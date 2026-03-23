@@ -44,7 +44,6 @@ Dependencies
   #   https://github.com/rpng/rosbags
 """
 
-import argparse
 import os
 import struct
 import sys
@@ -395,68 +394,80 @@ def convert(
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Config file loader
 # ---------------------------------------------------------------------------
 
-def parse_args():
+_DEFAULTS = {
+    "rgb_topic":          "/camera/color/image_raw",
+    "depth_topic":        "/camera/depth/image_rect_raw",
+    "camera_info_topic":  "/camera/color/camera_info",
+    "tf_parent":          "map",
+    "tf_child":           "camera_color_optical_frame",
+    "fx":                 615.0,
+    "fy":                 615.0,
+    "cx":                 320.0,
+    "cy":                 240.0,
+    "width":              640,
+    "height":             480,
+    "skip":               0,
+    "max_depth_mm":       10000,
+    "max_interp_gap":     0.1,
+}
+
+
+
+def load_config(config_path: str) -> dict:
+    """Load convert.yaml and merge with defaults."""
+    config_path = Path(config_path)
+    if not config_path.exists():
+        sys.exit(f"ERROR: Config file not found: {config_path}")
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f) or {}
+
+    # Merge defaults for any missing keys
+    for key, val in _DEFAULTS.items():
+        cfg.setdefault(key, val)
+
+    for required in ("bag", "output"):
+        if not cfg.get(required):
+            sys.exit(f"ERROR: '{required}' is required in {config_path}")
+
+    return cfg
+
+
+if __name__ == "__main__":
+    import argparse
+
     p = argparse.ArgumentParser(
         description="Convert ROS2 bag to Horizon RGB-D dataset format.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--bag",   required=True,
-                   help="Path to the ROS2 bag directory (e.g. rosbag2_xxx/)")
-    p.add_argument("--output", required=True,
-                   help="Output dataset directory (will be created)")
+    p.add_argument(
+        "--config",
+        default=str(Path(__file__).parent / "convert.yaml"),
+        help="Path to the YAML config file (default: scripts/convert.yaml)",
+    )
+    args = p.parse_args()
 
-    # Topics
-    p.add_argument("--rgb-topic",   default="/camera/color/image_raw",
-                   help="RGB image topic")
-    p.add_argument("--depth-topic", default="/camera/depth/image_rect_raw",
-                   help="Depth image topic")
-    p.add_argument("--camera-info-topic",
-                   default="/camera/color/camera_info",
-                   help="CameraInfo topic for auto-reading intrinsics "
-                        "(set to '' to use --fx/fy/cx/cy directly)")
+    cfg = load_config(args.config)
+    print(f"Using config: {args.config}")
 
-    # TF frames
-    p.add_argument("--tf-parent", default="map",
-                   help="Parent TF frame (world / map frame)")
-    p.add_argument("--tf-child",  default="camera_color_optical_frame",
-                   help="Child TF frame (camera frame)")
-
-    # Manual intrinsics fallback
-    p.add_argument("--fx", type=float, default=615.0)
-    p.add_argument("--fy", type=float, default=615.0)
-    p.add_argument("--cx", type=float, default=320.0)
-    p.add_argument("--cy", type=float, default=240.0)
-    p.add_argument("--width",  type=int, default=640)
-    p.add_argument("--height", type=int, default=480)
-
-    # Processing options
-    p.add_argument("--skip", type=int, default=0,
-                   help="Save every (skip+1)-th RGB frame (0 = all frames)")
-    p.add_argument("--max-depth-mm", type=int, default=10000,
-                   help="Clip depth values above this threshold (mm)")
-    p.add_argument("--max-interp-gap", type=float, default=0.1,
-                   help="Max TF interpolation gap in seconds; "
-                        "frames outside this window get identity pose")
-
-    return p.parse_args()
-
-
-if __name__ == "__main__":
-    args = parse_args()
     convert(
-        bag_path=args.bag,
-        output_dir=args.output,
-        rgb_topic=args.rgb_topic,
-        depth_topic=args.depth_topic,
-        tf_parent=args.tf_parent,
-        tf_child=args.tf_child,
-        camera_info_topic=args.camera_info_topic,
-        fx=args.fx, fy=args.fy, cx=args.cx, cy=args.cy,
-        width=args.width, height=args.height,
-        skip=args.skip,
-        max_depth_mm=args.max_depth_mm,
-        max_interp_gap=args.max_interp_gap,
+        bag_path=cfg["bag"],
+        output_dir=cfg["output"],
+        rgb_topic=cfg["rgb_topic"],
+        depth_topic=cfg["depth_topic"],
+        tf_parent=cfg["tf_parent"],
+        tf_child=cfg["tf_child"],
+        camera_info_topic=cfg["camera_info_topic"],
+        fx=float(cfg["fx"]),
+        fy=float(cfg["fy"]),
+        cx=float(cfg["cx"]),
+        cy=float(cfg["cy"]),
+        width=int(cfg["width"]),
+        height=int(cfg["height"]),
+        skip=int(cfg["skip"]),
+        max_depth_mm=int(cfg["max_depth_mm"]),
+        max_interp_gap=float(cfg["max_interp_gap"]),
     )

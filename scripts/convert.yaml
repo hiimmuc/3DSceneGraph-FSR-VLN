@@ -1,0 +1,35 @@
+# convert.yaml
+# Configuration for rosbag_2_dataset.py
+# Edit this file and run:  python scripts/rosbag_2_dataset.py
+
+# Path to the ROS2 bag directory (e.g. rosbag2_xxx/)
+bag: /path/to/rosbag2_xxx/
+
+# Output dataset directory (will be created if it does not exist)
+output: /path/to/output/
+
+# Topics
+rgb_topic: /camera/color/image_raw
+depth_topic: /camera/depth/image_rect_raw
+# Set to "" to skip auto-reading intrinsics from the bag and use fx/fy/cx/cy below
+camera_info_topic: /camera/color/camera_info
+
+# TF frames
+tf_parent: map
+tf_child: camera_color_optical_frame
+
+# Fallback camera intrinsics (used when camera_info_topic is empty or unavailable)
+fx: 615.0
+fy: 615.0
+cx: 320.0
+cy: 240.0
+width: 640
+height: 480
+
+# Processing options
+# Save every (skip+1)-th RGB frame; 0 = save all frames
+skip: 0
+# Clip depth values above this threshold (millimetres)
+max_depth_mm: 1000
+# Max TF interpolation gap in seconds; frames outside this window get identity pose
+max_interp_gap: 0.1
