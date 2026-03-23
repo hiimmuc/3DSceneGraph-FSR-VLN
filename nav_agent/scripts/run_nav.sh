@@ -3,13 +3,13 @@
 # run inside docker
 SESSION_NAME="robot_nav_ros2"
 
-# 删除旧 tmux 会话
+# Kill existing tmux session if it exists
 if tmux has-session -t $SESSION_NAME 2>/dev/null; then
     tmux kill-session -t $SESSION_NAME
     echo "Session '$SESSION_NAME' has been deleted."
 fi
 
-# 创建 tmux 会话
+# Create a new tmux session
 tmux new-session -d -s $SESSION_NAME -n nav
 
 # -------------------
@@ -41,9 +41,9 @@ tmux split-window -v -t $SESSION_NAME:0
 tmux send-keys -t $SESSION_NAME:0.3 "source /agentic_robot/G1_Nav_Bringup/install/setup.bash" C-m
 tmux send-keys -t $SESSION_NAME:0.3 "ros2 run pubpose pubpose" C-m
 
-# 调整布局，让四个 pane 都可见
+# Arrange all four panes to be visible
 tmux select-layout -t $SESSION_NAME:0 tiled
 
-# 附加到 tmux 会话
+# Attach to the tmux session
 tmux attach-session -t $SESSION_NAME
 

@@ -109,7 +109,7 @@ class RGBDDataset(Dataset, ABC):
         # create point cloud
         y, x = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
         depth = depth.astype(np.float32) / scale
-        # depth 超过3m的全部置为0
+        # zero out all depth values exceeding 3m
         # clip_depth_mask = depth > 3.0
         # depth[clip_depth_mask] = 0
         if mask_img:

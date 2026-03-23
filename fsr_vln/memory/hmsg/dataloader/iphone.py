@@ -86,18 +86,18 @@ class IPhoneDataset(RGBDDataset):
         return len(self.indices)
 
     def load_camera_config(self, json_path: str) -> Dict:
-        # 存在性检查
+        # Existence check
         if not os.path.isfile(json_path):
-            raise FileNotFoundError(f"路径不是文件: {json_path}")
+            raise FileNotFoundError(f"Path is not a file: {json_path}")
 
-        # 读取配置
+        # Read configuration
         with open(json_path, 'r') as f:
             config = json.load(f)
 
-        # 数据解析
+        # Parse data
         frames = []
         for idx, frame in enumerate(config["frames"]):
-            # 使用os.path处理路径
+            # Use os.path to handle path
             rgb_path = os.path.normpath(
                 frame["file_path"]).replace(
                 "images", "images_2")

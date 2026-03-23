@@ -7,7 +7,7 @@ if tmux has-session -t $SESSION_NAME 2>/dev/null; then
     echo "Session '$SESSION_NAME' has been deleted."
 fi
 
-# 创建新的 tmux 会话，不附加 (-d)
+# Create a new tmux session (detached)
 tmux new-session -d -s $SESSION_NAME -n camera_tab
 
 # # --- Window 1: Camera ---
@@ -28,5 +28,5 @@ tmux send-keys -t $SESSION_NAME:lidar_tab "1" C-m
 tmux send-keys -t $SESSION_NAME:lidar_tab "unset ASAN_OPTIONS" C-m
 tmux send-keys -t $SESSION_NAME:lidar_tab "ros2 launch livox_ros_driver2 msg_MID360_launch.py" C-m
 
-# 附加到 tmux 会话
+# Attach to the tmux session
 tmux attach-session -t $SESSION_NAME

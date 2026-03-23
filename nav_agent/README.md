@@ -1,73 +1,79 @@
 # NavAgent
 
-本项目包含一个完整的 **具身智能导航系统**（NavAgent），包含定位、建图、导航、语义目标定位、语音交互、运控调用等模块，支持 Docker 与宿主机混合运行。
+This project contains a complete **embodied intelligence navigation system** (NavAgent), including modules for localization, mapping, navigation, semantic goal localization, voice interaction, and motor control. It supports a hybrid Docker + host machine deployment.
 
 ---
 
-## 📁 项目结构
+## 📁 Project Structure
+
 ```text
 nav_agent/
-├── humble_localization_nav2/        # Docker 内运行的本体定位 / 导航 & 避障模块
-│   ├── g1_nav_bringup/              # 一键启动所有 launch 文件
-│   ├── g1_navigation2/              # ROS 2 Navigation 参数接口
-│   ├── lio_mapping_loc/             # FastLIVO2 + 重定位模块
-│   ├── navigation2-humble/          # ROS 2 Navigation 2 核心功能包
-│   ├── pubpose/                      # 接收 goal_publisher 目标位姿并转发给 Nav2 做全局导航与避障
-│   └── rpg_vikit-ros2/              # FastLIVO2 第三方依赖
-├── scripts/                         # 启动脚本（Docker / 宿主机）
-│   ├── run_nav.sh                    # Docker 内一键启动所有算法模块
-│   ├── run_sem_nav.sh                # 宿主机一键启动语义导航模块
-│   └── run_sensors.sh                # 宿主机一键启动传感器
-└── sem_nav_ctr/                      # 宿主机运行的语音 / 运控 / 目标语义定位模块
-    ├── chat_loc_python/             # 语音交互客户端
-    ├── g1_move/                     # G1 运控接口
-    └── goal_publisher/              # 目标实例 / 区域的语义定位, 内部调用fsr-vln模块的hmsg查询目标位姿
-``` 
+├── humble_localization_nav2/        # Localization / navigation & obstacle avoidance modules (run inside Docker)
+│   ├── g1_nav_bringup/              # One-click launcher for all launch files
+│   ├── g1_navigation2/              # ROS 2 Navigation2 parameter interface
+│   ├── lio_mapping_loc/             # FastLIVO2 + map relocalization module
+│   ├── navigation2-humble/          # ROS 2 Navigation2 core package
+│   ├── pubpose/                      # Receives goal pose from goal_publisher and forwards it to Nav2 for global navigation & obstacle avoidance
+│   └── rpg_vikit-ros2/              # Third-party dependency for FastLIVO2
+├── scripts/                         # Launch scripts (Docker / host machine)
+│   ├── run_nav.sh                    # One-click launch of all algorithm modules inside Docker
+│   ├── run_sem_nav.sh                # One-click launch of semantic navigation modules on host
+│   └── run_sensors.sh                # One-click launch of sensors on host
+└── sem_nav_ctr/                      # Voice / motor control / semantic goal localization modules (run on host)
+    ├── chat_loc_python/             # Voice interaction client
+    ├── g1_move/                     # G1 motor control interface
+    └── goal_publisher/              # Semantic localization of target instances/regions; internally calls the fsr-vln HMSG to query goal poses
+```
 
-## 🚀 功能概述
+## 🚀 Feature Overview
 
-- ✅ **导航和避障（Nav2）**  
-  基于 ROS 2 Navigation2 框架，支持全局路径规划、局部避障。
+- ✅ **Navigation and Obstacle Avoidance (Nav2)**  
+  Based on the ROS 2 Navigation2 framework; supports global path planning and local obstacle avoidance.
 
-- ✅ **FastLIVO2 里程计 + 重定位**  
-  实时点云里程计，并支持地图重定位。
+- ✅ **FastLIVO2 Odometry + Relocalization**  
+  Real-time LiDAR-inertial-visual odometry with map-based relocalization support.
 
-- ✅ **语音交互控制**  
-  通过本地语音客户端配合远程服务端实现语音导航任务，当前代码仅包含客户端设备数据采集部分，建议自行实现语音交互模块, 或等下一步开源。
+- ✅ **Voice Interaction Control**  
+  Implements voice-guided navigation tasks via a local voice client paired with a remote server. The current code only includes the client-side data acquisition component; it is recommended to implement your own voice interaction module, or wait for the next open-source release.
 
-- ✅ **语义目标定位**  
-  从目标名称（如"沙发"、"展厅"）解析为具体的三维空间目标位姿。
+- ✅ **Semantic Goal Localization**  
+  Resolves target names (e.g., "sofa", "exhibition hall") into specific 3D spatial goal poses.
 
-- ✅ **一键启动脚本**  
-  提供 Docker / 宿主机 的一键启动方案。
+- ✅ **One-click Launch Scripts**  
+  Provides one-click startup solutions for both Docker and host machine environments.
 
 ---
 
-## 🏃 启动方式
+## 🏃 Getting Started
 
-### Docker 构建与运行
+### Docker Build and Run
 
-确保已安装 Docker 与 NVIDIA Container Toolkit。
+Ensure Docker and the NVIDIA Container Toolkit are installed.
 
-**基础镜像配置：**
-- 自行构建 `ubuntu22.04 + ros2-humble` 基础镜像
-- 在基础镜像中colcon build `humble_localization_nav2` 中的所有子模块
+**Base image configuration:**
 
-**使用预构建镜像：**
-- 直接使用我们提供的镜像：ghcr.io/zhaoyu1992101/fsrvln:v1.0
+- Build a `ubuntu22.04 + ros2-humble` base image yourself
+- Run `colcon build` inside the base image for all submodules in `humble_localization_nav2`
 
-### 启动命令
+**Using the prebuilt image:**
 
-**Docker 内启动导航模块：**
+- Use the image we provide directly: `ghcr.io/zhaoyu1992101/fsrvln:v1.0`
+
+### Launch Commands
+
+**Start navigation modules inside Docker:**
+
 ```bash
 bash scripts/run_nav.sh
 ```
 
-**宿主机启动语义导航模块：**
+**Start semantic navigation modules on host:**
+
 ```bash
 bash scripts/run_sem_nav.sh
 ```
 
-**宿主机启动传感器：**
+**Start sensors on host:**
+
 ```bash
 bash scripts/run_sensors.sh
