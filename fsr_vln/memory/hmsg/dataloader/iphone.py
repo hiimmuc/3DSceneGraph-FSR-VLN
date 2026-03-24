@@ -229,11 +229,11 @@ class IPhoneDataset(RGBDDataset):
         depth = np.array(depth_image)
         clip_depth_mask = depth > 3.0 * 1000
         depth[clip_depth_mask] = 0
-        # 计算梯度（Sobel 算子）
+        # Compute gradient (Sobel operator)
         grad_x = cv2.Sobel(depth, cv2.CV_32F, 1, 0, ksize=3)
         grad_y = cv2.Sobel(depth, cv2.CV_32F, 0, 1, ksize=3)
         grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-        # 设置深度变化阈值（如 0.05 米）
+        # Set depth change threshold (e.g., 0.05 m)
         threshold = 0.1 * 1e3
         edge_mask = grad_mag > threshold
         depth[edge_mask] = 0
@@ -331,14 +331,14 @@ class IPhoneDataset(RGBDDataset):
         depth = depth.astype(np.float32) / scale
 
         # # depth visualize
-        # # 自动将深度图归一化到 [0, 255]
+        # # Auto-normalize depth map to [0, 255]
         # depth_norm = cv2.normalize(depth, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
         # depth_norm = depth_norm.astype(np.uint8)
-        # depth_colored = cv2.applyColorMap(depth_norm, cv2.COLORMAP_JET)  # 你也可以用 COLORMAP_TURBO 等
+        # depth_colored = cv2.applyColorMap(depth_norm, cv2.COLORMAP_JET)  # COLORMAP_TURBO can also be used
         # cv2.imshow(str(image_id), depth_colored)
         # cv2.waitKey(1)
 
-        # depth 超过3m的全部置为0
+        # Set all depth values exceeding 3m to 0
         # clip_depth_mask = depth > 3.0
         # depth[clip_depth_mask] = 0
         if mask_img:
@@ -351,7 +351,7 @@ class IPhoneDataset(RGBDDataset):
         X = (x - camera_matrix[0, 2]) * depth / camera_matrix[0, 0]
         Y = (y - camera_matrix[1, 2]) * depth / camera_matrix[1, 1]
         Z = depth
-        # 该帧相机坐标系的平均深度
+        # Mean depth in the camera coordinate system for this frame
         if Z.mean() > filter_distance:
             return o3d.geometry.PointCloud()
         # convert to open3d point cloud
@@ -362,7 +362,7 @@ class IPhoneDataset(RGBDDataset):
         if not mask_img:
             colors = rgb[mask]
             pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
-        # 相机系点云转换到世界坐标系
+        # Transform point cloud from camera coordinates to world coordinates
         pcd.transform(camera_pose)
         return pcd
 

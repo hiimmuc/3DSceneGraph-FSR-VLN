@@ -28,81 +28,81 @@ use.
 """
 # pylint: disable=missing-docstring
 import time
-# 读取点云
+# Load point cloud
 import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
-# 用于创建图形用户界面和渲染场景
+# For creating the GUI and rendering the scene
 import open3d.visualization.gui as gui  # type: ignore
 import open3d.visualization.rendering as rendering  # type: ignore
 
 
 def exit_after_delay():
-    time.sleep(5)  # 等待 5 秒
-    gui.Application.instance.quit()  # 退出应用
+    time.sleep(5)  # Wait 5 seconds
+    gui.Application.instance.quit()  # Quit the application
 
-# 函数功能，用于显示点云并标注类别标签
+# Function: display point cloud with category labels
 
 
 def show_point_cloud_with_labels(pcd, point_labels, cluster_labels):
     """
-    显示点云并标注类别标签。
+    Display point cloud with category label annotations.
 
     Args:
-        pcd (open3d.geometry.PointCloud): 输入的点云数据。
-        labels (numpy.ndarray): 点云的聚类标签，每个点对应一个聚类索引。
-        cluster_names (dict): 聚类索引到类名的映射，用于显示在点云标签中。
+        pcd (open3d.geometry.PointCloud): input point cloud data.
+        labels (numpy.ndarray): cluster labels for the point cloud; each point corresponds to one cluster index.
+        cluster_names (dict): mapping from cluster index to category name, used for displaying labels on the point cloud.
 
     Returns:
         None
     """
-    # 初始化GUI应用
+    # Initialize GUI application
     app = gui.Application.instance
     app.initialize()
 
-    # 创建窗口和场景
+    # Create window and scene
     window = app.create_window(
         "mapvln raw existing object instances", 1024, 768)
-    # 创建一个场景小部件（SceneWidget）并将其添加到窗口中
+    # Create a SceneWidget and add it to the window
     scene = gui.SceneWidget()
     scene.scene = rendering.Open3DScene(window.renderer)
     window.add_child(scene)
 
-    # 设置场景背景和光照
-    scene.scene.set_background([1, 1, 1, 1])  # 白色背景
-    scene.scene.add_geometry("pcd", pcd, rendering.MaterialRecord())  # 添加点云到场景
+    # Set scene background and lighting
+    scene.scene.set_background([1, 1, 1, 1])  # White background
+    scene.scene.add_geometry("pcd", pcd, rendering.MaterialRecord())  # Add point cloud to scene
 
-    # 遍历每个聚类标签，并在点云中添加对应的文本标签
+    # Iterate over each cluster label and add the corresponding text label to the point cloud
     for i in range(max(point_labels) + 1):
-        cluster_idx = np.where(point_labels == i)[0]  # 找到术语当前聚类的索引
+        cluster_idx = np.where(point_labels == i)[0]  # Find indices belonging to the current cluster
         if len(cluster_idx) == 0:
             continue
         cluster_points = np.asarray(pcd.points)[cluster_idx]
-        center = cluster_points.mean(axis=0)  # 计算当前家具类点的中心位置
-        # 获取聚类名称，如果没有则使用默认名称cluster_{i}
+        center = cluster_points.mean(axis=0)  # Compute centroid of the current cluster
+        # Get cluster name, or fall back to cluster_{i}
         label = cluster_labels.get(i, f"cluster_{i}")
-        # 添加3d文本标签
+        # Add 3D text label
         scene.add_3d_label(center, label)
 
-    # 设置相机的中心位置为[0, 0, 0]
+    # Set the camera center to [0, 0, 0]
     center = np.array([0.0, 0.0, 0.0], dtype=np.float32).reshape(3, 1)
-    # 获取点云的轴对齐包围盒
+    # Get the axis-aligned bounding box of the point cloud
     bounding_box = pcd.get_axis_aligned_bounding_box()
-    # 设置相机视角为60度，并将其对准点云的包围盒
+    # Set camera FOV to 60 degrees and align it to the point cloud bounding box
     scene.setup_camera(60.0, bounding_box, center)
 
-    # 启动GUI应用，显示窗口
+    # Launch the GUI application and display the window
     app.run()
 
 
-# 加载点云和聚类
+# Load point cloud and run clustering
 pcd = o3d.io.read_point_cloud(
     "/mnt/disk2/hovsg/HOV-SG/data/scannet/scene_graph/scannet/scene0378_00/full_pcd.ply")
-labels = np.array(pcd.cluster_dbscan(eps=0.05,  # 聚类半径
-                                     min_points=50,  # 最小点数
-                                     print_progress=True))  # 显示进度
+labels = np.array(pcd.cluster_dbscan(eps=0.05,  # Clustering radius
+                                     min_points=50,  # Minimum number of points
+                                     print_progress=True))  # Show progress
 
-# 颜色
+# Colors
 max_label = labels.max()
 print("max_label: ", max_label)
 colors = plt.get_cmap("tab20")(
@@ -111,10 +111,10 @@ print(colors)
 colors[labels < 0] = 0
 pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
-# 聚类类别名映射
-cluster_names = {0: "chair", 1: "table", 2: "sofa"}  # 可根据聚类结果自行扩展
+# Cluster label-to-name mapping
+cluster_names = {0: "chair", 1: "table", 2: "sofa"}  # Extend as needed based on clustering results
 
-# 显示
-# 启动一个线程，在 5 秒后退出应用
+# Display
+# Start a thread to quit the application after 5 seconds
 # threading.Thread(target=exit_after_delay).start()
-show_point_cloud_with_labels(pcd, labels, cluster_names)  # 调用时保持变量名一致
+show_point_cloud_with_labels(pcd, labels, cluster_names)  # Keep variable names consistent when calling

@@ -1,6 +1,10 @@
 """Class to represent the HMSG graph."""
-from oss2.credentials import EnvironmentVariableCredentialsProvider
-import oss2
+try:
+    from oss2.credentials import EnvironmentVariableCredentialsProvider
+    import oss2
+except ImportError:
+    oss2 = None
+    EnvironmentVariableCredentialsProvider = None
 from openai import AzureOpenAI, OpenAI
 import openai
 from typing import Dict, List, Tuple, Union
@@ -68,7 +72,7 @@ from omegaconf import DictConfig
 import numpy as np
 import open3d as o3d
 import matplotlib
-matplotlib.use('Agg')  # 设置为非GUI后端
+matplotlib.use('Agg')  # Use non-GUI backend
 
 
 # pylint: disable=all
@@ -308,9 +312,9 @@ class Graph:
                 rgb = np.array(rgb_image)
                 depth = np.array(depth_image)
                 img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                # 保存帧到视频
+                # Save frame to video
                 self.video_writer.write(rgb)
-                # 保存图像
+                # Save image
                 image_name = f"image{self.frame_count:05}.png"
                 depth_name = f"depth{self.frame_count:05}.png"
                 cv2.imwrite(
@@ -326,7 +330,7 @@ class Graph:
                 #  Extract pose information
                 tx, ty, tz = pose[0, 3], pose[1, 3], pose[2, 3]
                 rot_mat = pose[:3, :3]
-                r = R.from_matrix(rot_mat)  # 转四元数（格式：x, y, z, w）
+                r = R.from_matrix(rot_mat)  # Convert to quaternion (format: x, y, z, w)
                 qx, qy, qz, qw = r.as_quat()
                 r = R.from_quat([qx, qy, qz, qw])
                 yaw, pitch, roll = r.as_euler("zyx", degrees=False)
@@ -336,13 +340,17 @@ class Graph:
                 self.frame_count += 1
 
         # create the RGB-D point cloud
-        for i in tqdm(range(0,
+        for loop_idx, i in enumerate(tqdm(range(0,
                             len(self.dataset),
                             self.cfg.pipeline.skip_frames),
-                      desc="Creating RGB-D point cloud"):
+                      desc="Creating RGB-D point cloud")):
             rgb_image, depth_image, pose, _, depth_intrinsics = self.dataset[i]
             self.full_pcd += self.dataset.create_pcd(
                 rgb_image, depth_image, pose, idx=i)
+            # Periodically downsample to keep memory usage bounded
+            if loop_idx % 10 == 9:
+                self.full_pcd = self.full_pcd.voxel_down_sample(
+                    voxel_size=self.cfg.pipeline.voxel_size)
 
         # filter point cloud
         self.full_pcd = self.full_pcd.voxel_down_sample(
@@ -456,7 +464,7 @@ class Graph:
             mask_3d = mask_3d.voxel_down_sample(self.cfg.pipeline.voxel_size)
             points = np.asarray(mask_3d.points)
             dist, idx = tree_pcd.query(points, k=1, workers=-1)
-            # 根据距离阈值过滤掉“太远”的点
+            # Filter out points that are "too far" based on the distance threshold
             valid_mask = dist <= 0.8
             n_total = len(points)
             n_valid = int(valid_mask.sum())
@@ -465,12 +473,12 @@ class Graph:
                 tqdm.write(
                     f"mask {i}: removed {n_removed}/{n_total} points with dist > {0.1}")
             # if n_valid == 0:
-            #     # 全部点都太远，按原逻辑插入一个零向量
+            #     # All points are too far; insert a zero vector as fallback
             #     masks_feats.append(
             #         np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
             #     )
             #     continue
-             # 只保留有效的索引
+             # Keep only valid indices
             valid_idx = idx[valid_mask]
             # shape = (n_valid, clip_feat_dim)
             feats = self.full_feats_array[valid_idx]
@@ -722,17 +730,17 @@ class Graph:
         clustred_peaks = np.sort(clustred_peaks)
         print("clustred_peaks", clustred_peaks)
 
-        # 检查相邻峰值之间的距离是否超过或等于2.5m
+        # Check if the distance between adjacent peaks exceeds or equals 2.5m
         adjusted_peaks = []
         for i in range(len(clustred_peaks) - 1):
             adjusted_peaks.append(clustred_peaks[i])
             if clustred_peaks[i + 1] - clustred_peaks[i] >= 2.5:
-                # 在两个峰值之间插入一个虚拟边界
+                # Insert a virtual boundary between the two peaks
                 mid_point = clustred_peaks[i + 1] - 0.2
                 adjusted_peaks.append(mid_point)
         adjusted_peaks.append(clustred_peaks[-1])
 
-        # # 如果最后一个峰值距离点云最大值较远，插入天花板边界
+        # # If the last peak is far from the point cloud max, insert a ceiling boundary
         # max_z = np.max(downpcd[:, 1])
         # if max_z - adjusted_peaks[-1] > 1.0:
         #     adjusted_peaks.append(max_z)
@@ -740,7 +748,7 @@ class Graph:
         clustred_peaks = np.array(adjusted_peaks)
         print("adjusted_peaks", clustred_peaks)
         floors = []
-        # 根据调整后的峰值生成楼层范围
+        # Generate floor ranges based on the adjusted peaks
         for i in range(len(clustred_peaks) - 1):
             floors.append([clustred_peaks[i], clustred_peaks[i + 1]])
         print("computed floors: ", floors)
@@ -749,20 +757,20 @@ class Graph:
             floors.append([z_hist[1].min().item(), z_hist[1].max().item()])
             print("priors floors", floors)
 
-        # 对第一个楼层和最后一个楼层进行扩展
+        # Extend the first and last floor ranges
         floors[0][0] = (floors[0][0] + np.min(downpcd[:, 1])) / 2
         # floors[-1][1] = (floors[-1][1] + np.max(downpcd[:, 1])) / 2
         floors[-1][1] = np.max(downpcd[:, 1])
 
-        # 调试输出：打印 clustred_peaks 和 adjusted_peaks
+        # Debug output: print clustred_peaks and adjusted_peaks
         print("Original clustred_peaks:", clustred_peaks)
         print(
             "Adjusted clustred_peaks after inserting virtual boundaries:",
             adjusted_peaks)
 
-        # 调试输出：打印楼层范围
+        # Debug output: print floor ranges
         print("Generated floor ranges:", floors)
-        # 确认楼层数量
+        # Confirm the number of floors
         print("Total number of floors detected:", len(floors))
         print("number of floors: ", len(floors))
 
@@ -1102,7 +1110,7 @@ class Graph:
             T1 = np.eye(4)
             T1[:3, :3] = Rotation.from_euler("x", 90, degrees=True).as_matrix()
             pcd.transform(T1)
-            # find the nearest point in the original point cloud # 很慢
+            # find the nearest point in the original point cloud  # slow
             _, idx = floor_tree.query(np.array(pcd.points), k=1, workers=-1)
             pcd = floor_pcd.select_by_index(idx)
             room_pcds.append(pcd)
@@ -1172,7 +1180,7 @@ class Graph:
             )
         )
         # import pdb; pdb.set_trace()
-        # 构建view层级
+        # Build view hierarchy
         view_index = 0
         for room_id in range(len(room_id2img_id)):
             # all_view_cnt += len(room_id2img_id[room_id])
@@ -1373,7 +1381,7 @@ class Graph:
             T1 = np.eye(4)
             T1[:3, :3] = Rotation.from_euler("x", 90, degrees=True).as_matrix()
             pcd.transform(T1)
-            # find the nearest point in the original point cloud # 很慢
+            # find the nearest point in the original point cloud  # slow
             _, idx = floor_tree.query(np.array(pcd.points), k=1, workers=-1)
             pcd = floor_pcd.select_by_index(idx)
             room_pcds.append(pcd)
@@ -1721,13 +1729,13 @@ class Graph:
                         camera_matrix,
                         np.linalg.inv(pose),
                         np.array(self.mask_pcds[mask_idx].points),
-                        return_depth=True   # 修改 check_object_in_view，支持返回深度
+                        return_depth=True   # Modified check_object_in_view to support returning depth
                     )
                     if obj_in_view:
                         object.view_ids.append(view.view_id)
                         view.object_ids.append(object.object_id)
                         view.text_discription.append(object.name)
-                        # 找最优视角（平均深度最小）
+                        # Find the best viewpoint (minimum average depth)
                         if mean_depth < best_depth:
                             best_depth = mean_depth
                             best_view_id = view.view_id
@@ -2261,7 +2269,7 @@ class Graph:
         self.force_reupload = False
         self.src_img_root = os.path.dirname(retrieved_img_list[0])
         img_dir_prefix = f"{os.path.basename(self.src_img_root)}/images"
-        img_list = retrieved_img_list  # 不做 sorted
+        img_list = retrieved_img_list  # Do not sort
         # img_list = sorted(
         #     retrieved_img_list,
         #     key=lambda x: float(os.path.splitext(os.path.basename(x))[0])
@@ -2353,21 +2361,21 @@ class Graph:
             query: str,
             score_threshold: float = 0.5):
         """
-        使用 GPT Vision 判断 object 是否在每张图中出现，并返回最佳图像。
+        Use GPT Vision to detect whether an object appears in each image and return the best matching image.
         Args:
-            imglist: 图片 URL 列表
-            query: 查询目标对象
-            score_threshold: 分数阈值，低于此值即判定为 False
+            imglist: list of image paths or URLs
+            query: target object to query
+            score_threshold: score threshold below which detection is considered False
         Returns:
-            results: List[bool]，每张图是否包含 object
-            best_image: str，最符合 query 的图像（如果没有则 None）
+            results: List[bool], whether each image contains the object
+            best_image: str, the image best matching the query (None if not found)
         """
         self.upload2oss(imglist)
 
         results, scores = [], []
 
         for img in self.oss_img_list:
-            # Step1: yes/no 判断
+            # Step 1: yes/no detection
             prompt_yesno = f"Does this image contain a '{query}'? Answer strictly with 'yes' or 'no'."
             messages_yesno = [
                 {"role": "system", "content": "You are an object detector. Answer only 'yes' or 'no', no explanation."},
@@ -2384,11 +2392,11 @@ class Graph:
                 messages=messages_yesno,
             )
             ans_raw = resp_yesno.choices[0].message.content.strip().lower()
-            has_object = (ans_raw == "yes")  # 严格匹配
+            has_object = (ans_raw == "yes")  # Strict match
 
             score = 0.0
             if has_object:
-                # Step2: 打分
+                # Step 2: Scoring
                 prompt_score = f"On a scale from 0 to 1, how strongly does this image contain a '{query}'? Respond only with a single number (e.g., 0.73)."
                 # prompt_score = (
                 # f"On a scale from 0 to 1, how strongly and prominently does this image show a '{query}'? "
@@ -2419,7 +2427,7 @@ class Graph:
                 except Exception:
                     score = 0.0
 
-                # 分数低于阈值则否定
+                # Reject if score is below threshold
                 if score < score_threshold:
                     has_object = False
 
@@ -2428,7 +2436,7 @@ class Graph:
             print(
                 f"[GPT] Image: {img} → raw_yesno='{ans_raw}', score={score:.3f}, has_object={has_object}, query={query}")
 
-        # Step3: 选出 best（如果都没有，则返回 None）
+        # Step 3: Select best (return None if none found)
         if any(results):
             best_idx = int(np.argmax(scores))
             best_image = imglist[best_idx]
@@ -2443,11 +2451,11 @@ class Graph:
             query: str,
             score_threshold: float = 0.3) -> bool:
 
-        # 上传图片到 OSS
+        # Upload image to OSS
         self.upload2oss([img_path])
         img_url = self.oss_img_list[0]
 
-        # 一步到位：直接输出 0~1
+        # Directly output a 0~1 score
         prompt = (
             f"On a scale from 0 to 1, does this image contain a '{query}'? "
             "Respond only with a single number between 0 and 1."
@@ -2488,24 +2496,24 @@ class Graph:
             goal_image_path_by_clip,
             goal_image_path_by_gpt,
             save_name="goal_compare.png"):
-        # 读取两张图片
+        # Read the images
         img_online = cv2.imread(goal_image_path_online)
         img_gpt_best = cv2.imread(goal_image_path_by_clip)
         img_gpt = cv2.imread(goal_image_path_by_gpt)
 
         if img_gpt_best is None or img_gpt is None or img_online is None:
-            raise FileNotFoundError("其中一张图片路径无效，请检查路径是否正确")
+            raise FileNotFoundError("One of the image paths is invalid, please verify the paths")
 
-        # 保证两张图大小一致（都缩放到640x480）
+        # Ensure both images have the same size (scaled to 640x480)
         img_gpt_best = cv2.resize(img_gpt_best, (640, 480))
         img_gpt = cv2.resize(img_gpt, (640, 480))
         img_online = cv2.resize(img_online, (640, 480))
 
-        # 在左上角添加标签
+        # Add labels in the top-left corner
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 1.0
         thickness = 2
-        color = (0, 255, 0)  # 绿色
+        color = (0, 255, 0)  # Green
 
         cv2.putText(img_gpt_best, "BEST", (10, 30), font,
                     font_scale, color, thickness, cv2.LINE_AA)
@@ -2523,12 +2531,12 @@ class Graph:
             color,
             thickness,
             cv2.LINE_AA)
-        # 横向拼接
+        # Horizontal concatenation
         combined = np.hstack((img_online, img_gpt_best, img_gpt))
-        # 保存结果
+        # Save result
         save_path = os.path.join(self.curr_query_save_dir, save_name)
         cv2.imwrite(save_path, combined)
-        # 可视化
+        # Visualization
         cv2.imshow("Goal Image Comparison", combined)
         cv2.waitKey(1)
         cv2.destroyAllWindows()
@@ -2649,15 +2657,15 @@ class Graph:
                 [room_query], self.clip_model, self.clip_feat_dim
             )
             room2query_sim = dict()
-            room2query_feat = dict()   # 保存对应的特征向量
-            room2query_id = dict()     # 保存对应的embedding索引
+            room2query_feat = dict()   # Store the corresponding feature vectors
+            room2query_id = dict()     # Store the corresponding embedding indices
             for room in rooms_list:
                 embeddings = np.stack(room.embeddings)   # [view_num, 768]
-                # [1, view_num]，query和每个view的相似度
+                # [1, view_num], similarity between query and each view
                 sims = np.dot(query_room_text_feats, embeddings.T)
-                max_idx = np.argmax(sims)                # 找到最大相似度的位置
-                max_sim = sims[0, max_idx]               # 最大相似度值
-                max_feat = embeddings[max_idx]           # 对应的特征向量 (768,)
+                max_idx = np.argmax(sims)                # Find the position of maximum similarity
+                max_sim = sims[0, max_idx]               # Maximum similarity value
+                max_feat = embeddings[max_idx]           # Corresponding feature vector (768,)
 
                 room2query_sim[room.room_id] = max_sim
                 room2query_feat[room.room_id] = max_feat
@@ -2808,7 +2816,7 @@ class Graph:
 
         if best_view is None:
             total_online_query_time = FastMatching_time
-            query_time_consumer["total_query_time"] = f"{total_online_query_time:.4f} 秒"
+            query_time_consumer["total_query_time"] = f"{total_online_query_time:.4f} seconds"
             with open(save_json_path, "w", encoding="utf-8") as f:
                 json.dump(query_time_consumer, f, ensure_ascii=False, indent=4)
             res_dict = dict()
@@ -2844,11 +2852,11 @@ class Graph:
         Object_in_goal_view_check = self.detect_object_in_image(
             best_view_image_path, object_query[query_id])
         Object_in_goal_view_check_time = time.time() - start_time
-        query_time_consumer["Object_in_goal_view_check_time"] = f"{Object_in_goal_view_check_time:.4f} 秒"
+        query_time_consumer["Object_in_goal_view_check_time"] = f"{Object_in_goal_view_check_time:.4f} seconds"
         query_time_consumer["Object_in_goal_view_check_res"] = Object_in_goal_view_check
         if Object_in_goal_view_check:
             total_online_query_time = FastMatching_time + Object_in_goal_view_check_time
-            query_time_consumer["total_query_time"] = f"{total_online_query_time:.4f} 秒"
+            query_time_consumer["total_query_time"] = f"{total_online_query_time:.4f} seconds"
             with open(save_json_path, "w", encoding="utf-8") as f:
                 json.dump(query_time_consumer, f, ensure_ascii=False, indent=4)
             res_dict = dict()
@@ -2866,11 +2874,11 @@ class Graph:
             for room in rooms_list:
                 img_ids = room.sample_images  # list of images
                 embs = room.clip_embeddings  # shape [view, 768]
-                # 确保长度对齐
+                # Ensure lengths are aligned
                 assert len(img_ids) == len(embs), \
                     f"Number of images ({len(img_ids)}) != embeddings ({len(embs)})"
                 all_image_incides.extend(img_ids)
-                all_image_embedding.extend(embs)  # 每个embedding对应一张图
+                all_image_embedding.extend(embs)  # Each embedding corresponds to one image
             print("all_image_incides: ", len(all_image_incides))
             print("all_image_embedding: ", len(all_image_embedding))
             room_ids = target_ids
@@ -2889,12 +2897,12 @@ class Graph:
                     all_image_embedding)  # [total_view_num, 768]
                 sims = np.dot(
                     query_object_text_feats[0],
-                    gloal_embedding.T)  # [1, view_num]，query和每个view的相似度
-                clip_max_idx = np.argmax(sims)  # 找到最大相似度的位置
+                    gloal_embedding.T)  # [1, view_num], similarity between query and each view
+                clip_max_idx = np.argmax(sims)  # Find the position of maximum similarity
 
-                # 计算 top_k，确保不超过 sims 的长度
+                # Compute top_k, ensuring it does not exceed the length of sims
                 top_k = min(24, sims.shape[0])
-                top_idx = np.argsort(sims)[-top_k:][::-1]  # 从大到小取前 top_k 索引
+                top_idx = np.argsort(sims)[-top_k:][::-1]  # indices of top_k in descending order
 
                 # find goal image by clip
                 goal_image_path_by_clip = self.dataset.frameId2imgPath[all_image_incides[clip_max_idx]]
@@ -2902,7 +2910,7 @@ class Graph:
                 end_time = time.time()
                 query_time_consumer[f"goal_image_reterival_by_clip_{room_id}"] = end_time - start_time
                 print(
-                    f"find goal image by clip 运行时间: {end_time - start_time:.4f} 秒")
+                    f"find goal image by clip elapsed time: {end_time - start_time:.4f} seconds")
                 query_time_consumer["goal_image_path_by_clip"] = goal_image_path_by_clip
                 start_time = time.time()
 
@@ -2928,7 +2936,7 @@ class Graph:
                 query_time_consumer[f"goal_image_reterival_by_gpt_{room_id}"] = end_time - start_time
                 query_time_consumer["goal_image_path_by_gpt"] = goal_image_path_by_gpt
                 print(
-                    f"find goal image by gpt 运行时间: {end_time - start_time:.4f} 秒")
+                    f"find goal image by gpt elapsed time: {end_time - start_time:.4f} seconds")
                 print("goal_image_path_by_gpt: ", goal_image_path_by_gpt)
 
                 # judge whether object in goal image
@@ -2950,10 +2958,10 @@ class Graph:
                 query_time_consumer["gpt_check_time"] = gpt_check_time
                 # print("goal_sim_mat:" , goal_sim_mat)
                 # if goal_sim_mat[0, query_id] > 0.3:
-                print("检测结果:", gpt_check_result)      # [True, False]
-                print("最佳图像:", best_image_path)
-                query_time_consumer["检测结果"] = gpt_check_result
-                query_time_consumer["最佳图像"] = best_image_path
+                print("Detection results:", gpt_check_result)      # [True, False]
+                print("Best image:", best_image_path)
+                query_time_consumer["detection_results"] = gpt_check_result
+                query_time_consumer["best_image"] = best_image_path
                 # query_time_consumer["goal_sim_mat"] = goal_sim_mat.tolist()
                 print(best_image_path != goal_image_path_online)
                 print("update_flatg ", update_flag)
@@ -2976,10 +2984,10 @@ class Graph:
                             objs_embedding_in_view)
                         obj_sims = np.dot(
                             query_object_text_feats[0],
-                            objs_embedding_in_view.T)  # [1, obj_num]，query和这个view下每个obj的相似度
+                            objs_embedding_in_view.T)  # [1, obj_num], similarity between query and each object under this view
                         max_obj_idx = np.argmax(
-                            obj_sims)                # 找到最大相似度的位置
-                        max_obj_sim = obj_sims[max_obj_idx]           # 最大相似度值
+                            obj_sims)                # Find the position of maximum similarity
+                        max_obj_sim = obj_sims[max_obj_idx]           # Maximum similarity value
                         print(f"max_obj_sim: {max_obj_sim}")
                         max_sim_object_id = object_ids_in_view[max_obj_idx]
                         final_object = self.find_object_by_object_id(
@@ -3007,7 +3015,7 @@ class Graph:
                 gpt_refine_time = time.time() - gpt_refine_time_start
                 query_time_consumer["gpt_refine_time"] = gpt_refine_time
 
-                # 计算距离
+                # Calculate distance
                 obj_pcd = deepcopy(best_object.pcd)
                 obj_center = obj_pcd.get_center()
                 camera_matrix = self.dataset.get_camera_intrinsics()
@@ -3018,7 +3026,7 @@ class Graph:
                     camera_matrix,
                     np.linalg.inv(pose),
                     np.array(obj_pcd.points),
-                    return_depth=True   # 修改 check_object_in_view，支持返回深度
+                    return_depth=True   # Modified check_object_in_view to support returning depth
                 )
                 # gpt_index = all_image_incides.index()
                 if best_image_path is not None:
@@ -3037,10 +3045,10 @@ class Graph:
                         goal_image_path_by_gpt,
                         save_name=f"goal_compare_room_{room_id}.png")
 
-                # 保存为 JSON 文件
+                # Save as JSON file
             total_query_time_offline = total_online_query_time + \
                 gpt_check_time + gpt_refine_time
-            query_time_consumer["total_query_time"] = f"{total_query_time_offline:.4f} 秒"
+            query_time_consumer["total_query_time"] = f"{total_query_time_offline:.4f} seconds"
             query_time_consumer["online_object_distance_in_online_view"] = mean_depth_online
             query_time_consumer["gptref_object_distance_in_ofline_view"] = avg_distance_in_gptview
             with open(save_json_path, "w", encoding="utf-8") as f:
@@ -3241,16 +3249,16 @@ class Graph:
             #     # room_query_sim_median = np.max(compute_similarity(query_text_feats, np.stack(room.embeddings)))
             #     room2query_sim[room.room_id] = room_query_sim_median
             room2query_sim = dict()
-            room2query_feat = dict()   # 保存对应的特征向量
-            room2query_id = dict()     # 保存对应的embedding索引
+            room2query_feat = dict()   # Store the corresponding feature vectors
+            room2query_id = dict()     # Store the corresponding embedding indices
 
             for room in rooms_list:
                 embeddings = np.stack(room.embeddings)   # [view_num, 768]
-                # [1, view_num]，query和每个view的相似度
+                # [1, view_num], similarity between query and each view
                 sims = np.dot(query_text_feats, embeddings.T)
-                max_idx = np.argmax(sims)                # 找到最大相似度的位置
-                max_sim = sims[0, max_idx]               # 最大相似度值
-                max_feat = embeddings[max_idx]           # 对应的特征向量 (768,)
+                max_idx = np.argmax(sims)                # Find the position of maximum similarity
+                max_sim = sims[0, max_idx]               # Maximum similarity value
+                max_feat = embeddings[max_idx]           # Corresponding feature vector (768,)
 
                 room2query_sim[room.room_id] = max_sim
                 room2query_feat[room.room_id] = max_feat
@@ -3635,7 +3643,7 @@ class Graph:
                 f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n")
         print(
             (f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n"))
-        # if "展厅" in room_query:
+        # if "exhibition hall" in room_query:
         #     negative_labels = ["wall"]
 
         res_dict = dict()

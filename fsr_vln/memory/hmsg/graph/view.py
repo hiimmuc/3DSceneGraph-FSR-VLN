@@ -66,7 +66,7 @@ class View:
             "img_id": int(self.img_id) if isinstance(self.img_id, np.integer) else self.img_id,
             "object_ids": [int(x) if isinstance(x, np.integer) else x for x in self.object_ids],
             "img_path": self.img_path,
-            # 👈 强制转成 str
+            # 👈 Force conversion to str
             "text_discription": [str(x) for x in self.text_discription],
         }
         with open(os.path.join(path, str(self.view_id) + ".json"), "w", encoding="utf-8") as outfile:

@@ -118,12 +118,12 @@ def extract_feats_per_pixel(
     # print("after mask_generator")
     # cv2.imshow("image", image)
     # cv2.waitKey(0)
-    # --- Step 4: 创建 weighted mask 可视化 ---
+    # --- Step 4: Create weighted mask visualization ---
     overlay = np.zeros_like(image, dtype=np.float32)
     for mask in masks:
-        weight = mask["predicted_iou"]  # 或 mask["stability_score"]
+        weight = mask["predicted_iou"]  # or mask["stability_score"]
         color = np.random.rand(3)  # RGB in [0, 1]
-        # 将 color × weight 叠加到 overlay 中
+        # Accumulate color × weight into overlay
         mask_area = mask["segmentation"]
         for c in range(3):
             overlay[:, :, c] += mask_area * color[c] * weight
@@ -131,7 +131,7 @@ def extract_feats_per_pixel(
     overlay = (overlay - overlay.min()) / \
         (overlay.max() - overlay.min())  # Normalize to [0, 1]
     overlay_uint8 = (overlay * 255).astype(np.uint8)
-    # 可选：混合原图与 weighted mask（alpha 叠加）
+    # Optional: blend original image with weighted mask (alpha compositing)
     alpha = 0.8
     blended = cv2.addWeighted(image, 1 - alpha, overlay_uint8, alpha, 0)
     # cv2.imshow("sam", blended)

@@ -9,6 +9,7 @@ from openai import AzureOpenAI, OpenAI
 
 from openai import AzureOpenAI
 
+# TODO: use Ollama instead of AzureOpenAI, keep the interface same for easy switching between different LLM providers.
 
 def infer_floor_id_from_query(floor_ids: List[int], query: str) -> int:
     """
@@ -326,19 +327,19 @@ def parse_hier_query_use_prompt_insentence_parse(
 
     # Depending on the query spec, parse the query differently:
     if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
-        system_prompt = "你是一个查询解析器。你的任务是将一句话解析为楼层、房间和物体，如果只能解析出房间或者物体，请将另一个字段置为空, 物体的描述必须是英文，楼层和房间为中文。"
-        # system_prompt = "你是一个名为地瓜的查询解析器。你需要忽略句子中的所有“地瓜”字样。你的任务是将一句话解析为楼层、房间和物体，如果只能解析出房间或者物体，请将另一个字段置为空, 物体的描述必须是英文，楼层和房间为中文。"
+        system_prompt = "You are a query parser. Your task is to parse a sentence into floor, room, and object. If only a room or object can be parsed, leave the other field empty. Object descriptions must be in English; floor and room may be in Chinese."
+        # system_prompt = "You are a query parser named Digua. Ignore all occurrences of the word 'Digua' in the sentence. Your task is to parse a sentence into floor, room, and object. If only a room or object can be parsed, leave the other field empty. Object descriptions must be in English; floor and room may be in Chinese."
 
-        prompt = f"请解析以下句子：{instruction}"
-        prompt += "输出格式要求：用逗号分隔的列表，依次为楼层、房间和物体。例如：[楼层1, 地瓜办公区, sofa]"
+        prompt = f"Please parse the following sentence: {instruction}"
+        prompt += "Output format: a comma-separated list in the order of floor, room, and object. Example: [Floor 1, Digua Office Area, sofa]"
     elif set(params.main.long_query.spec) == {"obj", "room"}:
-        system_prompt = "你是一个名为地瓜的查询解析器。你的任务是将一句话解析为房间和物体。"
-        prompt = f"请解析以下句子：{instruction}"
-        prompt += "输出格式要求：用逗号分隔的列表，依次为房间和物体。例如：[地平线展厅, 沙发]"
+        system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into room and object."
+        prompt = f"Please parse the following sentence: {instruction}"
+        prompt += "Output format: a comma-separated list in the order of room and object. Example: [Horizon Exhibition Hall, sofa]"
     elif set(params.main.long_query.spec) == {"obj", "floor"}:
-        system_prompt = "你是一个名为地瓜的查询解析器。你的任务是将一句话解析为楼层和物体。"
-        prompt = f"请解析以下句子：{instruction}"
-        prompt += "输出格式要求：用逗号分隔的列表，依次为楼层和物体。例如：[楼层1, 沙发]"
+        system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into floor and object."
+        prompt = f"Please parse the following sentence: {instruction}"
+        prompt += "Output format: a comma-separated list in the order of floor and object. Example: [Floor 1, sofa]"
     elif set(params.main.long_query.spec) == {"obj"}:
         # return directly and not use the LLM for parsing
         print("floor, room, object:", None, None, instruction)
@@ -415,17 +416,17 @@ def parse_hier_query_use_prompt_insentence_parse_icra(
         return [None, None, instruction.strip()]
 
     # if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
-    #     system_prompt = "你是一个查询解析器。你的任务是将一句话解析为楼层、房间和物体，如果只能解析出房间或者物体，请将另一个字段置为空, 所有的描述必须是英文。"
-    #     prompt = f"请解析以下句子：{instruction}"
-    #     prompt += "输出格式要求：用逗号分隔的列表，依次为楼层、房间和物体。例如：[楼层1, 地平线展厅, sofa]"
+    #     system_prompt = "You are a query parser. Your task is to parse a sentence into floor, room, and object. If only a room or object can be parsed, leave the other field empty. All descriptions must be in English."
+    #     prompt = f"Please parse the following sentence: {instruction}"
+    #     prompt += "Output format: a comma-separated list in the order of floor, room, and object. Example: [Floor 1, Horizon Exhibition Hall, sofa]"
     # elif set(params.main.long_query.spec) == {"obj", "room"}:
-    #     system_prompt = "你是一个名为地瓜的查询解析器。你的任务是将一句话解析为房间和物体。"
-    #     prompt = f"请解析以下句子：{instruction}"
-    #     prompt += "输出格式要求：用逗号分隔的列表，依次为房间和物体。例如：[客厅, 沙发]"
+    #     system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into room and object."
+    #     prompt = f"Please parse the following sentence: {instruction}"
+    #     prompt += "Output format: a comma-separated list in the order of room and object. Example: [living room, sofa]"
     # elif set(params.main.long_query.spec) == {"obj", "floor"}:
-    #     system_prompt = "你是一个名为地瓜的查询解析器。你的任务是将一句话解析为楼层和物体。"
-    #     prompt = f"请解析以下句子：{instruction}"
-    #     prompt += "输出格式要求：用逗号分隔的列表，依次为楼层和物体。例如：[楼层1, 沙发]"
+    #     system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into floor and object."
+    #     prompt = f"Please parse the following sentence: {instruction}"
+    #     prompt += "Output format: a comma-separated list in the order of floor and object. Example: [Floor 1, sofa]"
     # elif set(params.main.long_query.spec) == {"obj"}:
     #     # return directly and not use the LLM for parsing
     #     print("floor, room, object:", None, None, instruction)

@@ -32,7 +32,7 @@ class HorizonDataset(RGBDDataset):
         # pose_name = "colmap_pose"
         # camera_config_path = "orbslam3_rgbd.yaml"
         pose_name = "poses"
-        camera_config_path = "d435i.yaml"
+        camera_config_path = "camera_info.yaml"
         self.rgb_intrinsics, self.depth_intrinsics = self.load_camera_params(
             os.path.join(self.root_dir, camera_config_path))
         self.scale = 1000.0
@@ -244,11 +244,11 @@ class HorizonDataset(RGBDDataset):
         # depth = np.array(depth_image)
         # clip_depth_mask = depth > 3.0*1000
         # depth[clip_depth_mask] = 0
-        # # 计算梯度（Sobel 算子）
+        # # Compute gradient (Sobel operator)
         # grad_x = cv2.Sobel(depth, cv2.CV_32F, 1, 0, ksize=3)
         # grad_y = cv2.Sobel(depth, cv2.CV_32F, 0, 1, ksize=3)
         # grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-        # # 设置深度变化阈值（如 0.05 米）
+        # # Set depth change threshold (e.g., 0.05 m)
         # threshold = 0.1 * 1e3
         # edge_mask = grad_mag > threshold
         # depth[edge_mask] = 0

@@ -261,7 +261,7 @@ def main(params: DictConfig):
             # add object point cloud
             object_pcds[obj_id].paint_uniform_color(np.random.rand(3))
             cloud_xyz = np.asarray(object_pcds[obj_id].points)
-            center = cloud_xyz.mean(axis=0)  # 计算当前家具类点的中心位置
+            center = cloud_xyz.mean(axis=0)  # Calculate the centroid of the current furniture cluster
             cloud = pv.PolyData(cloud_xyz)
             p.add_mesh(
                 cloud,

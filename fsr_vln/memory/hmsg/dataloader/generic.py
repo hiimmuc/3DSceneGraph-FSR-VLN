@@ -122,7 +122,7 @@ class RGBDDataset(Dataset, ABC):
         X = (x - camera_matrix[0, 2]) * depth / camera_matrix[0, 0]
         Y = (y - camera_matrix[1, 2]) * depth / camera_matrix[1, 1]
         Z = depth
-        # 该帧相机坐标系的平均深度
+        # Mean depth in the camera coordinate system for this frame
         if Z.mean() > filter_distance:
             return o3d.geometry.PointCloud()
         # convert to open3d point cloud
@@ -133,7 +133,7 @@ class RGBDDataset(Dataset, ABC):
         if not mask_img:
             colors = rgb[mask]
             pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
-        # 相机系点云转换到世界坐标系
+        # Transform point cloud from camera coordinates to world coordinates
         pcd.transform(camera_pose)
         return pcd
 

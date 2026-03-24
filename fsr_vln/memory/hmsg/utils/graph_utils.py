@@ -19,7 +19,7 @@ import cv2
 
 import faiss
 import matplotlib
-matplotlib.use('Agg')  # 设置为非GUI后端
+matplotlib.use('Agg')  # Use non-GUI backend
 
 
 def visualize_pcd_on_image(
@@ -33,32 +33,32 @@ def visualize_pcd_on_image(
         0,
         255)):
     """
-    将 3D 点云投影到 2D 图像并保存可视化结果，同时返回物体的平均距离.
+    Project a 3D point cloud onto a 2D image, save the visualization, and return the mean object distance.
 
     Args:
-        obj_pcd: Open3D PointCloud 对象 (物体点云)
-        img: numpy.ndarray (H, W, 3)，原始图像
-        camera_matrix: numpy.ndarray (3, 3)，相机内参矩阵
-        pose: numpy.ndarray (4, 4)，相机位姿矩阵 (世界到相机的变换)
-        save_path: str，保存路径
-        color: tuple(B, G, R)，绘制点的颜色
+        obj_pcd: Open3D PointCloud object (object point cloud)
+        img: numpy.ndarray (H, W, 3), original image
+        camera_matrix: numpy.ndarray (3, 3), camera intrinsic matrix
+        pose: numpy.ndarray (4, 4), camera pose matrix (world-to-camera transform)
+        save_path: str, output save path
+        color: tuple(B, G, R), color used for drawing points
 
     Returns:
-        avg_distance: float，物体在相机坐标系下的平均距离（米）
+        avg_distance: float, mean distance of the object in camera coordinates (meters)
     """
-    # 取出点云坐标 (N, 3)
-    pts = np.asarray(obj_pcd.points)  # 世界坐标系下点云
+    # Extract point cloud coordinates (N, 3)
+    pts = np.asarray(obj_pcd.points)  # point cloud in world coordinates
     if pts.shape[0] == 0:
         print("Warning: Empty point cloud provided.")
         return None
 
-    # 转换到齐次坐标 (N, 4)
+    # Convert to homogeneous coordinates (N, 4)
     pts_h = np.hstack((pts, np.ones((pts.shape[0], 1))))
 
-    # 世界坐标系 -> 相机坐标系
+    # World coordinates -> camera coordinates
     pts_cam = (pose @ pts_h.T).T[:, :3]  # (N, 3)
 
-    # 过滤掉 Z<=0 的点（在相机后方）
+    # Filter out points with Z <= 0 (behind the camera)
     valid_mask = pts_cam[:, 2] > 0
     pts_cam = pts_cam[valid_mask]
 
@@ -66,22 +66,22 @@ def visualize_pcd_on_image(
         print("Warning: No valid points in front of camera.")
         return None
 
-    # 计算平均距离（Z 方向）
+    # Calculate mean depth (Z direction)
     avg_distance = float(np.mean(pts_cam[:, 2]))
 
-    # 相机坐标系 -> 像素坐标
+    # Camera coordinates -> pixel coordinates
     uv = (camera_matrix @ pts_cam.T).T  # (N, 3)
-    uv = uv[:, :2] / uv[:, 2:]  # 除以 z 得到像素坐标
+    uv = uv[:, :2] / uv[:, 2:]  # divide by z to get pixel coordinates
 
-    # 拷贝一份图像用于绘制
+    # Copy image for drawing
     img_vis = img.copy()
 
-    # 遍历绘制点
+    # Draw projected points
     for (u, v) in uv.astype(int):
         if 0 <= u < img_vis.shape[1] and 0 <= v < img_vis.shape[0]:
             cv2.circle(img_vis, (u, v), 2, color, -1)
 
-    # 保存结果
+    # Save result
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     cv2.imwrite(save_path, img_vis)
     # cv2.imshow("Projected PCD on Image", img_vis)
@@ -102,39 +102,39 @@ def check_object_in_view(
         max_depth=10.0,
         return_depth=False):
     """
-    检查物体点云是否在相机的视野范围内，并且平均深度小于 max_depth.
+    Check whether an object point cloud is within the camera's field of view and has a mean depth below max_depth.
 
     Args:
-        img_w (int): 图像宽度 (像素)
-        img_h (int): 图像高度 (像素)
-        camera_matrix (numpy.ndarray): 内参矩阵 (3x3)
-        cam_pose_inv (numpy.ndarray): 世界到相机的变换矩阵 (4x4)
-        obj_points (numpy.ndarray): 物体点云 (N x 3)
-        min_visible_ratio (float): 至少多少比例的点可见才算在视野中
-        max_depth (float): 平均深度阈值 (米)
+        img_w (int): image width (pixels)
+        img_h (int): image height (pixels)
+        camera_matrix (numpy.ndarray): intrinsic matrix (3x3)
+        cam_pose_inv (numpy.ndarray): world-to-camera transform matrix (4x4)
+        obj_points (numpy.ndarray): object point cloud (N x 3)
+        min_visible_ratio (float): minimum fraction of points that must be visible to count as in-view
+        max_depth (float): mean depth threshold (meters)
 
     Returns:
-        bool: True 如果物体在视野中且平均深度小于 max_depth, 否则 False
+        bool: True if the object is in view and mean depth is below max_depth, otherwise False
     """
 
     if obj_points.shape[0] == 0:
         return (False, np.inf) if return_depth else False
 
-    # ---- 1. 世界 -> 相机坐标 ----
+    # ---- 1. World -> camera coordinates ----
     ones = np.ones((obj_points.shape[0], 1))
     obj_points_h = np.hstack([obj_points, ones])  # (N,4)
     obj_points_cam = (cam_pose_inv @ obj_points_h.T).T[:, :3]  # (N,3)
 
-    # ---- 2. 只保留相机前方的点 ----
+    # ---- 2. Keep only points in front of the camera ----
     obj_points_cam = obj_points_cam[obj_points_cam[:, 2] > 0]
     if obj_points_cam.shape[0] == 0:
         return (False, np.inf) if return_depth else False
 
-    # ---- 3. 投影到图像坐标 ----
+    # ---- 3. Project to image coordinates ----
     pixels_h = (camera_matrix @ obj_points_cam.T).T  # (N,3)
     pixels = pixels_h[:, :2] / pixels_h[:, 2:3]  # (u,v)
 
-    # ---- 4. 判断是否落在图像范围内 ----
+    # ---- 4. Check if points fall within the image bounds ----
     inside_mask = (
         (pixels[:, 0] >= 0) & (pixels[:, 0] < img_w) &
         (pixels[:, 1] >= 0) & (pixels[:, 1] < img_h)
@@ -148,7 +148,7 @@ def check_object_in_view(
     if visible_ratio < min_visible_ratio:
         return (False, np.inf) if return_depth else False
 
-    # ---- 5. 深度约束 ----
+    # ---- 5. Depth constraint ----
     mean_depth = np.mean(obj_points_cam[inside_mask, 2]) if np.any(
         inside_mask) else np.inf
     if mean_depth > max_depth:
@@ -305,7 +305,7 @@ def compute_room_embeddings(
                     room_2d_points[:, 1], s=0.1, c=cmap(room_idx))
 
     for room_id in range(len(flattened_room_points)):
-        img_ids = room_id2img_id[room_id]  # 获取room的imageid
+        img_ids = room_id2img_id[room_id]  # get image ids for the room
         # all_img_ids = img_ids.copy()
         print("room_id: ", room_id, " has ", len(img_ids), " images")
         print("img_ids: ", img_ids)
@@ -470,15 +470,15 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
             tuple(
                 np.where(
                     markers == i +
-                    1)))  # 每个元素是 (rows, cols)
+                    1)))  # each element is (rows, cols)
 
     plt.figure()
     plt.imshow(markers, cmap="jet", origin="lower")
-    # # 在每个房间区域中心写上编号
+    # # Write the room index at the center of each room region
     for i, room in enumerate(room_vertices):
         if len(room[0]) == 0:
             continue
-        cy, cx = np.mean(room[0]), np.mean(room[1])  # y是行，x是列
+        cy, cx = np.mean(room[0]), np.mean(room[1])  # y is row, x is column
         plt.text(cx, cy, str(i), color="white", fontsize=8,
                  ha="center", va="center", fontweight="bold")
 

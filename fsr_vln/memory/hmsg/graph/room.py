@@ -192,8 +192,8 @@ class Room:
         Returns:
             str: room type name
         Func Descriptions:
-            "name" : 根据房间内的物体列表的name，推断房间类型
-            "llm" : 利用LLM比较room_text和和default_room_types文本的相似度，推断房间类型
+            "name" : infer room type from the name of objects in the room
+            "llm" : use LLM to compare room_text with default_room_types text similarity to infer room type
         """
         # import sys
         # sys.path.append("/mnt/disk2/hovsg/HOV-SG/hmsg/utils")
@@ -259,8 +259,8 @@ class Room:
         Returns:
             str: room type name
         Func Descriptions:
-            "label" : 根据房间内的物体列表的name，推断房间类型
-            "obj_embedding" : 根据房间内的物体列表的embedding，推断房间类型
+            "label" : infer room type from the name of objects in the room
+            "obj_embedding" : infer room type from the embeddings of objects in the room
         """
         # import sys
         # sys.path.append("/mnt/disk2/hovsg/HOV-SG/hmsg/utils")

@@ -35,7 +35,7 @@ import numpy as np
 import os
 import json
 import sys
-# 添加项目根目录到Python路径
+# Add project root directory to Python path
 sys.path.insert(
     0, os.path.dirname(
         os.path.dirname(
@@ -46,9 +46,9 @@ from memory.hmsg.graph.graph import Graph
 
 def visualize_and_save(room_pcd, obj_pcd, end_sphere, save_path="scene.png"):
     vis = o3d.visualization.Visualizer()
-    vis.create_window(visible=True)  # 设置 False 可后台渲染
-    # vis = o3d.visualization.OffscreenVisualizer()  # 使用 OffscreenVisualizer
-    # vis.create_window()  # 不需要设置 visible 参数
+    vis.create_window(visible=True)  # Set to False for off-screen rendering
+    # vis = o3d.visualization.OffscreenVisualizer()  # Use OffscreenVisualizer
+    # vis.create_window()  # No need to set the visible parameter
 
     vis.add_geometry(room_pcd)
     vis.add_geometry(obj_pcd)
@@ -57,33 +57,33 @@ def visualize_and_save(room_pcd, obj_pcd, end_sphere, save_path="scene.png"):
     vis.poll_events()
     vis.update_renderer()
 
-    # 计算房间和物体的中心
+    # Calculate the center of the room and object
     room_center = np.array(room_pcd.get_center())
     obj_center = np.array(obj_pcd.get_center())
 
-    # 相机位置：在房间中心 + y方向上方 5m
+    # Camera position: above the room center by 5m in the y direction
     cam_pos = room_center + np.array([0, 5.0, 0.0])
 
-    # 设置相机参数
+    # Set camera parameters
     ctr = vis.get_view_control()
-    ctr.set_lookat(obj_center)                     # 看向物体中心
+    ctr.set_lookat(obj_center)                     # Look at the object center
     ctr.set_front((cam_pos - obj_center) /
-                  np.linalg.norm(cam_pos - obj_center))  # 相机朝向
-    ctr.set_up([0, 1, 0])                          # 这里假设 z 作为水平参考，上方向定为 z
+                  np.linalg.norm(cam_pos - obj_center))  # Camera direction
+    ctr.set_up([0, 1, 0])                          # Assuming z as the horizontal reference; up direction is set to z
 
-    ctr.set_zoom(0.7)  # 缩放调节
+    ctr.set_zoom(0.7)  # Zoom adjustment
 
     vis.poll_events()
     vis.update_renderer()
 
-    # 保存截图
+    # Save screenshot
     vis.capture_screen_image(save_path)
     vis.destroy_window()
     print(f"Saved visualization to {save_path}")
 
 
 instruction_templelate_ic3f_obj = [
-    # 地瓜电梯间/接待区
+    # Digua Elevator Lobby / Reception Area
     "Find me a plants",
     "Find me a television",
     "Find me a potted plants",
@@ -91,7 +91,7 @@ instruction_templelate_ic3f_obj = [
     # small obj
     "Find me a cup",
     "Find me a bottle ",
-    # 展厅
+    # Exhibition Hall
     # small obj
     "Find me a chair",
     "Find me a blue chair",
@@ -106,7 +106,7 @@ instruction_templelate_ic3f_obj = [
     "Find me some fruit",
     "Find me J6 chip processor",
     "Find me a robot toy",
-    # 走廊
+    # Hallway
     "Find me a fire hydrant",
     "Find me a fire extinguisher",
     "Find me a bottle of water in the Hallway",
@@ -120,7 +120,7 @@ instruction_templelate_ic3f_obj = [
 ]
 
 instruction_templelate_ic3f_autoregion = [  # 22
-    # # 地瓜电梯间/接待区
+    # # Digua Elevator Lobby / Reception Area
     "Find me a plants in the Elevator Lobby",
     "Find me a television in the Elevator Lobby",
     "Find me a potted plants on the counter in the Reception Area",
@@ -129,7 +129,7 @@ instruction_templelate_ic3f_autoregion = [  # 22
     # # small obj
     "Find me a cup in the Reception Area",
     "Find me a bottle of water in the Reception Area",
-    # 展厅
+    # Exhibition Hall
     # small obj
     "Find me a chair in the Exhibition Hall",
     "Find me a blue chair in the Exhibition Hall",
@@ -145,7 +145,7 @@ instruction_templelate_ic3f_autoregion = [  # 22
 
     # "Find me some chip processor in the Exhibition Hall",
     "Find me a robot toy in the Exhibition Hall",
-    # # 走廊
+    # # Hallway
     "Find me a fire hydrant in the Corner HallWay",
     "Find me a fire extinguisher in the Corner HallWay",
     "Fine me a silver rack in the Corner HallWay",
@@ -180,7 +180,7 @@ def main(params: DictConfig):
     hmsg.load_hmsg_graph(params.main.graph_path)
     hmsg.vln_result_dir = os.path.join(
         save_dir, f"fsrvln_result_online_{spatial_reasoning_method}_{fast_slow_method}")
-    # 自主判断房间类型和名字
+    # Automatically determine room type and name
     hmsg.generate_room_names(
         generate_method="view_embedding",
         # generate_method="label",
@@ -192,7 +192,7 @@ def main(params: DictConfig):
             "Elevator Lobby Reception Area",
         ]
     )
-    # 人为设定房间类型和名字
+    # Manually assign room type and name
     if spatial_reasoning_method == "human_assign":
         designated_room_names_ic3f = [
             "none",  # Exhibition Hall",
@@ -216,7 +216,7 @@ def main(params: DictConfig):
     # print("T_tomap: ", T_tomap)
     # loop forever and ask for query, until user click 'q'
     json_save_path = os.path.join(hmsg.vln_result_dir, "all_results.json")
-    all_results = []  # 存放每条 query 的结果
+    all_results = []  # Store results for each query
 
     sum_Total_Time = 0.0
     sum_FastMatching = 0.0
@@ -238,11 +238,11 @@ def main(params: DictConfig):
             query_instruction, top_k=5, use_gpt=use_gpt)
         end_time = time.time()
         query_time = end_time - start_time
-        print(f"运行时间: {query_time:.4f} 秒")
+        print(f"Elapsed time: {query_time:.4f} seconds")
         # visualize the query
         print(floor.floor_id, [(r.room_id, r.name)
               for r in room], [o.object_id for o in obj])
-        # 构建要写入 JSON 的数据
+        # Build the data to write to JSON
         query_result = {
             "query": query_instruction,
             "time_seconds": query_time,
@@ -260,7 +260,7 @@ def main(params: DictConfig):
             room_pcd = deepcopy(room[i].pcd)
             obj_center = obj_pcd.get_center()
             print("obj_center in scenegraph: ", obj_center)
-            obj_center_h = np.hstack((obj_center, 1.0))  # 齐次坐标 (4,)
+            obj_center_h = np.hstack((obj_center, 1.0))  # Homogeneous coordinates (4,)
             obj_center_in_map = (T_tomap @ obj_center_h)[:3]
             print("obj_center in lidarmap: ", obj_center_in_map)
 
@@ -268,10 +268,10 @@ def main(params: DictConfig):
             end_sphere.translate(obj_center)
             end_sphere.paint_uniform_color([1, 0, 0])
             # o3d.visualization.draw_geometries([room_pcd, obj_pcd, end_sphere])
-            # 合并点云
+            # Merge point clouds
             mesh_pcd = end_sphere.sample_points_uniformly(number_of_points=500)
             combined_pcd = room_pcd + obj_pcd + mesh_pcd
-            # 保存为单个文件
+            # Save as a single file
             pcd_save_path = os.path.join(
                 hmsg.curr_query_save_dir, f"scene_{i}.ply")
             pcd_render_save_path = os.path.join(
@@ -309,17 +309,17 @@ def main(params: DictConfig):
     average_total_time = sum_Total_Time / len(final_instruction_telepalte)
     average_llm_parse_time = sum_LLM_parse / len(final_instruction_telepalte)
 
-    print(f"fsrvln average_total_time : {average_total_time:.4f} 秒")
+    print(f"fsrvln average_total_time : {average_total_time:.4f} seconds")
     print(
-        f"fsrvln average_objectinimagecheck_time : {average_objectinimagecheck_time:.4f} 秒")
+        f"fsrvln average_objectinimagecheck_time : {average_objectinimagecheck_time:.4f} seconds")
     print(
-        f"fsrvln average_vlm_rethinking_time : {average_vlm_rethinking_time:.4f} 秒")
+        f"fsrvln average_vlm_rethinking_time : {average_vlm_rethinking_time:.4f} seconds")
     print(
-        f"fsrvln average_re_matching_time : {average_re_matching_time:.4f} 秒")
+        f"fsrvln average_re_matching_time : {average_re_matching_time:.4f} seconds")
     print(
-        f"fsrvln average_fastmatching_time : {average_fastmatching_time:.4f} 秒")
-    print(f"fsrvln average_llm_parse_time : {average_llm_parse_time:.4f} 秒")
-    # 将平均时间也写入 JSON
+        f"fsrvln average_fastmatching_time : {average_fastmatching_time:.4f} seconds")
+    print(f"fsrvln average_llm_parse_time : {average_llm_parse_time:.4f} seconds")
+    # Write the average times to JSON as well
     final_json = {
         "average_total_time": average_total_time,
         "average_objectIncheck_time": average_objectinimagecheck_time,

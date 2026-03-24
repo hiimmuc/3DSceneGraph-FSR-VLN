@@ -31,7 +31,7 @@ import sys
 
 import hydra
 from omegaconf import DictConfig
-# 添加项目根目录到Python路径
+# Add project root directory to Python path
 sys.path.insert(
     0, os.path.dirname(
         os.path.dirname(

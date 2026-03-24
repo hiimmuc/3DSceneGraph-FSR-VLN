@@ -31,17 +31,17 @@ use.
 """
 semantic_scene_reconstruction_unified.
 
-基于传入的配置对不同场景执行语义重建并构建多模态场景图（HMSG）。
-脚本通过 Hydra 加载配置，创建 `Graph` 实例，
-生成并保存特征地图、点云、掩码点云与特征文件，然后调用图构建流程
-将结果写入磁盘。
+Performs semantic scene reconstruction and builds a Hierarchical Multimodal Scene Graph (HMSG)
+for different scenes based on the provided configuration.
+The script loads configuration via Hydra, creates a `Graph` instance,
+generates and saves the feature map, point cloud, masked point clouds, and feature files,
+then calls the graph construction pipeline to write results to disk.
 
-注意
-----
-- 依赖项目中的 `hmsg.graph.graph.Graph` 实现与配置文件 `config/`
-    下的相应配置文件。
-- 运行时会在磁盘上创建并写入输出目录（具有副作用）。
-- 可以通过命令行参数指定不同的配置文件，例如：
+Notes
+-----
+- Depends on `hmsg.graph.graph.Graph` and the corresponding configuration files under `config/`.
+- Creates and writes to the output directory on disk at runtime (has side effects).
+- A different configuration file can be specified via command-line arguments, e.g.:
   python semantic_scene_reconstruction_unified.py --config-name=semantic_scene_reconstruction_ic3f
 """
 
@@ -50,7 +50,7 @@ import os
 import hydra
 from omegaconf import DictConfig
 import sys
-# 添加项目根目录到Python路径
+# Add project root directory to Python path
 sys.path.insert(
     0, os.path.dirname(
         os.path.dirname(
@@ -60,36 +60,36 @@ from memory.hmsg.graph.graph import Graph
 
 def run_scene_reconstruction(params: DictConfig):
     """
-    执行单个场景的语义重建与场景图构建的核心函数。
+    Core function that performs semantic reconstruction and scene graph construction for a single scene.
 
-    根据 Hydra 注入的 `params` 初始化并运行 `Graph` 的重建流程。主要步骤：
-    1. 基于 `params.main.scene_id` 与 `params.main.dataset_path` 计算输入/输出路径；
-    2. 创建输出目录并初始化 `Graph(params)`；
-    3. 生成特征地图并保存点云、掩码点云与特征；
-    4. 调用 `build_hier_multimodal_scene_graph` 构建并保存多模态场景图。
+    Initializes and runs the `Graph` reconstruction pipeline based on Hydra-injected `params`. Main steps:
+    1. Compute input/output paths from `params.main.scene_id` and `params.main.dataset_path`;
+    2. Create the output directory and initialize `Graph(params)`;
+    3. Generate the feature map and save the point cloud, masked point clouds, and features;
+    4. Call `build_hier_multimodal_scene_graph` to build and save the multimodal scene graph.
 
     Args:
-        params (DictConfig): Hydra 配置对象，期望包含 `params.main.scene_id`、
-            `params.main.dataset_path`、`params.main.save_path` 和 `params.main.dataset` 等字段。
+        params (DictConfig): Hydra configuration object, expected to contain `params.main.scene_id`,
+            `params.main.dataset_path`, `params.main.save_path`, and `params.main.dataset`.
 
     Returns:
         None
 
     Side effects:
-        在磁盘上创建并写入 `save_dir`，包含点云、特征以及生成的 graph 数据。
+        Creates and writes to `save_dir` on disk, containing point clouds, features, and graph data.
     """
-    scene_ids = [params.main.scene_id]  # 使用配置文件中指定的场景ID
+    scene_ids = [params.main.scene_id]  # Use the scene ID specified in the config
 
     if hasattr(
             params,
             'main') and hasattr(
             params.main,
             'scene_ids') and params.main.scene_ids:
-        # 如果配置文件中定义了多个场景ID，则使用它们
+        # If multiple scene IDs are defined in the config, use them
         scene_ids = params.main.scene_ids
 
     for scene_id in scene_ids:
-        # 更新参数中的scene_id
+        # Update the scene_id in params
         if hasattr(params, 'main'):
             params.main.scene_id = scene_id
         # Create save directory
@@ -127,14 +127,14 @@ def run_scene_reconstruction(params: DictConfig):
         hmsg.build_hier_multimodal_scene_graph(save_path=save_dir)
 
 
-@hydra.main(version_base=None, config_path="../../config",
-            config_name="semantic_scene_reconstruction_ic4f")  # 默认使用ic4f配置
+@hydra.main(version_base=None, config_path="../../config/semantic_scene_reconstruction",
+            config_name="semantic_scene_reconstruction_ic4f")  # Default: use ic4f config
 def main(params: DictConfig):
     """
-    主函数，通过 Hydra 加载配置并执行场景重建。
+    Main function that loads configuration via Hydra and runs scene reconstruction.
 
-    可以通过命令行参数指定不同的配置文件，例如： python semantic_scene_reconstruction.py
-    --config-name=semantic_scene_reconstruction_sh3f
+    A different config file can be specified via command-line arguments, e.g.:
+    python semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_sh3f
     """
     run_scene_reconstruction(params)
 
