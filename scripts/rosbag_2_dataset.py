@@ -12,7 +12,7 @@ Output layout
 ├── depth/           # Depth frames: {timestamp_sec:.4f}.png  (16-bit, mm)
 ├── poses.txt        # Camera trajectory, TUM format:
 │                    #   timestamp tx ty tz qx qy qz qw
-└── d435i.yaml       # Camera intrinsics (fx, fy, cx, cy, width, height)
+└── camera_info.yaml       # Camera intrinsics (fx, fy, cx, cy, width, height)
 
 TUM pose format
 ───────────────
@@ -193,7 +193,7 @@ def interpolate_pose(query_ts: float, ts_arr, trans_arr,
 def write_camera_yaml(path: str, fx: float, fy: float,
                       cx: float, cy: float,
                       width: int, height: int):
-    """Write d435i.yaml in the format expected by HorizonDataset."""
+    """Write camera_info.yaml in the format expected by HorizonDataset."""
     content = {
         "Camera1.fx": float(fx),
         "Camera1.fy": float(fy),
@@ -223,7 +223,7 @@ def extract_camera_info(bag_reader, typestore, camera_info_topic: str):
             connections=[c for c in bag_reader.connections
                          if c.topic == camera_info_topic]):
         msg = typestore.deserialize_cdr(raw, conn.msgtype)
-        K = msg.K  # 3x3 row-major
+        K = msg.k  # 3x3 row-major (rosbags uses lowercase field names)
         return {
             "fx": K[0], "fy": K[4],
             "cx": K[2], "cy": K[5],
@@ -274,7 +274,7 @@ def convert(
                       f"cx={cx:.2f} cy={cy:.2f} {width}×{height}")
 
         write_camera_yaml(
-            str(output_dir / "d435i.yaml"),
+            str(output_dir / "camera_info.yaml"),
             fx, fy, cx, cy, width, height,
         )
 
@@ -380,7 +380,7 @@ def convert(
     print(f"  images/ : {len(list(img_dir.glob('*.png')))} files")
     print(f"  depth/  : {len(list(depth_dir.glob('*.png')))} files")
     print(f"  poses.txt: {len(pose_lines)} entries")
-    print(f"  d435i.yaml: written")
+    print(f"  camera_info.yaml: written")
 
     print("\n── Next step ────────────────────────────────────────────────────")
     print("  Edit fsr_vln/config/semantic_scene_reconstruction_custom.yaml:")

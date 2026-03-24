@@ -128,7 +128,7 @@ my_scene/
 ├── images/          # RGB frames:  {timestamp:.4f}.png
 ├── depth/           # Depth frames: {timestamp:.4f}.png  (16-bit mm)
 ├── poses.txt        # TUM format: timestamp tx ty tz qx qy qz qw
-└── d435i.yaml       # Camera intrinsics
+└── camera_info.yaml       # Camera intrinsics
 ```
 
 > **Tip:** Check `poses.txt` — if the robot was stationary the translation should change each line. All-zero translations indicate TF was not published; ensure the odometry node was running during recording.
