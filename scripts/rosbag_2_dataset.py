@@ -62,15 +62,13 @@ try:
     from rosbags.rosbag2 import Reader
     from rosbags.typesys import Stores, get_typestore
 except ImportError:
-    sys.exit(
-        "ERROR: 'rosbags' package not found.\n"
-        "Install it with:  pip install rosbags"
-    )
+    sys.exit("ERROR: 'rosbags' package not found.\n" "Install it with:  pip install rosbags")
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def stamp_to_sec(stamp) -> float:
     """Convert ROS2 stamp (sec + nanosec) or raw nanoseconds int to seconds."""
@@ -112,6 +110,7 @@ def msg_to_depth_mm(msg, max_depth_mm: int = 10000) -> np.ndarray:
         depth = np.frombuffer(msg.data, dtype=np.uint16).reshape(h, w)
     elif enc == "32fc1":
         depth_m = np.frombuffer(msg.data, dtype=np.float32).reshape(h, w)
+        depth_m = np.nan_to_num(depth_m, nan=0.0, posinf=0.0, neginf=0.0)
         depth = (depth_m * 1000.0).astype(np.uint16)
     else:
         raise ValueError(f"Unsupported depth encoding: {enc}")
@@ -140,12 +139,15 @@ def extract_tf(bag_reader, typestore, parent_frame: str, child_frame: str):
     if not tf_topics:
         return np.array([]), np.zeros((0, 3)), np.zeros((0, 4))
 
-    for connection, ts_ns, raw in bag_reader.messages(connections=[
-            c for c in bag_reader.connections if c.topic in tf_topics]):
+    for connection, ts_ns, raw in bag_reader.messages(
+        connections=[c for c in bag_reader.connections if c.topic in tf_topics]
+    ):
         msg = typestore.deserialize_cdr(raw, connection.msgtype)
         for transform in msg.transforms:
-            if (transform.header.frame_id == parent_frame and
-                    transform.child_frame_id == child_frame):
+            if (
+                transform.header.frame_id == parent_frame
+                and transform.child_frame_id == child_frame
+            ):
                 t = transform.transform.translation
                 r = transform.transform.rotation
                 timestamps.append(stamp_to_sec(transform.header.stamp))
@@ -156,13 +158,10 @@ def extract_tf(bag_reader, typestore, parent_frame: str, child_frame: str):
         return np.array([]), np.zeros((0, 3)), np.zeros((0, 4))
 
     idx = np.argsort(timestamps)
-    return (np.array(timestamps)[idx],
-            np.array(translations)[idx],
-            np.array(quaternions)[idx])
+    return (np.array(timestamps)[idx], np.array(translations)[idx], np.array(quaternions)[idx])
 
 
-def interpolate_pose(query_ts: float, ts_arr, trans_arr,
-                     quat_arr, max_dt: float = 0.1):
+def interpolate_pose(query_ts: float, ts_arr, trans_arr, quat_arr, max_dt: float = 0.1):
     """
     Linearly interpolate translation, SLERP quaternion at query_ts.
     Returns (tx, ty, tz, qx, qy, qz, qw) or None if gap > max_dt.
@@ -190,16 +189,16 @@ def interpolate_pose(query_ts: float, ts_arr, trans_arr,
     return (*trans.tolist(), *q_interp.tolist())
 
 
-def write_camera_yaml(path: str, fx: float, fy: float,
-                      cx: float, cy: float,
-                      width: int, height: int):
+def write_camera_yaml(
+    path: str, fx: float, fy: float, cx: float, cy: float, width: int, height: int
+):
     """Write camera_info.yaml in the format expected by HorizonDataset."""
     content = {
         "Camera1.fx": float(fx),
         "Camera1.fy": float(fy),
         "Camera1.cx": float(cx),
         "Camera1.cy": float(cy),
-        "Camera.width":  int(width),
+        "Camera.width": int(width),
         "Camera.height": int(height),
     }
     with open(path, "w") as f:
@@ -211,6 +210,7 @@ def write_camera_yaml(path: str, fx: float, fy: float,
 # Main extraction
 # ---------------------------------------------------------------------------
 
+
 def extract_camera_info(bag_reader, typestore, camera_info_topic: str):
     """
     Try to read fx/fy/cx/cy/width/height from sensor_msgs/CameraInfo.
@@ -220,13 +220,15 @@ def extract_camera_info(bag_reader, typestore, camera_info_topic: str):
     if camera_info_topic not in available:
         return None
     for conn, ts_ns, raw in bag_reader.messages(
-            connections=[c for c in bag_reader.connections
-                         if c.topic == camera_info_topic]):
+        connections=[c for c in bag_reader.connections if c.topic == camera_info_topic]
+    ):
         msg = typestore.deserialize_cdr(raw, conn.msgtype)
         K = msg.k  # 3x3 row-major (rosbags uses lowercase field names)
         return {
-            "fx": K[0], "fy": K[4],
-            "cx": K[2], "cy": K[5],
+            "fx": K[0],
+            "fy": K[4],
+            "cx": K[2],
+            "cy": K[5],
             "width": msg.width,
             "height": msg.height,
         }
@@ -241,8 +243,12 @@ def convert(
     tf_parent: str,
     tf_child: str,
     camera_info_topic: str,
-    fx: float, fy: float, cx: float, cy: float,
-    width: int, height: int,
+    fx: float,
+    fy: float,
+    cx: float,
+    cy: float,
+    width: int,
+    height: int,
     skip: int,
     max_depth_mm: int,
     max_interp_gap: float,
@@ -250,7 +256,7 @@ def convert(
     bag_path = Path(bag_path)
     output_dir = Path(output_dir)
 
-    img_dir   = output_dir / "images"
+    img_dir = output_dir / "images"
     depth_dir = output_dir / "depth"
     img_dir.mkdir(parents=True, exist_ok=True)
     depth_dir.mkdir(parents=True, exist_ok=True)
@@ -269,19 +275,25 @@ def convert(
             info = extract_camera_info(reader, typestore, camera_info_topic)
             if info:
                 fx, fy, cx, cy = info["fx"], info["fy"], info["cx"], info["cy"]
-                width, height  = info["width"], info["height"]
-                print(f"  Intrinsics from bag: fx={fx:.2f} fy={fy:.2f} "
-                      f"cx={cx:.2f} cy={cy:.2f} {width}×{height}")
+                width, height = info["width"], info["height"]
+                print(
+                    f"  Intrinsics from bag: fx={fx:.2f} fy={fy:.2f} "
+                    f"cx={cx:.2f} cy={cy:.2f} {width}×{height}"
+                )
 
         write_camera_yaml(
             str(output_dir / "camera_info.yaml"),
-            fx, fy, cx, cy, width, height,
+            fx,
+            fy,
+            cx,
+            cy,
+            width,
+            height,
         )
 
         # ── TF trajectory ───────────────────────────────────────────────
         print(f"  Extracting TF: '{tf_parent}' → '{tf_child}' …")
-        ts_tf, trans_tf, quat_tf = extract_tf(
-            reader, typestore, tf_parent, tf_child)
+        ts_tf, trans_tf, quat_tf = extract_tf(reader, typestore, tf_parent, tf_child)
 
         if len(ts_tf) == 0:
             print(
@@ -293,7 +305,7 @@ def convert(
             )
 
         # ── RGB + depth messages ─────────────────────────────────────────
-        rgb_conns   = [c for c in reader.connections if c.topic == rgb_topic]
+        rgb_conns = [c for c in reader.connections if c.topic == rgb_topic]
         depth_conns = [c for c in reader.connections if c.topic == depth_topic]
 
         if not rgb_conns:
@@ -306,7 +318,7 @@ def convert(
         depth_cache: dict[float, np.ndarray] = {}
         for conn, ts_ns, raw in reader.messages(connections=depth_conns):
             msg = typestore.deserialize_cdr(raw, conn.msgtype)
-            ts  = stamp_to_sec(msg.header.stamp)
+            ts = stamp_to_sec(msg.header.stamp)
             depth_cache[ts] = msg_to_depth_mm(msg, max_depth_mm)
 
         depth_ts_arr = np.array(sorted(depth_cache.keys()))
@@ -319,15 +331,14 @@ def convert(
         print("  Processing RGB frames …")
         rgb_iter = reader.messages(connections=rgb_conns)
 
-        for frame_idx, (conn, ts_ns, raw) in enumerate(
-                tqdm(rgb_iter, unit="frame")):
+        for frame_idx, (conn, ts_ns, raw) in enumerate(tqdm(rgb_iter, unit="frame")):
 
             if frame_idx % (skip + 1) != 0:
                 skipped += 1
                 continue
 
             msg = typestore.deserialize_cdr(raw, conn.msgtype)
-            ts  = stamp_to_sec(msg.header.stamp)
+            ts = stamp_to_sec(msg.header.stamp)
             ts_str = f"{ts:.4f}"
 
             # ── RGB image ────────────────────────────────────────────────
@@ -340,18 +351,16 @@ def convert(
             # ── Sync depth: find nearest depth frame ─────────────────────
             if len(depth_ts_arr) > 0:
                 nearest_idx = np.argmin(np.abs(depth_ts_arr - ts))
-                nearest_ts  = depth_ts_arr[nearest_idx]
-                if abs(nearest_ts - ts) > 0.05:   # 50 ms tolerance
-                    continue                        # no depth match
+                nearest_ts = depth_ts_arr[nearest_idx]
+                if abs(nearest_ts - ts) > 0.05:  # 50 ms tolerance
+                    continue  # no depth match
                 depth_frame = depth_cache[nearest_ts]
             else:
-                depth_frame = np.zeros((bgr.shape[0], bgr.shape[1]),
-                                       dtype=np.uint16)
+                depth_frame = np.zeros((bgr.shape[0], bgr.shape[1]), dtype=np.uint16)
 
             # ── Camera pose from TF ───────────────────────────────────────
             if len(ts_tf) > 0:
-                pose = interpolate_pose(
-                    ts, ts_tf, trans_tf, quat_tf, max_interp_gap)
+                pose = interpolate_pose(ts, ts_tf, trans_tf, quat_tf, max_interp_gap)
             else:
                 pose = None
 
@@ -361,8 +370,7 @@ def convert(
 
             tx, ty, tz, qx, qy, qz, qw = pose
             pose_lines.append(
-                f"{ts_str} {tx:.6f} {ty:.6f} {tz:.6f} "
-                f"{qx:.6f} {qy:.6f} {qz:.6f} {qw:.6f}"
+                f"{ts_str} {tx:.6f} {ty:.6f} {tz:.6f} " f"{qx:.6f} {qy:.6f} {qz:.6f} {qw:.6f}"
             )
 
             # ── Save frames ───────────────────────────────────────────────
@@ -388,9 +396,11 @@ def convert(
     print(f"    main.scene_id:     {output_dir.name}")
     print("  Then run:")
     print("    cd fsr_vln/")
-    print("    python application/semantic_scene_reconstrucion_offline/"
-          "semantic_scene_reconstruction.py "
-          "--config-name=semantic_scene_reconstruction_custom")
+    print(
+        "    python application/semantic_scene_reconstrucion_offline/"
+        "semantic_scene_reconstruction.py "
+        "--config-name=semantic_scene_reconstruction_custom"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -398,22 +408,21 @@ def convert(
 # ---------------------------------------------------------------------------
 
 _DEFAULTS = {
-    "rgb_topic":          "/camera/color/image_raw",
-    "depth_topic":        "/camera/depth/image_rect_raw",
-    "camera_info_topic":  "/camera/color/camera_info",
-    "tf_parent":          "map",
-    "tf_child":           "camera_color_optical_frame",
-    "fx":                 615.0,
-    "fy":                 615.0,
-    "cx":                 320.0,
-    "cy":                 240.0,
-    "width":              640,
-    "height":             480,
-    "skip":               0,
-    "max_depth_mm":       10000,
-    "max_interp_gap":     0.1,
+    "rgb_topic": "/camera/color/image_raw",
+    "depth_topic": "/camera/depth/image_rect_raw",
+    "camera_info_topic": "/camera/color/camera_info",
+    "tf_parent": "map",
+    "tf_child": "camera_color_optical_frame",
+    "fx": 615.0,
+    "fy": 615.0,
+    "cx": 320.0,
+    "cy": 240.0,
+    "width": 640,
+    "height": 480,
+    "skip": 0,
+    "max_depth_mm": 10000,
+    "max_interp_gap": 0.1,
 }
-
 
 
 def load_config(config_path: str) -> dict:

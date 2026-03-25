@@ -37,14 +37,8 @@ class PanopticLevelEval(PanopticLevel):
 
 class PanopticRegionEval(PanopticRegion):
     def __init__(
-            self,
-            region_id,
-            floor_id,
-            category,
-            voted_category,
-            min_height,
-            max_height,
-            mean_height):
+        self, region_id, floor_id, category, voted_category, min_height, max_height, mean_height
+    ):
         self.id = region_id
         self.floor_id = floor_id
         self.voted_category = voted_category
@@ -116,13 +110,11 @@ class HM3DSemanticEvaluator:
 
         for level_info in scene_info["levels"]:
             level_id = level_info["id"]
-            floor = PanopticLevelEval(
-                level_id, level_info["lower"], level_info["upper"])
+            floor = PanopticLevelEval(level_id, level_info["lower"], level_info["upper"])
             floor.regions = level_info["regions"]
             floor.objects = level_info["objects"]
 
-            self.gt_graph.add_node(
-                floor, name=f"floor_{level_id}", type="floor")
+            self.gt_graph.add_node(floor, name=f"floor_{level_id}", type="floor")
             self.gt_graph.add_edge(building, floor)
             self.gt_floors[floor.id] = floor
 
@@ -139,8 +131,7 @@ class HM3DSemanticEvaluator:
             room.graph_id = f"{room.floor_id}_{room.id}"
             room.bev_region_points = np.array(region_info["bev_region_points"])
             room.bev_pcd = o3d.geometry.PointCloud()
-            room.bev_pcd.points = o3d.utility.Vector3dVector(
-                room.bev_region_points)
+            room.bev_pcd.points = o3d.utility.Vector3dVector(room.bev_region_points)
             room.objects = region_info["objects"]
 
             print(room)
@@ -155,7 +146,8 @@ class HM3DSemanticEvaluator:
                 obj_info["region_id"],
                 obj_info["floor_id"],
                 obj_info["category"],
-                obj_info["hex"])
+                obj_info["hex"],
+            )
             obj.aabb_center, obj.aabb_dims = obj_info["aabb_center"], obj_info["aabb_dims"]
             obj.obb_center, obj.obb_dims = obj_info["obb_center"], obj_info["obb_dims"]
             obj.obb_rotation = obj_info["obb_rotation"]
@@ -167,9 +159,8 @@ class HM3DSemanticEvaluator:
             # load points from object pcd under self.gt_scene_infos_path +
             # "/objects"
             obj_pcd_path = os.path.join(
-                os.path.dirname(
-                    self.gt_scene_infos_path), "objects", str(
-                    obj_info["id"]) + ".ply")
+                os.path.dirname(self.gt_scene_infos_path), "objects", str(obj_info["id"]) + ".ply"
+            )
             obj.pcd = o3d.io.read_point_cloud(obj_pcd_path)
             obj.points = np.asarray(obj.pcd.points)
 
@@ -179,12 +170,18 @@ class HM3DSemanticEvaluator:
 
         print("----------------------------")
         print("GT graph loaded:")
-        print("Number of GT floors: ", len(
-            [node for node in self.gt_graph.nodes if node.type == "floor"]))
-        print("Number of GT rooms: ", len(
-            [node for node in self.gt_graph.nodes if node.type == "room"]))
-        print("Number of GT objects: ", len(
-            [node for node in self.gt_graph.nodes if node.type == "object"]))
+        print(
+            "Number of GT floors: ",
+            len([node for node in self.gt_graph.nodes if node.type == "floor"]),
+        )
+        print(
+            "Number of GT rooms: ",
+            len([node for node in self.gt_graph.nodes if node.type == "room"]),
+        )
+        print(
+            "Number of GT objects: ",
+            len([node for node in self.gt_graph.nodes if node.type == "object"]),
+        )
         print("----------------------------")
 
     def get_results(self):
@@ -193,47 +190,39 @@ class HM3DSemanticEvaluator:
     def evaluate_floors(self, pred_graph):
         """Evaluate the floor prediction by comparing low an upper bounds of
         the predicted floor with the ground truth floor."""
-        gt_floors = [
-            node for node in self.gt_graph.nodes if node.type == "floor"]
-        pred_floors = [
-            node for node in pred_graph.nodes if isinstance(
-                node, Floor)]
+        gt_floors = [node for node in self.gt_graph.nodes if node.type == "floor"]
+        pred_floors = [node for node in pred_graph.nodes if isinstance(node, Floor)]
 
         gt_floors_bounds = []
         for gt_floor in gt_floors:
             gt_floors_bounds.append([gt_floor.lower, gt_floor.upper])
         gt_floors_bounds = sorted([y for x in gt_floors_bounds for y in x])
 
-        gt_floors_bounds_ = [(gt_floors_bounds[i] +
-                              gt_floors_bounds[i +
-                                               1]) /
-                             2 for i in range(1, len(gt_floors_bounds) -
-                             1, 2)]
-        gt_floors_bounds = [gt_floors_bounds[0]] + \
-            gt_floors_bounds_ + [gt_floors_bounds[-1]]
+        gt_floors_bounds_ = [
+            (gt_floors_bounds[i] + gt_floors_bounds[i + 1]) / 2
+            for i in range(1, len(gt_floors_bounds) - 1, 2)
+        ]
+        gt_floors_bounds = [gt_floors_bounds[0]] + gt_floors_bounds_ + [gt_floors_bounds[-1]]
 
         pred_floors_bounds = []
         for pred_floor in pred_floors:
-            pred_floor_center, pred_floor_dims = find_box_center_and_dims(
-                pred_floor.vertices)
+            pred_floor_center, pred_floor_dims = find_box_center_and_dims(pred_floor.vertices)
             pred_floor_y_bounds = [
                 pred_floor_center[1] - pred_floor_dims[1] / 2,
                 pred_floor_center[1] + pred_floor_dims[1] / 2,
             ]
             pred_floors_bounds.append(pred_floor_y_bounds)
         pred_floors_bounds = sorted([y for x in pred_floors_bounds for y in x])
-        pred_floors_bounds_ = [(pred_floors_bounds[i] +
-                                pred_floors_bounds[i +
-                                                   1]) /
-                               2 for i in range(1, len(pred_floors_bounds) -
-                                                1, 2)]
-        pred_floors_bounds = [pred_floors_bounds[0]] + \
-            pred_floors_bounds_ + [pred_floors_bounds[-1]]
+        pred_floors_bounds_ = [
+            (pred_floors_bounds[i] + pred_floors_bounds[i + 1]) / 2
+            for i in range(1, len(pred_floors_bounds) - 1, 2)
+        ]
+        pred_floors_bounds = (
+            [pred_floors_bounds[0]] + pred_floors_bounds_ + [pred_floors_bounds[-1]]
+        )
 
         # calc distance between each gt floor and each openmap floor
-        dist = np.abs(
-            np.array(gt_floors_bounds) -
-            np.array(pred_floors_bounds))
+        dist = np.abs(np.array(gt_floors_bounds) - np.array(pred_floors_bounds))
 
         TP, TN, FP, FN = 0, 0, 0, 0
         floor_dist_threshold = 0.5
@@ -245,8 +234,7 @@ class HM3DSemanticEvaluator:
 
         precision = TP / (TP + FP) if (TP + FP) > 0 else 0
         recall = TP / (TP + FN) if (TP + FN) > 0 else 0
-        accuracy = (TP + TN) / (TP + TN + FP +
-                                FN) if (TP + TN + FP + FN) > 0 else 0
+        accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
 
         print("----- Floor Evaluation -----")
         floor_metrics = {
@@ -256,7 +244,8 @@ class HM3DSemanticEvaluator:
             "fn": FN,
             "acc": accuracy,
             "prec": precision,
-            "recall": recall}
+            "recall": recall,
+        }
         self.metrics["floors"] = floor_metrics
         for k, v in floor_metrics.items():
             print("{}: {}".format(k, v))
@@ -265,13 +254,9 @@ class HM3DSemanticEvaluator:
     def evaluate_rooms(self, pred_graph):
         """Evaluate the room prediction by comparing 3D IoU of the predicted
         room with the ground truth room."""
-        gt_floors = [
-            node for node in self.gt_graph.nodes if node.type == "floor"]
-        gt_rooms = [
-            node for node in self.gt_graph.nodes if node.type == "room"]
-        pred_rooms = [
-            node for node in pred_graph.nodes if isinstance(
-                node, Room)]
+        gt_floors = [node for node in self.gt_graph.nodes if node.type == "floor"]
+        gt_rooms = [node for node in self.gt_graph.nodes if node.type == "room"]
+        pred_rooms = [node for node in pred_graph.nodes if isinstance(node, Room)]
 
         # find openmap room corresponding to each gt room based on distance
         # between centers
@@ -282,24 +267,27 @@ class HM3DSemanticEvaluator:
                     for pred_room in pred_rooms:
                         pred_room_points = np.asarray(pred_room.pcd.points)
                         pred_mean_height = pred_room.room_zero_level + pred_room.room_height / 2
-                        if pred_mean_height > gt_room.min_height and pred_mean_height < gt_room.max_height:
+                        if (
+                            pred_mean_height > gt_room.min_height
+                            and pred_mean_height < gt_room.max_height
+                        ):
                             pred_room.bev_pcd = o3d.geometry.PointCloud()
                             # overwrite this to get planes on same height
                             pred_room_points[:, 1] = gt_room.min_height
-                            pred_room.bev_pcd.points = o3d.utility.Vector3dVector(
-                                pred_room_points)
-                            gt_room.bev_pcd = gt_room.bev_pcd.voxel_down_sample(
-                                voxel_size=0.05)
+                            pred_room.bev_pcd.points = o3d.utility.Vector3dVector(pred_room_points)
+                            gt_room.bev_pcd = gt_room.bev_pcd.voxel_down_sample(voxel_size=0.05)
                             pred_room.bev_pcd = pred_room.bev_pcd.voxel_down_sample(
-                                voxel_size=0.05)
+                                voxel_size=0.05
+                            )
                             overlap = find_overlapping_ratio_faiss(
-                                pred_room.bev_pcd, gt_room.bev_pcd, 0.05)
+                                pred_room.bev_pcd, gt_room.bev_pcd, 0.05
+                            )
 
-                            room_association_matrix[pred_rooms.index(
-                                pred_room)][gt_rooms.index(gt_room)] = overlap
+                            room_association_matrix[pred_rooms.index(pred_room)][
+                                gt_rooms.index(gt_room)
+                            ] = overlap
 
-        hydra_room_overlap_over_pred = np.zeros(
-            (len(pred_rooms), len(gt_rooms)))
+        hydra_room_overlap_over_pred = np.zeros((len(pred_rooms), len(gt_rooms)))
         hydra_room_overlap_over_gt = np.zeros((len(pred_rooms), len(gt_rooms)))
         for gt_floor in gt_floors:
             for gt_room in gt_rooms:
@@ -307,32 +295,40 @@ class HM3DSemanticEvaluator:
                     for pred_room in pred_rooms:
                         pred_room_points = np.asarray(pred_room.pcd.points)
                         pred_mean_height = pred_room.room_zero_level + pred_room.room_height / 2
-                        if pred_mean_height > gt_room.min_height and pred_mean_height < gt_room.max_height:
+                        if (
+                            pred_mean_height > gt_room.min_height
+                            and pred_mean_height < gt_room.max_height
+                        ):
                             pred_room.bev_pcd = o3d.geometry.PointCloud()
                             # overwrite this to get planes on same height
                             pred_room_points[:, 1] = gt_room.min_height
-                            pred_room.bev_pcd.points = o3d.utility.Vector3dVector(
-                                pred_room_points)
+                            pred_room.bev_pcd.points = o3d.utility.Vector3dVector(pred_room_points)
                             pred_room.bev_pcd.colors = o3d.utility.Vector3dVector(
                                 np.array([[0, 0, 1] for i in range(len(pred_room.bev_pcd.points))])
                             )
                             gt_room.bev_pcd.colors = o3d.utility.Vector3dVector(
                                 np.array([[1, 0, 0] for i in range(len(gt_room.bev_pcd.points))])
                             )
-                            gt_room.bev_pcd = gt_room.bev_pcd.voxel_down_sample(
-                                voxel_size=0.05)
+                            gt_room.bev_pcd = gt_room.bev_pcd.voxel_down_sample(voxel_size=0.05)
                             pred_room.bev_pcd = pred_room.bev_pcd.voxel_down_sample(
-                                voxel_size=0.05)
+                                voxel_size=0.05
+                            )
                             overlap_over_pred = min(
                                 find_intersection_share(
-                                    np.asarray(
-                                        gt_room.bev_pcd.points), np.asarray(
-                                        pred_room.bev_pcd.points), 0.05), 1.0, )
+                                    np.asarray(gt_room.bev_pcd.points),
+                                    np.asarray(pred_room.bev_pcd.points),
+                                    0.05,
+                                ),
+                                1.0,
+                            )
                             overlap_over_gt = min(
                                 find_intersection_share(
-                                    np.asarray(
-                                        pred_room.bev_pcd.points), np.asarray(
-                                        gt_room.bev_pcd.points), 0.05), 1.0, )
+                                    np.asarray(pred_room.bev_pcd.points),
+                                    np.asarray(gt_room.bev_pcd.points),
+                                    0.05,
+                                ),
+                                1.0,
+                            )
                             hydra_room_overlap_over_pred[pred_rooms.index(pred_room)][
                                 gt_rooms.index(gt_room)
                             ] = overlap_over_pred
@@ -356,24 +352,20 @@ class HM3DSemanticEvaluator:
         hydra_recall = hydra_recall / len(gt_rooms)
 
         # calculate TP, FP, FN for rooms
-        row_ind, col_ind = linear_sum_assignment(
-            room_association_matrix, maximize=True)
+        row_ind, col_ind = linear_sum_assignment(room_association_matrix, maximize=True)
         acc_values = list()
         prec_values = list()
         rec_values = list()
-        for eval_idx, thresh in enumerate(
-                np.linspace(0.0, 1.0, 11, endpoint=True)):
+        for eval_idx, thresh in enumerate(np.linspace(0.0, 1.0, 11, endpoint=True)):
             TP, TN, FP, FN = 0, 0, 0, 0
             iou_threshold = thresh
-            TP = np.sum(
-                room_association_matrix[row_ind, col_ind] > iou_threshold)
+            TP = np.sum(room_association_matrix[row_ind, col_ind] > iou_threshold)
             FP = len(pred_rooms) - TP
             FN = len(gt_rooms) - TP
 
             precision = TP / (TP + FP) if (TP + FP) > 0 else 0
             recall = TP / (TP + FN) if (TP + FN) > 0 else 0
-            accuracy = (TP + TN) / (TP + TN + FP +
-                                    FN) if (TP + TN + FP + FN) > 0 else 0
+            accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
 
             acc_values.append(accuracy)
             prec_values.append(precision)
@@ -398,95 +390,68 @@ class HM3DSemanticEvaluator:
             print("{}: {}".format(k, v))
         print("----------------------------")
 
-    def evaluate_objects(
-            self,
-            eval_metric,
-            pred_graph,
-            gt_classes,
-            gt_text_feats):
+    def evaluate_objects(self, eval_metric, pred_graph, gt_classes, gt_text_feats):
         """Evaluate the object prediction by comparing 3D IoU of the predicted
         object with the ground truth object."""
-        object_metrics = {
-            "instances": {},
-            "instances_iou50": {},
-            "ins_semantics": {}}
+        object_metrics = {"instances": {}, "instances_iou50": {}, "ins_semantics": {}}
         self.metrics["objects"] = object_metrics
         print("----- Object Evaluation ------")
 
         gt_objects = [
-            node for node,
-            n_data in self.gt_graph.nodes(
-                data=True) if (
-                node.type == "object")]
-        pred_objects = [
-            node for node in pred_graph.nodes if (
-                isinstance(
-                    node, Object))]
+            node for node, n_data in self.gt_graph.nodes(data=True) if (node.type == "object")
+        ]
+        pred_objects = [node for node in pred_graph.nodes if (isinstance(node, Object))]
 
         # Evaluation of class-agnostic instance segmentation on point clouds
         # find openmap object corresponding to each gt object based on distance
         # between centers
         obj_iou_assoc_matrix = np.zeros((len(pred_objects), len(gt_objects)))
-        obj_overlap_assoc_matrix = np.zeros(
-            (len(pred_objects), len(gt_objects)))
+        obj_overlap_assoc_matrix = np.zeros((len(pred_objects), len(gt_objects)))
 
         for gt_obj in gt_objects:
             gt_obj_center = gt_obj.obb_center
             gt_obj_dims = gt_obj.obb_dims
 
-            gt_obj_bbox = np.array(
-                gt_obj.pcd.get_axis_aligned_bounding_box().get_box_points())
+            gt_obj_bbox = np.array(gt_obj.pcd.get_axis_aligned_bounding_box().get_box_points())
             for pred_obj in pred_objects:
                 pred_obj_bbox = np.array(
-                    pred_obj.pcd.get_axis_aligned_bounding_box().get_box_points())
-                pred_obj_center, pred_obj_dims = find_box_center_and_dims(
-                    pred_obj_bbox)
+                    pred_obj.pcd.get_axis_aligned_bounding_box().get_box_points()
+                )
+                pred_obj_center, pred_obj_dims = find_box_center_and_dims(pred_obj_bbox)
 
-                iou = get_3d_iou(
-                    gt_obj_center,
-                    gt_obj_dims,
-                    pred_obj_center,
-                    pred_obj_dims)
-                obj_iou_assoc_matrix[pred_objects.index(
-                    pred_obj)][gt_objects.index(gt_obj)] = iou
+                iou = get_3d_iou(gt_obj_center, gt_obj_dims, pred_obj_center, pred_obj_dims)
+                obj_iou_assoc_matrix[pred_objects.index(pred_obj)][gt_objects.index(gt_obj)] = iou
 
                 overlap = 0.0
                 if iou > 0.0:
-                    overlap = find_overlapping_ratio_faiss(
-                        pred_obj.pcd, gt_obj.pcd, 0.02)
-                    obj_overlap_assoc_matrix[pred_objects.index(
-                        pred_obj)][gt_objects.index(gt_obj)] = overlap
+                    overlap = find_overlapping_ratio_faiss(pred_obj.pcd, gt_obj.pcd, 0.02)
+                    obj_overlap_assoc_matrix[pred_objects.index(pred_obj)][
+                        gt_objects.index(gt_obj)
+                    ] = overlap
 
         if eval_metric == "iou":
-            row_ind, col_ind = linear_sum_assignment(
-                obj_iou_assoc_matrix, maximize=True)
+            row_ind, col_ind = linear_sum_assignment(obj_iou_assoc_matrix, maximize=True)
         elif eval_metric == "overlap":
-            row_ind, col_ind = linear_sum_assignment(
-                obj_overlap_assoc_matrix, maximize=True)
+            row_ind, col_ind = linear_sum_assignment(obj_overlap_assoc_matrix, maximize=True)
 
         acc_values = list()
         prec_values = list()
         rec_values = list()
-        for eval_idx, thresh in enumerate(
-                np.linspace(0.0, 1.0, 11, endpoint=True)):
+        for eval_idx, thresh in enumerate(np.linspace(0.0, 1.0, 11, endpoint=True)):
             TP, TN, FP, FN = 0, 0, 0, 0
             TP = np.sum(obj_overlap_assoc_matrix[row_ind, col_ind] > thresh)
             FP = len(pred_objects) - TP
             FN = len(gt_objects) - TP
             precision = TP / (TP + FP) if (TP + FP) > 0 else 0
             recall = TP / (TP + FN) if (TP + FN) > 0 else 0
-            accuracy = (TP + TN) / (TP + TN + FP +
-                                    FN) if (TP + TN + FP + FN) > 0 else 0
+            accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
             acc_values.append(accuracy)
             prec_values.append(precision)
             rec_values.append(recall)
         rec_values.sort()
         avg_prec = np.trapz(prec_values, rec_values)
 
-        obj_instance_metrics = {
-            "ap": avg_prec,
-            "gt": len(gt_objects),
-            "pred": len(pred_objects)}
+        obj_instance_metrics = {"ap": avg_prec, "gt": len(gt_objects), "pred": len(pred_objects)}
         self.metrics["objects"]["instances"] = obj_instance_metrics
         print("- - - - - - - - - - - - - - - ")
         print("Object Instance Evaluation:")
@@ -502,8 +467,7 @@ class HM3DSemanticEvaluator:
 
         precision = TP / (TP + FP) if (TP + FP) > 0 else 0
         recall = TP / (TP + FN) if (TP + FN) > 0 else 0
-        accuracy = (TP + TN) / (TP + TN + FP +
-                                FN) if (TP + TN + FP + FN) > 0 else 0
+        accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
 
         obj_instance_iou50_metrics = {
             "acc": accuracy,
@@ -555,14 +519,8 @@ class HM3DSemanticEvaluator:
         print("- - - - - - - - - - - - - - - ")
 
     def object_semantics_eval_tp_auc(
-            self,
-            top_k_spec,
-            row_ind,
-            col_ind,
-            pred_objects,
-            gt_objects,
-            gt_text_feats,
-            gt_classes):
+        self, top_k_spec, row_ind, col_ind, pred_objects, gt_objects, gt_text_feats, gt_classes
+    ):
         success_k = {k: list() for k in top_k_spec}
         for pred_idx, gt_idx in zip(row_ind, col_ind):
             # dot_sim = np.dot(pred_objects[pred_idx].embedding, gt_text_feats.T)

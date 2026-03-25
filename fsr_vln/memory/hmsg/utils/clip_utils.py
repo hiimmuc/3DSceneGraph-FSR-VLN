@@ -106,12 +106,7 @@ def get_imgs_feats(raw_imgs, preprocess, clip_model, clip_feat_dim):
     return imgs_feats
 
 
-def get_imgs_feats_batch(
-        raw_imgs,
-        preprocess,
-        clip_model,
-        clip_feat_dim,
-        batch_size=64):
+def get_imgs_feats_batch(raw_imgs, preprocess, clip_model, clip_feat_dim, batch_size=64):
     """Get the image features from the CLIP model for a list of images :param
     raw_imgs (list): the images to get the features from :param preprocess
     (torchvision.transforms): the preprocessing function :param clip_model
@@ -132,10 +127,7 @@ def get_imgs_feats_batch(
                 batch_feats = clip_model.encode_image(img_batch.cuda()).float()
             batch_feats /= batch_feats.norm(dim=-1, keepdim=True)
             batch_feats = np.float32(batch_feats.cpu())
-            imgs_feats[img_id -
-                       len(img_batch) +
-                       1: img_id +
-                       1, :] = batch_feats
+            imgs_feats[img_id - len(img_batch) + 1 : img_id + 1, :] = batch_feats
             img_batch = []
     return imgs_feats
 
@@ -152,21 +144,17 @@ def get_text_feats(in_text, clip_model, clip_feat_dim, batch_size=64):
     text_feats = np.zeros((len(in_text), clip_feat_dim), dtype=np.float32)
     while text_id < len(text_tokens):  # Batched inference.
         batch_size = min(len(in_text) - text_id, batch_size)
-        text_batch = text_tokens[text_id: text_id + batch_size]
+        text_batch = text_tokens[text_id : text_id + batch_size]
         with torch.no_grad():
             batch_feats = clip_model.encode_text(text_batch).float()
         batch_feats /= batch_feats.norm(dim=-1, keepdim=True)
         batch_feats = np.float32(batch_feats.cpu())
-        text_feats[text_id: text_id + batch_size, :] = batch_feats
+        text_feats[text_id : text_id + batch_size, :] = batch_feats
         text_id += batch_size
     return text_feats
 
 
-def get_text_feats_62_templates(
-        in_text,
-        clip_model,
-        clip_feat_dim,
-        batch_size=64):
+def get_text_feats_62_templates(in_text, clip_model, clip_feat_dim, batch_size=64):
     """
     Get the text features from the CLIP model with 62 templates :param in_text
     (list): the text to get the features from :param clip_model (CLIP):
@@ -241,24 +229,16 @@ def get_text_feats_62_templates(
         "a painting of a {}.",
     ]
     mul_tmp = multiple_templates.copy()
-    multi_temp_landmarks_other = [
-        x.format(lm) for lm in in_text for x in mul_tmp]
+    multi_temp_landmarks_other = [x.format(lm) for lm in in_text for x in mul_tmp]
     # format the text with multiple templates except for "background"
-    text_feats = get_text_feats(
-        multi_temp_landmarks_other,
-        clip_model,
-        clip_feat_dim)
+    text_feats = get_text_feats(multi_temp_landmarks_other, clip_model, clip_feat_dim)
     # average the features
     text_feats = text_feats.reshape((-1, len(mul_tmp), text_feats.shape[-1]))
     text_feats = np.mean(text_feats, axis=1)
     return text_feats
 
 
-def get_text_feats_multiple_templates(
-        in_text,
-        clip_model,
-        clip_feat_dim,
-        batch_size=64):
+def get_text_feats_multiple_templates(in_text, clip_model, clip_feat_dim, batch_size=64):
     """
     Get the text features from the CLIP model with text templates :param
     in_text (list): the text to get the features from :param clip_model (CLIP):
@@ -334,13 +314,9 @@ def get_text_feats_multiple_templates(
         # "a painting of a {}.",
     ]
     mul_tmp = multiple_templates.copy()
-    multi_temp_landmarks_other = [
-        x.format(lm) for lm in in_text for x in mul_tmp]
+    multi_temp_landmarks_other = [x.format(lm) for lm in in_text for x in mul_tmp]
     # format the text with multiple templates except for "background"
-    text_feats = get_text_feats(
-        multi_temp_landmarks_other,
-        clip_model,
-        clip_feat_dim)
+    text_feats = get_text_feats(multi_temp_landmarks_other, clip_model, clip_feat_dim)
     # import pdb; pdb.set_trace()
     # average the features
     text_feats = text_feats.reshape((-1, len(mul_tmp), text_feats.shape[-1]))

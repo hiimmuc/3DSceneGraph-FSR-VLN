@@ -34,8 +34,7 @@ class HM3DSemDataset(RGBDDataset):
         self.data_list = self._get_data_list()
         self.rgb_H = self._load_image(self.data_list[0][0]).size[1]
         self.rgb_W = self._load_image(self.data_list[0][0]).size[0]
-        self.depth_intrinsics = self._load_depth_intrinsics(
-            self.rgb_H, self.rgb_W)
+        self.depth_intrinsics = self._load_depth_intrinsics(self.rgb_H, self.rgb_W)
         self.camera_matrix = self.depth_intrinsics
         self.scale = 1000.0
 
@@ -76,10 +75,7 @@ class HM3DSemDataset(RGBDDataset):
         rgb_data_list = [self.root_dir + "/rgb/" + x for x in rgb_data_list]
         self.frameId2imgPath = rgb_data_list
         depth_data_list = os.listdir(self.root_dir + "/depth")
-        depth_data_list = [
-            self.root_dir +
-            "/depth/" +
-            x for x in depth_data_list]
+        depth_data_list = [self.root_dir + "/depth/" + x for x in depth_data_list]
         pose_data_list = os.listdir(self.root_dir + "/pose")
         pose_data_list = [self.root_dir + "/pose/" + x for x in pose_data_list]
         # sort the data list
@@ -150,8 +146,7 @@ class HM3DSemDataset(RGBDDataset):
         fy = H / (2.0 * np.tan(vfov / 2.0))
         cx = W / 2
         cy = H / 2
-        depth_camera_matrix = np.array(
-            [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
+        depth_camera_matrix = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
         return depth_camera_matrix
 
     def create__pcd(self, rgb, depth, camera_pose=None):
@@ -185,8 +180,7 @@ class HM3DSemDataset(RGBDDataset):
         Y = (y - camera_matrix[1, 2]) * depth / camera_matrix[1, 1]
         Z = depth
         # convert to open3d point cloud
-        points = np.hstack(
-            (X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
+        points = np.hstack((X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         colors = rgb[mask]

@@ -2,8 +2,8 @@ main:
     device: cuda
     use_gpt: false
     dataset: horizon #scannet # hm3dsem #replica #iphone
-    scene_id: rosbag2_2026_03_11-14_26_05
-    dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/dataset_converted
+    scene_id: dataset_converted
+    dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/
     depth_cut: 6.0
     save_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/outputs/built_graphs
 models:

@@ -34,10 +34,7 @@ class Floor:
         """Save the floor in folder as ply for the point cloud and json for the
         metadata."""
         # save the point cloud
-        o3d.io.write_point_cloud(
-            os.path.join(
-                path, str(
-                    self.floor_id) + ".ply"), self.pcd)
+        o3d.io.write_point_cloud(os.path.join(path, str(self.floor_id) + ".ply"), self.pcd)
         # save the metadata
         metadata = {
             "floor_id": self.floor_id,
@@ -54,8 +51,7 @@ class Floor:
         """Load the floor from folder as ply for the point cloud and json for
         the metadata."""
         # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            path + "/" + str(self.floor_id) + ".ply")
+        self.pcd = o3d.io.read_point_cloud(path + "/" + str(self.floor_id) + ".ply")
         # load the metadata
         with open(path + "/" + str(self.floor_id) + ".json") as json_file:
             metadata = json.load(json_file)

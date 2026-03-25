@@ -19,13 +19,12 @@ def filter_masks(masks):
             if i == j:
                 continue
             # check if mask i contain mask j by anding them
-            anded = np.logical_and(
-                masks[i]["segmentation"],
-                masks[j]["segmentation"])
+            anded = np.logical_and(masks[i]["segmentation"], masks[j]["segmentation"])
             if np.all(anded == masks[j]["segmentation"]):
                 # subtract mask j from mask i
                 masks[i]["segmentation"] = np.logical_xor(
-                    masks[i]["segmentation"], masks[j]["segmentation"])
+                    masks[i]["segmentation"], masks[j]["segmentation"]
+                )
                 masks[i]["area"] = np.sum(masks[i]["segmentation"])
 
     # remove empty masks
@@ -82,15 +81,8 @@ def increase_bbox_by_margin(bbox, margin):
 
 
 def draw_all_bounding_boxs(
-        image,
-        masks,
-        iou_threshold=0.89,
-        color=(
-            0,
-            255,
-            0),
-    thickness=2,
-        bbox_margin=0):
+    image, masks, iou_threshold=0.89, color=(0, 255, 0), thickness=2, bbox_margin=0
+):
     """
     Draws and crop bounding boxs on the given image using the provided XYWH
     format bbox.
@@ -116,11 +108,7 @@ def draw_all_bounding_boxs(
     return bbox_image
 
 
-def crop_all_bounding_boxs(
-        image,
-        masks,
-        block_background=False,
-        bbox_margin=0):
+def crop_all_bounding_boxs(image, masks, block_background=False, bbox_margin=0):
     """
     Draws and crop bounding boxs on the given image using the provided XYWH
     format bbox.
@@ -158,7 +146,7 @@ def crop_image(image, mask):
     x, y, w, h = mask["bbox"]
     masked = image * np.expand_dims(mask["segmentation"], -1)
     x, y, w, h = int(x), int(y), int(w), int(h)
-    crop = masked[y: y + h, x: x + w, :]
+    crop = masked[y : y + h, x : x + w, :]
     return crop
 
 
@@ -177,7 +165,7 @@ def crop_bbox(image, bbox, bbox_margin=0):
     x, y, w, h = increase_bbox_by_margin(bbox, bbox_margin)
     # make x, y, w, h positive and not bigger than the image size and int
     x, y, w, h = int(x), int(y), int(w), int(h)
-    crop = image[y: y + h, x: x + w]
+    crop = image[y : y + h, x : x + w]
     return crop
 
 

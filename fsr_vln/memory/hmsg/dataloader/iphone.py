@@ -1,4 +1,3 @@
-
 import os
 import numpy as np
 from PIL import Image
@@ -35,11 +34,11 @@ class IPhoneDataset(RGBDDataset):
         camera_config_path = "orbslam3_rgbd.yaml"
         if os.path.exists(camera_config_path):
             self.rgb_intrinsics, self.depth_intrinsics = self.load_camera_params(
-                os.path.join(self.root_dir, camera_config_path))
+                os.path.join(self.root_dir, camera_config_path)
+            )
             self.frames = None
         else:
-            self.frames = self.load_camera_config(
-                os.path.join(self.root_dir, "transforms.json"))
+            self.frames = self.load_camera_config(os.path.join(self.root_dir, "transforms.json"))
 
         self.scale = 1000.0
         print("self.root_dir: ", self.root_dir)
@@ -91,61 +90,53 @@ class IPhoneDataset(RGBDDataset):
             raise FileNotFoundError(f"Path is not a file: {json_path}")
 
         # Read configuration
-        with open(json_path, 'r') as f:
+        with open(json_path, "r") as f:
             config = json.load(f)
 
         # Parse data
         frames = []
         for idx, frame in enumerate(config["frames"]):
             # Use os.path to handle path
-            rgb_path = os.path.normpath(
-                frame["file_path"]).replace(
-                "images", "images_2")
-            depth_path = os.path.normpath(
-                frame.get(
-                    "depth_file_path",
-                    "")).replace(
-                "depth",
-                "depth_2")
+            rgb_path = os.path.normpath(frame["file_path"]).replace("images", "images_2")
+            depth_path = os.path.normpath(frame.get("depth_file_path", "")).replace(
+                "depth", "depth_2"
+            )
 
-            frames.append({
-                "K": [
-                    [frame["fl_x"] / 2, 0, frame["cx"] / 2],
-                    [0, frame["fl_y"] / 2, frame["cy"] / 2],
-                    [0, 0, 1]
-                ],
-                "image_size": (frame["w"] // 2, frame["h"] // 2),
-                "distortion": [
-                    frame.get("k1", 0),
-                    frame.get("k2", 0),
-                    frame.get("p1", 0),
-                    frame.get("p2", 0)
-                ],
-                "transform": frame["transform_matrix"],
-                "rgb_path": rgb_path,
-                "depth_path": depth_path
-            })
+            frames.append(
+                {
+                    "K": [
+                        [frame["fl_x"] / 2, 0, frame["cx"] / 2],
+                        [0, frame["fl_y"] / 2, frame["cy"] / 2],
+                        [0, 0, 1],
+                    ],
+                    "image_size": (frame["w"] // 2, frame["h"] // 2),
+                    "distortion": [
+                        frame.get("k1", 0),
+                        frame.get("k2", 0),
+                        frame.get("p1", 0),
+                        frame.get("p2", 0),
+                    ],
+                    "transform": frame["transform_matrix"],
+                    "rgb_path": rgb_path,
+                    "depth_path": depth_path,
+                }
+            )
 
         return frames
 
-    def load_camera_params(
-        self, config_path: str, camera_name: str = None
-    ) -> np.ndarray:
+    def load_camera_params(self, config_path: str, camera_name: str = None) -> np.ndarray:
 
         with open(config_path, "r") as file:
             config = yaml.safe_load(file)
 
         # load camera intrinsics
         K = np.eye(3)
-        if "Camera.fx" in config.keys() and isinstance(
-                config["Camera.fx"], set):
+        if "Camera.fx" in config.keys() and isinstance(config["Camera.fx"], set):
             K[0, 0] = next(iter(config["Camera.fx"]))
             K[1, 1] = next(iter(config["Camera.fy"]))
             K[0, 2] = next(iter(config["Camera.cx"]))
             K[1, 2] = next(iter(config["Camera.cy"]))
-            image_size = next(iter(config["Camera.width"])), next(
-                iter(config["Camera.height"])
-            )
+            image_size = next(iter(config["Camera.width"])), next(iter(config["Camera.height"]))
         else:
             K[0, 0] = config["Camera1.fx"]
             K[1, 1] = config["Camera1.fy"]
@@ -183,9 +174,7 @@ class IPhoneDataset(RGBDDataset):
             ts, tx, ty, tz, qx, qy, qz, qw = pose
             # Create rotation matrix from quaternion
             quat = [qx, qy, qz, qw]
-            rot_matrix = R.from_quat(
-                quat
-            ).as_matrix()  # Convert quaternion to 3x3 rotation matrix
+            rot_matrix = R.from_quat(quat).as_matrix()  # Convert quaternion to 3x3 rotation matrix
             # Create the homogeneous transformation matrix (4x4)
             T = np.eye(4)
             T[:3, :3] = rot_matrix  # Rotation part
@@ -221,7 +210,8 @@ class IPhoneDataset(RGBDDataset):
         # np.array([[1,0,0,-2.5],[0,0,1,0],[0,-1,0,2.5],[0,0,0,1]],
         # dtype=np.float64) scannet0518
         T_switch_axis = np.array(
-            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64)
+            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64
+        )
         pose = T_switch_axis @ pose
         rgb_image = self._load_image(rgb_path)
         depth_image = self._load_depth(depth_path)
@@ -288,13 +278,8 @@ class IPhoneDataset(RGBDDataset):
         return depth_image
 
     def create_pcd(
-            self,
-            rgb,
-            depth,
-            camera_pose=None,
-            idx=None,
-            mask_img=False,
-            filter_distance=np.inf):
+        self, rgb, depth, camera_pose=None, idx=None, mask_img=False, filter_distance=np.inf
+    ):
         """
         Create Open3D point cloud from RGB and depth images, and camera pose.
 
@@ -313,11 +298,7 @@ class IPhoneDataset(RGBDDataset):
         depth = np.array(depth)
         # resize rgb image to match depth image size if needed
         if rgb.shape[0] != depth.shape[0] or rgb.shape[1] != depth.shape[1]:
-            rgb = cv2.resize(
-                rgb,
-                (depth.shape[1],
-                 depth.shape[0]),
-                interpolation=cv2.INTER_AREA)
+            rgb = cv2.resize(rgb, (depth.shape[1], depth.shape[0]), interpolation=cv2.INTER_AREA)
         # load depth camera intrinsics
         H = rgb.shape[0]
         W = rgb.shape[1]
@@ -355,8 +336,7 @@ class IPhoneDataset(RGBDDataset):
         if Z.mean() > filter_distance:
             return o3d.geometry.PointCloud()
         # convert to open3d point cloud
-        points = np.hstack(
-            (X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
+        points = np.hstack((X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         if not mask_img:
@@ -367,15 +347,16 @@ class IPhoneDataset(RGBDDataset):
         return pcd
 
     def create_3d_masks(
-            self,
-            masks,
-            depth,
-            full_pcd,
-            full_pcd_tree,
-            camera_pose,
-            idx=None,
-            down_size=0.02,
-            filter_distance=None):
+        self,
+        masks,
+        depth,
+        full_pcd,
+        full_pcd_tree,
+        camera_pose,
+        idx=None,
+        down_size=0.02,
+        filter_distance=None,
+    ):
         """
         create 3d masks from 2D masks
         Args:
@@ -397,12 +378,8 @@ class IPhoneDataset(RGBDDataset):
             mask = np.array(mask)
             # create pcd from mask
             pcd_masked = self.create_pcd(
-                mask,
-                depth,
-                camera_pose,
-                idx=idx,
-                mask_img=True,
-                filter_distance=filter_distance)
+                mask, depth, camera_pose, idx=idx, mask_img=True, filter_distance=filter_distance
+            )
             # using KD-Tree to find the nearest points in the point cloud
             pcd_masked = np.asarray(pcd_masked.points)
             dist, indices = full_pcd_tree.query(pcd_masked, k=1, workers=-1)
