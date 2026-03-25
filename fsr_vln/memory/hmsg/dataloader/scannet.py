@@ -1,4 +1,3 @@
-
 import os
 import numpy as np
 from PIL import Image
@@ -28,9 +27,11 @@ class ScannetDataset(RGBDDataset):
         self.root_dir = cfg["root_dir"]
         self.transforms = cfg["transforms"]
         self.rgb_intrinsics = self._load_rgb_intrinsics(
-            self.root_dir + "/intrinsic/intrinsic_color.txt")
+            self.root_dir + "/intrinsic/intrinsic_color.txt"
+        )
         self.depth_intrinsics = self._load_depth_intrinsics(
-            self.root_dir + "/intrinsic/intrinsic_depth.txt")
+            self.root_dir + "/intrinsic/intrinsic_depth.txt"
+        )
         self.camera_matrix = self.depth_intrinsics
         self.scale = 1000.0
         self.data_list = self._get_data_list()
@@ -57,7 +58,8 @@ class ScannetDataset(RGBDDataset):
         depth_image = Image.fromarray(depth)
         pose = self._load_pose(pose_path)  # cam2world
         T_switch_axis = np.array(
-            [[1, 0, 0, -2.5], [0, 0, 1, 0], [0, -1, 0, 2.5], [0, 0, 0, 1]], dtype=np.float64)
+            [[1, 0, 0, -2.5], [0, 0, 1, 0], [0, -1, 0, 2.5], [0, 0, 0, 1]], dtype=np.float64
+        )
         pose = T_switch_axis @ pose
         if self.transforms is not None:
             # convert to Tensor
@@ -79,10 +81,7 @@ class ScannetDataset(RGBDDataset):
         rgb_data_list = os.listdir(self.root_dir + "/color")
         rgb_data_list = [self.root_dir + "/color/" + x for x in rgb_data_list]
         depth_data_list = os.listdir(self.root_dir + "/depth")
-        depth_data_list = [
-            self.root_dir +
-            "/depth/" +
-            x for x in depth_data_list]
+        depth_data_list = [self.root_dir + "/depth/" + x for x in depth_data_list]
         pose_data_list = os.listdir(self.root_dir + "/pose")
         pose_data_list = [self.root_dir + "/pose/" + x for x in pose_data_list]
         # sort the data list
@@ -188,16 +187,11 @@ class ScannetDataset(RGBDDataset):
         cloud from RGB-D images."""
         rgb = np.array(rgb)
         depth = np.array(depth)
-        rgb = np.array(
-            Image.fromarray(rgb).resize(
-                (depth.shape[1], depth.shape[0])))
+        rgb = np.array(Image.fromarray(rgb).resize((depth.shape[1], depth.shape[0])))
         depth_scale = 1000.0
         camera_matrix = self.depth_intrinsics
         depth_img = depth.astype(np.float32) / depth_scale
-        x, y = np.meshgrid(
-            np.arange(
-                depth_img.shape[1]), np.arange(
-                depth_img.shape[0]))
+        x, y = np.meshgrid(np.arange(depth_img.shape[1]), np.arange(depth_img.shape[0]))
         mask = depth_img > 0
         x = x[mask]
         y = y[mask]
@@ -205,8 +199,9 @@ class ScannetDataset(RGBDDataset):
         X = (x - camera_matrix[0, 2]) * depth_img / camera_matrix[0, 0]
         Y = (y - camera_matrix[1, 2]) * depth_img / camera_matrix[1, 1]
         Z = depth_img
-        pcd = np.hstack(([X.reshape(-1, 1), Y.reshape(-1, 1),
-                        Z.reshape(-1, 1), np.ones((X.shape[0], 1))]))
+        pcd = np.hstack(
+            ([X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1), np.ones((X.shape[0], 1))])
+        )
 
         # apply projection matrix
         if camera_pose is not None:

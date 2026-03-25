@@ -1,4 +1,3 @@
-
 import os
 from abc import ABC, abstractmethod
 import numpy as np
@@ -72,13 +71,8 @@ class RGBDDataset(Dataset, ABC):
         pass
 
     def create_pcd(
-            self,
-            rgb,
-            depth,
-            camera_pose=None,
-            idx=None,
-            mask_img=False,
-            filter_distance=np.inf):
+        self, rgb, depth, camera_pose=None, idx=None, mask_img=False, filter_distance=np.inf
+    ):
         """
         Create Open3D point cloud from RGB and depth images, and camera pose.
 
@@ -96,11 +90,7 @@ class RGBDDataset(Dataset, ABC):
         depth = np.array(depth)
         # resize rgb image to match depth image size if needed
         if rgb.shape[0] != depth.shape[0] or rgb.shape[1] != depth.shape[1]:
-            rgb = cv2.resize(
-                rgb,
-                (depth.shape[1],
-                 depth.shape[0]),
-                interpolation=cv2.INTER_AREA)
+            rgb = cv2.resize(rgb, (depth.shape[1], depth.shape[0]), interpolation=cv2.INTER_AREA)
         # load depth camera intrinsics
         H = rgb.shape[0]
         W = rgb.shape[1]
@@ -126,8 +116,7 @@ class RGBDDataset(Dataset, ABC):
         if Z.mean() > filter_distance:
             return o3d.geometry.PointCloud()
         # convert to open3d point cloud
-        points = np.hstack(
-            (X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
+        points = np.hstack((X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         if not mask_img:
@@ -138,15 +127,16 @@ class RGBDDataset(Dataset, ABC):
         return pcd
 
     def create_3d_masks(
-            self,
-            masks,
-            depth,
-            full_pcd,
-            full_pcd_tree,
-            camera_pose,
-            idx=None,
-            down_size=0.02,
-            filter_distance=None):
+        self,
+        masks,
+        depth,
+        full_pcd,
+        full_pcd_tree,
+        camera_pose,
+        idx=None,
+        down_size=0.02,
+        filter_distance=None,
+    ):
         """
         create 3d masks from 2D masks
         Args:
@@ -170,12 +160,8 @@ class RGBDDataset(Dataset, ABC):
             mask = np.array(mask)
             # create pcd from mask
             pcd_masked = self.create_pcd(
-                mask,
-                depth,
-                camera_pose,
-                idx=None,
-                mask_img=True,
-                filter_distance=filter_distance)
+                mask, depth, camera_pose, idx=None, mask_img=True, filter_distance=filter_distance
+            )
             # using KD-Tree to find the nearest points in the point cloud
             pcd_masked = np.asarray(pcd_masked.points)
             dist, indices = full_pcd_tree.query(pcd_masked, k=1, workers=-1)

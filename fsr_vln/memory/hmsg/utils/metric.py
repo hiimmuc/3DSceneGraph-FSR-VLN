@@ -1,4 +1,5 @@
 """IoU."""
+
 import numpy as np
 
 
@@ -199,7 +200,7 @@ def get_pixel_area(segm):
 
 
 def extract_both_masks(eval_segm, gt_segm, cl, n_cl):
-    """" Extracts the masks of the segmentation :param eval_segm: 2D array,
+    """ " Extracts the masks of the segmentation :param eval_segm: 2D array,
     predicted segmentation :param gt_segm: 2D array, ground truth segmentation
     :param cl: list of classes :param n_cl: number of classes :return: masks of
     the segmentation."""

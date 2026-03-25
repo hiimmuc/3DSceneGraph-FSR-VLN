@@ -32,11 +32,7 @@ def parse_json_gt_graph_hm3dsem(json_path: Union[str, Path]) -> Dict:
     ignored_room_ids = set()
     for region in data["regions"]:
         level_id, _ = region["id"].split("_")
-        if region["category"] in [
-            "living room",
-            "kitchen",
-            "bedroom",
-                "bathroom"]:
+        if region["category"] in ["living room", "kitchen", "bedroom", "bathroom"]:
             tree.add_node(region["id"], **region)
             tree.add_edge(level_id, region["id"])
         else:
@@ -122,10 +118,7 @@ def generate_gt_object_nodes(
         List[List[str]]: a list of object node ids lists.
     """
     gt_node_ids = []
-    room_nodes = [
-        node for node,
-        out_degree in tree.out_degree() if len(
-            node.split("_")) == 2]
+    room_nodes = [node for node, out_degree in tree.out_degree() if len(node.split("_")) == 2]
     for i, gt_nodes_tuple in enumerate(gt_nodes_tuples):
         floor_id, room_id, object_id = gt_nodes_tuple
         room_category = tree.nodes[room_id]["category"]
@@ -133,7 +126,8 @@ def generate_gt_object_nodes(
 
         # select all room of the same category at the same level
         candidate_room_nodes = [
-            node for node in room_nodes if tree.nodes[node]["category"] == room_category]
+            node for node in room_nodes if tree.nodes[node]["category"] == room_category
+        ]
 
         # select all object of the same category in candidate rooms
         object_nodes = []
@@ -246,26 +240,20 @@ def generate_long_query_dataset_hm3dsem(
             elif "obj" in query_spec and "floor" in query_spec:
                 nodes_tuple = (gt_obj_node.floor_id, None, gt_obj_node.id)
             elif "room" in query_spec and "floor" in query_spec:
-                nodes_tuple = (
-                    gt_obj_node.floor_id,
-                    gt_obj_node.region_id,
-                    None)
+                nodes_tuple = (gt_obj_node.floor_id, gt_obj_node.region_id, None)
             elif "obj" in query_spec:
                 nodes_tuple = (None, None, gt_obj_node.id)
 
             queries.append(query)
             gt_node_tuples.append(nodes_tuple)
-        aggregated_queries = aggregate_duplicates_long_queries(
-            queries, gt_node_tuples)
+        aggregated_queries = aggregate_duplicates_long_queries(queries, gt_node_tuples)
 
         dataset[scene_dir.name] = (evaluator, aggregated_queries)
 
     return dataset
 
 
-def create_3d_bounding_box(
-        center: List[float],
-        dimensions: List[float]) -> np.ndarray:
+def create_3d_bounding_box(center: List[float], dimensions: List[float]) -> np.ndarray:
     """
     Create a 3D bounding box given the center and dimensions.
 
@@ -317,10 +305,7 @@ def crop_pc_with_aabb(
     min_b = np.min(bbox_pts, axis=0).reshape((3, 1))
     max_b = np.max(bbox_pts, axis=0).reshape((3, 1))
     if not np.array_equal(min_b, max_b):
-        return pcd.crop(
-            o3d.geometry.AxisAlignedBoundingBox(
-                min_bound=min_b,
-                max_bound=max_b))
+        return pcd.crop(o3d.geometry.AxisAlignedBoundingBox(min_bound=min_b, max_bound=max_b))
     return None
 
 

@@ -16,13 +16,14 @@ from memory.hmsg.utils.sam_utils import crop_all_bounding_boxs, filter_masks
 
 
 def extract_feats_raw(
-        image,
-        mask_generator,
-        clip_model,
-        preprocess,
-        clip_feat_dim=768,
-        bbox_margin=0,
-        maskedd_weight=0.75):
+    image,
+    mask_generator,
+    clip_model,
+    preprocess,
+    clip_feat_dim=768,
+    bbox_margin=0,
+    maskedd_weight=0.75,
+):
     """
     Estimate the feature for each pixel in the image.
 
@@ -48,9 +49,11 @@ def extract_feats_raw(
     F_g = get_img_feats(image, preprocess, clip_model)
     # crop all masks above certain thershold.
     croped_images = crop_all_bounding_boxs(
-        image, masks, block_background=False, bbox_margin=bbox_margin)
+        image, masks, block_background=False, bbox_margin=bbox_margin
+    )
     croped_images_masked = crop_all_bounding_boxs(
-        image, masks, block_background=True, bbox_margin=bbox_margin)
+        image, masks, block_background=True, bbox_margin=bbox_margin
+    )
     number_of_masks = len(croped_images)
     # run CLIP on all croped images.
     F_l = []
@@ -58,23 +61,21 @@ def extract_feats_raw(
         f_l_masked = get_img_feats(img_masked, preprocess, clip_model)
         f_l = get_img_feats(img, preprocess, clip_model)
         f_l = maskedd_weight * f_l_masked + (1 - maskedd_weight) * f_l
-        f_l = torch.nn.functional.normalize(
-            torch.from_numpy(f_l), p=2, dim=-1).cpu().numpy()
+        f_l = torch.nn.functional.normalize(torch.from_numpy(f_l), p=2, dim=-1).cpu().numpy()
         F_l.append(f_l)
     F_l = np.array(F_l)
     F_l = torch.from_numpy(F_l).cuda()
     F_masks = F_l
     # interpolate F_p to the original image size
-    outfeat = torch.zeros(
-        LOAD_IMG_HEIGHT,
-        LOAD_IMG_WIDTH,
-        clip_feat_dim).cuda()
+    outfeat = torch.zeros(LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH, clip_feat_dim).cuda()
     for i, mask in enumerate(masks):
-        non_zero_indices = torch.argwhere(torch.from_numpy(
-            np.array(mask["segmentation"])) == 1).cuda()
+        non_zero_indices = torch.argwhere(
+            torch.from_numpy(np.array(mask["segmentation"])) == 1
+        ).cuda()
         outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :] += F_l[i, :]
         outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :] = torch.nn.functional.normalize(
-            outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :], p=2, dim=-1)
+            outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :], p=2, dim=-1
+        )
     outfeat = outfeat.half()
     return outfeat.cpu(), F_masks.cpu(), masks, F_g
 
@@ -128,8 +129,7 @@ def extract_feats_per_pixel(
         for c in range(3):
             overlay[:, :, c] += mask_area * color[c] * weight
     # --- Step 5: Normalize and blend with original image ---
-    overlay = (overlay - overlay.min()) / \
-        (overlay.max() - overlay.min())  # Normalize to [0, 1]
+    overlay = (overlay - overlay.min()) / (overlay.max() - overlay.min())  # Normalize to [0, 1]
     overlay_uint8 = (overlay * 255).astype(np.uint8)
     # Optional: blend original image with weighted mask (alpha compositing)
     alpha = 0.8
@@ -147,19 +147,19 @@ def extract_feats_per_pixel(
         F_g = get_img_feats(image, preprocess, clip_model)
         # crop all masks above certain thershold.
         croped_images = crop_all_bounding_boxs(
-            image, masks, block_background=False, bbox_margin=bbox_margin)
+            image, masks, block_background=False, bbox_margin=bbox_margin
+        )
         croped_images_masked = crop_all_bounding_boxs(
-            image, masks, block_background=True, bbox_margin=bbox_margin)
+            image, masks, block_background=True, bbox_margin=bbox_margin
+        )
         number_of_masks = len(croped_images)
         # run CLIP on all cropped images.
-        cropped_masked_feats = get_img_feats_batch(
-            croped_images_masked, preprocess, clip_model)
-        cropped_feats = get_img_feats_batch(
-            croped_images, preprocess, clip_model)
+        cropped_masked_feats = get_img_feats_batch(croped_images_masked, preprocess, clip_model)
+        cropped_feats = get_img_feats_batch(croped_images, preprocess, clip_model)
     fused_crop_feats = torch.from_numpy(
-        maskedd_weight * cropped_masked_feats + (1 - maskedd_weight) * cropped_feats)
-    F_l = torch.nn.functional.normalize(
-        fused_crop_feats, p=2, dim=-1).cpu().numpy()
+        maskedd_weight * cropped_masked_feats + (1 - maskedd_weight) * cropped_feats
+    )
+    F_l = torch.nn.functional.normalize(fused_crop_feats, p=2, dim=-1).cpu().numpy()
     if F_l.shape[0] == 0:
         return None, None, None
     # 1. compute the cosine similarity etween the local feature fLi and the
@@ -175,13 +175,10 @@ def extract_feats_per_pixel(
     F_p = torch.nn.functional.normalize(F_p, p=2, dim=-1)
     # 7. interpolate F_p to the original image size
     F_p = F_p.cuda()
-    outfeat = torch.zeros(
-        LOAD_IMG_HEIGHT *
-        LOAD_IMG_WIDTH,
-        clip_feat_dim,
-        device="cuda")
-    non_zero_ids = torch.from_numpy(
-        np.array([mask["segmentation"] for mask in masks])).reshape((len(masks), -1))
+    outfeat = torch.zeros(LOAD_IMG_HEIGHT * LOAD_IMG_WIDTH, clip_feat_dim, device="cuda")
+    non_zero_ids = torch.from_numpy(np.array([mask["segmentation"] for mask in masks])).reshape(
+        (len(masks), -1)
+    )
     for i, mask in enumerate(masks):
         non_zero_indices = torch.argwhere(non_zero_ids[i] == 1).cuda()
         outfeat[non_zero_indices, :] += F_p[i, :]

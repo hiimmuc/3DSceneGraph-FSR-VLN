@@ -1,4 +1,3 @@
-
 import os
 import numpy as np
 from PIL import Image
@@ -28,7 +27,8 @@ class ReplicaDataset(RGBDDataset):
         self.root_dir = cfg["root_dir"]
         self.transforms = cfg["transforms"]
         self.depth_intrinsics, self.scale = self._load_depth_intrinsics(
-            os.path.split(self.root_dir)[0] + "/cam_params.json")
+            os.path.split(self.root_dir)[0] + "/cam_params.json"
+        )
         self.data_list = self._get_data_list()
 
     def __getitem__(self, idx):
@@ -46,7 +46,8 @@ class ReplicaDataset(RGBDDataset):
         depth_image = self._load_depth(depth_path)
         pose = self._load_pose(self.root_dir, idx)
         T_switch_axis = np.array(
-            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64)
+            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64
+        )
         pose = T_switch_axis @ pose
         if self.transforms is not None:
             # convert to Tensor
@@ -66,8 +67,7 @@ class ReplicaDataset(RGBDDataset):
         pose_data_list = []
         # lis all files in the root directory + results, that start wuth rgb,
         # depth
-        for root, dirs, files in os.walk(
-                os.path.join(self.root_dir, "results")):
+        for root, dirs, files in os.walk(os.path.join(self.root_dir, "results")):
             for file in files:
                 if file.startswith("frame"):
                     rgb_data_list.append(os.path.join(root, file))
@@ -174,8 +174,7 @@ class ReplicaDataset(RGBDDataset):
         Z = depth
 
         # convert to camera coordinate
-        points = np.hstack(
-            (X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
+        points = np.hstack((X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         colors = rgb[mask]

@@ -34,7 +34,8 @@ class HorizonDataset(RGBDDataset):
         pose_name = "poses"
         camera_config_path = "camera_info.yaml"
         self.rgb_intrinsics, self.depth_intrinsics = self.load_camera_params(
-            os.path.join(self.root_dir, camera_config_path))
+            os.path.join(self.root_dir, camera_config_path)
+        )
         self.scale = 1000.0
         print("self.root_dir: ", self.root_dir)
         if pose_name is not None and os.path.exists(
@@ -74,17 +75,14 @@ class HorizonDataset(RGBDDataset):
                 for ts in self.ts_list
             ]
             self.depth_paths = [
-                os.path.join(self.root_dir, "depth", f"{float(ts):.4f}.png")
-                for ts in self.ts_list
+                os.path.join(self.root_dir, "depth", f"{float(ts):.4f}.png") for ts in self.ts_list
             ]
         else:
             self.image_paths = [
-                os.path.join(self.root_dir, "color", f"{int(ts):05d}.png")
-                for ts in self.ts_list
+                os.path.join(self.root_dir, "color", f"{int(ts):05d}.png") for ts in self.ts_list
             ]
             self.depth_paths = [
-                os.path.join(self.root_dir, "depth", f"{int(ts):05d}.png")
-                for ts in self.ts_list
+                os.path.join(self.root_dir, "depth", f"{int(ts):05d}.png") for ts in self.ts_list
             ]
         self.frameId2imgPath = self.image_paths
         print("horizon dataset init success!")
@@ -95,24 +93,19 @@ class HorizonDataset(RGBDDataset):
     def get_camera_intrinsics(self):
         return self.depth_intrinsics
 
-    def load_camera_params(
-        self, config_path: str, camera_name: str = None
-    ) -> np.ndarray:
+    def load_camera_params(self, config_path: str, camera_name: str = None) -> np.ndarray:
 
         with open(config_path, "r") as file:
             config = yaml.safe_load(file)
 
         # load camera intrinsics
         K = np.eye(3)
-        if "Camera.fx" in config.keys() and isinstance(
-                config["Camera.fx"], set):
+        if "Camera.fx" in config.keys() and isinstance(config["Camera.fx"], set):
             K[0, 0] = next(iter(config["Camera.fx"]))
             K[1, 1] = next(iter(config["Camera.fy"]))
             K[0, 2] = next(iter(config["Camera.cx"]))
             K[1, 2] = next(iter(config["Camera.cy"]))
-            image_size = next(iter(config["Camera.width"])), next(
-                iter(config["Camera.height"])
-            )
+            image_size = next(iter(config["Camera.width"])), next(iter(config["Camera.height"]))
         else:
             K[0, 0] = config["Camera1.fx"]
             K[1, 1] = config["Camera1.fy"]
@@ -155,9 +148,7 @@ class HorizonDataset(RGBDDataset):
             # ts, tx, ty, tz, qw, qx, qy, qz = pose
             # Create rotation matrix from quaternion
             quat = [qx, qy, qz, qw]
-            rot_matrix = R.from_quat(
-                quat
-            ).as_matrix()  # Convert quaternion to 3x3 rotation matrix
+            rot_matrix = R.from_quat(quat).as_matrix()  # Convert quaternion to 3x3 rotation matrix
             # Create the homogeneous transformation matrix (4x4)
             T = np.eye(4)
             T[:3, :3] = rot_matrix  # Rotation part
@@ -199,9 +190,7 @@ class HorizonDataset(RGBDDataset):
             ts, tx, ty, tz, qw, qx, qy, qz = pose
             # Create rotation matrix from quaternion
             quat = [qx, qy, qz, qw]
-            rot_matrix = R.from_quat(
-                quat
-            ).as_matrix()  # Convert quaternion to 3x3 rotation matrix
+            rot_matrix = R.from_quat(quat).as_matrix()  # Convert quaternion to 3x3 rotation matrix
             # Create the homogeneous transformation matrix (4x4)
             T = np.eye(4)
             T[:3, :3] = rot_matrix  # Rotation part
@@ -234,8 +223,9 @@ class HorizonDataset(RGBDDataset):
         # T_switch_axis = np.array([[1,0,0,0],[0,0,1,0],[0,-1,0,0],[0,0,0,1]], dtype=np.float64) # kitchen
         # T_switch_axis = np.array([[1,0,0,0],[0,-1,0,0],[0,0,-1,0],[0,0,0,1]],
         # dtype=np.float64) # go2_navi
-        T_switch_axis = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [
-                                 0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64)  # g1_navi fastlivo2
+        T_switch_axis = np.array(
+            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64
+        )  # g1_navi fastlivo2
         pose = T_switch_axis @ pose
         rgb_image = self._load_image(rgb_path)
         depth_image = self._load_depth(depth_path)
@@ -312,16 +302,11 @@ class HorizonDataset(RGBDDataset):
         cloud from RGB-D images."""
         rgb = np.array(rgb)
         depth = np.array(depth)
-        rgb = np.array(
-            Image.fromarray(rgb).resize(
-                (depth.shape[1], depth.shape[0])))
+        rgb = np.array(Image.fromarray(rgb).resize((depth.shape[1], depth.shape[0])))
         depth_scale = 1000.0
         camera_matrix = self.depth_intrinsics
         depth_img = depth.astype(np.float32) / depth_scale
-        x, y = np.meshgrid(
-            np.arange(
-                depth_img.shape[1]), np.arange(
-                depth_img.shape[0]))
+        x, y = np.meshgrid(np.arange(depth_img.shape[1]), np.arange(depth_img.shape[0]))
         mask = depth_img > 0
         x = x[mask]
         y = y[mask]
@@ -329,8 +314,9 @@ class HorizonDataset(RGBDDataset):
         X = (x - camera_matrix[0, 2]) * depth_img / camera_matrix[0, 0]
         Y = (y - camera_matrix[1, 2]) * depth_img / camera_matrix[1, 1]
         Z = depth_img
-        pcd = np.hstack(([X.reshape(-1, 1), Y.reshape(-1, 1),
-                        Z.reshape(-1, 1), np.ones((X.shape[0], 1))]))
+        pcd = np.hstack(
+            ([X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1), np.ones((X.shape[0], 1))])
+        )
 
         # apply projection matrix
         if camera_pose is not None:

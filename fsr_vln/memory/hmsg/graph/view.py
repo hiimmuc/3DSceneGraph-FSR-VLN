@@ -26,14 +26,15 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
 """Class to represent a view in a HMSG."""
-
-
 
 
 import json
 import os
 import numpy as np
+
+
 class View:
     """
     Class to represent a View/image in room.
@@ -69,8 +70,11 @@ class View:
             # 👈 Force conversion to str
             "text_discription": [str(x) for x in self.text_discription],
         }
-        with open(os.path.join(path, str(self.view_id) + ".json"), "w", encoding="utf-8") as outfile:
+        with open(
+            os.path.join(path, str(self.view_id) + ".json"), "w", encoding="utf-8"
+        ) as outfile:
             json.dump(metadata, outfile)
+
     # def save(self, path):
     #     """
     #     Save the floor in folder as ply for the point cloud

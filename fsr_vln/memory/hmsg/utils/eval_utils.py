@@ -29,13 +29,13 @@ def read_ply_and_assign_colors_replica(file_path, semantic_info_path):
     with open(semantic_info_path) as f:
         semantic_info = json.load(f)
 
-    object_class_mapping = {obj["id"]: obj["class_id"]
-                            for obj in semantic_info["objects"]}
+    object_class_mapping = {obj["id"]: obj["class_id"] for obj in semantic_info["objects"]}
     unique_class_ids = np.unique(list(object_class_mapping.values()))
 
     # Extract vertex data
     vertices = np.vstack(
-        [plydata["vertex"]["x"], plydata["vertex"]["y"], plydata["vertex"]["z"]]).T
+        [plydata["vertex"]["x"], plydata["vertex"]["y"], plydata["vertex"]["z"]]
+    ).T
     # Extract object_id and normalize it to use as color
     face_vertices = plydata["face"]["vertex_indices"]
     object_ids = plydata["face"]["object_id"]
@@ -84,13 +84,12 @@ def text_prompt(clip_model, clip_feat_dim, mask_feats, text, templates=True):
     :return: similarity."""
     text_list = text
     if templates:
-        text_feats = get_text_feats_multiple_templates(
-            text_list, clip_model, clip_feat_dim
-        )
+        text_feats = get_text_feats_multiple_templates(text_list, clip_model, clip_feat_dim)
     else:
         text_feats = get_text_feats(text_list, clip_model, clip_feat_dim)
-    similarity = torch.nn.functional.cosine_similarity(torch.from_numpy(
-        mask_feats).unsqueeze(1), torch.from_numpy(text_feats).unsqueeze(0), dim=2)
+    similarity = torch.nn.functional.cosine_similarity(
+        torch.from_numpy(mask_feats).unsqueeze(1), torch.from_numpy(text_feats).unsqueeze(0), dim=2
+    )
     similarity = similarity.cpu().numpy()
     return similarity
 
@@ -105,17 +104,15 @@ def read_semantic_classes_replica(semantic_info_path, crete_color_map=False):
     """
     with open(semantic_info_path) as f:
         semantic_info = json.load(f)
-    class_id_names = {obj["id"]: obj["name"]
-                      for obj in semantic_info["classes"]}
+    class_id_names = {obj["id"]: obj["name"] for obj in semantic_info["classes"]}
     if crete_color_map:
         unique_class_ids = np.unique(list(class_id_names.keys()))
         unique_colors = np.random.rand(len(unique_class_ids), 3)
         class_id_colors = {
-            class_id: unique_colors[i] for i,
-            class_id in enumerate(unique_class_ids)}
+            class_id: unique_colors[i] for i, class_id in enumerate(unique_class_ids)
+        }
         # convert to string
-        class_id_colors = {str(k): v.tolist()
-                           for k, v in class_id_colors.items()}
+        class_id_colors = {str(k): v.tolist() for k, v in class_id_colors.items()}
         # save class_id_colors to json file to use later
         with open("class_id_colors.json", "w") as f:
             json.dump(class_id_colors, f)
@@ -131,8 +128,7 @@ def load_feature_map(path, normalize=True):
     # load mask_feats
     mask_feats = torch.load(os.path.join(path, "mask_feats.pt")).float()
     if normalize:
-        mask_feats = torch.nn.functional.normalize(
-            mask_feats, p=2, dim=-1).cpu().numpy()
+        mask_feats = torch.nn.functional.normalize(mask_feats, p=2, dim=-1).cpu().numpy()
     else:
         mask_feats = mask_feats.cpu().numpy()
     print("full pcd feats loaded from disk with shape {}".format(mask_feats.shape))
@@ -142,17 +138,10 @@ def load_feature_map(path, normalize=True):
         number_of_pcds = len(os.listdir(os.path.join(path, "objects")))
         not_found = []
         for i in range(number_of_pcds):
-            if os.path.exists(
-                os.path.join(
-                    path,
-                    "objects",
-                    "pcd_{}.ply".format(i))):
+            if os.path.exists(os.path.join(path, "objects", "pcd_{}.ply".format(i))):
                 mask_pcds.append(
-                    o3d.io.read_point_cloud(
-                        os.path.join(
-                            path,
-                            "objects",
-                            "pcd_{}.ply".format(i))))
+                    o3d.io.read_point_cloud(os.path.join(path, "objects", "pcd_{}.ply".format(i)))
+                )
             else:
                 print("masked pcd {} not found in {}".format(i, path))
                 not_found.append(i)
@@ -162,8 +151,7 @@ def load_feature_map(path, normalize=True):
         print("number of mask_feats loaded from disk {}".format(len(mask_feats)))
         return mask_pcds, mask_feats
     else:
-        raise FileNotFoundError(
-            "objects directory not found in {}".format(path))
+        raise FileNotFoundError("objects directory not found in {}".format(path))
 
 
 def get_3d_iou(box1_center, box1_dims, box2_center, box2_dims):
@@ -251,21 +239,15 @@ def find_overlapping_ratio(pcd1, pcd2, radius=0.02):
     Returns:
     float: Overlapping ratio between 0 and 1.
     """
-    if isinstance(
-            pcd1,
-            o3d.geometry.PointCloud) and isinstance(
-            pcd2,
-            o3d.geometry.PointCloud):
+    if isinstance(pcd1, o3d.geometry.PointCloud) and isinstance(pcd2, o3d.geometry.PointCloud):
         pcd1 = np.asarray(pcd1.points)
         pcd2 = np.asarray(pcd2.points)
     tree_pcd2 = cKDTree(pcd2)
     tree_pcd1 = cKDTree(pcd1)
 
     # Query all points in pcd1 for nearby points in pcd2
-    _, indices1 = tree_pcd2.query(
-        pcd1, k=1, distance_upper_bound=radius, p=2, workers=-1)
-    _, indices2 = tree_pcd1.query(
-        pcd2, k=1, distance_upper_bound=radius, p=2, workers=-1)
+    _, indices1 = tree_pcd2.query(pcd1, k=1, distance_upper_bound=radius, p=2, workers=-1)
+    _, indices2 = tree_pcd1.query(pcd2, k=1, distance_upper_bound=radius, p=2, workers=-1)
 
     # Remove indices that are out of range
     indices1 = indices1[indices1 != pcd2.shape[0]]
@@ -276,8 +258,7 @@ def find_overlapping_ratio(pcd1, pcd2, radius=0.02):
     if pcd1.shape[0] == 0 or pcd2.shape[0] == 0:
         overlapping_ratio = 0
     else:
-        overlapping_ratio = (len(indices1) + len(indices2)) / \
-            (pcd1.shape[0] + pcd2.shape[0])
+        overlapping_ratio = (len(indices1) + len(indices2)) / (pcd1.shape[0] + pcd2.shape[0])
 
     return overlapping_ratio
 
@@ -305,10 +286,7 @@ def Tree_interpolation(pred_pc: np.ndarray, gt_pc: np.ndarray):
     return pred_label_new
 
 
-def knn_interpolation(
-        cumulated_pc: np.ndarray,
-        full_sized_data: np.ndarray,
-        k):
+def knn_interpolation(cumulated_pc: np.ndarray, full_sized_data: np.ndarray, k):
     """Using k-nn interpolation to find labels of points of the full sized
     pointcloud :param cumulated_pc: cumulated pointcloud results after running
     the network :param full_sized_data: full sized point cloud :param k: k for
@@ -320,8 +298,7 @@ def knn_interpolation(
 
     ball_tree = BallTree(labeled[:, :3], metric="minkowski")
 
-    knn_classes = labeled[ball_tree.query(to_be_predicted[:, :3], k=k)[
-        1]][:, :, -1].astype(int)
+    knn_classes = labeled[ball_tree.query(to_be_predicted[:, :3], k=k)[1]][:, :, -1].astype(int)
     print("knn_classes: ", knn_classes.shape)
 
     interpolated = np.zeros(knn_classes.shape[0])
@@ -354,13 +331,13 @@ def read_ply_and_assign_colors(file_path, semantic_info_path):
     with open(semantic_info_path) as f:
         semantic_info = json.load(f)
 
-    object_class_mapping = {obj["id"]: obj["class_id"]
-                            for obj in semantic_info["objects"]}
+    object_class_mapping = {obj["id"]: obj["class_id"] for obj in semantic_info["objects"]}
     unique_class_ids = np.unique(list(object_class_mapping.values()))
 
     # Extract vertex data
     vertices = np.vstack(
-        [plydata["vertex"]["x"], plydata["vertex"]["y"], plydata["vertex"]["z"]]).T
+        [plydata["vertex"]["x"], plydata["vertex"]["y"], plydata["vertex"]["z"]]
+    ).T
     # Extract object_id and normalize it to use as color
     face_vertices = plydata["face"]["vertex_indices"]
     object_ids = plydata["face"]["object_id"]
@@ -405,8 +382,7 @@ def read_ply_and_assign_colors(file_path, semantic_info_path):
 def read_semantic_classes(semantic_info_path):
     with open(semantic_info_path) as f:
         semantic_info = json.load(f)
-    class_id_names = {obj["id"]: obj["name"]
-                      for obj in semantic_info["classes"]}
+    class_id_names = {obj["id"]: obj["name"] for obj in semantic_info["classes"]}
     return class_id_names
 
 

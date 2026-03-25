@@ -19,19 +19,11 @@ import cv2
 
 import faiss
 import matplotlib
-matplotlib.use('Agg')  # Use non-GUI backend
+
+matplotlib.use("Agg")  # Use non-GUI backend
 
 
-def visualize_pcd_on_image(
-    obj_pcd,
-    img,
-    camera_matrix,
-    pose,
-    save_path,
-    color=(
-        0,
-        0,
-        255)):
+def visualize_pcd_on_image(obj_pcd, img, camera_matrix, pose, save_path, color=(0, 0, 255)):
     """
     Project a 3D point cloud onto a 2D image, save the visualization, and return the mean object distance.
 
@@ -77,7 +69,7 @@ def visualize_pcd_on_image(
     img_vis = img.copy()
 
     # Draw projected points
-    for (u, v) in uv.astype(int):
+    for u, v in uv.astype(int):
         if 0 <= u < img_vis.shape[1] and 0 <= v < img_vis.shape[0]:
             cv2.circle(img_vis, (u, v), 2, color, -1)
 
@@ -86,21 +78,21 @@ def visualize_pcd_on_image(
     cv2.imwrite(save_path, img_vis)
     # cv2.imshow("Projected PCD on Image", img_vis)
     # cv2.waitKey(10)
-    print(
-        f"Projected PCD visualization saved at {save_path}, avg_distance = {avg_distance:.3f}m")
+    print(f"Projected PCD visualization saved at {save_path}, avg_distance = {avg_distance:.3f}m")
 
     return avg_distance
 
 
 def check_object_in_view(
-        img_w,
-        img_h,
-        camera_matrix,
-        cam_pose_inv,
-        obj_points,
-        min_visible_ratio=0.5,
-        max_depth=10.0,
-        return_depth=False):
+    img_w,
+    img_h,
+    camera_matrix,
+    cam_pose_inv,
+    obj_points,
+    min_visible_ratio=0.5,
+    max_depth=10.0,
+    return_depth=False,
+):
     """
     Check whether an object point cloud is within the camera's field of view and has a mean depth below max_depth.
 
@@ -136,8 +128,7 @@ def check_object_in_view(
 
     # ---- 4. Check if points fall within the image bounds ----
     inside_mask = (
-        (pixels[:, 0] >= 0) & (pixels[:, 0] < img_w) &
-        (pixels[:, 1] >= 0) & (pixels[:, 1] < img_h)
+        (pixels[:, 0] >= 0) & (pixels[:, 0] < img_w) & (pixels[:, 1] >= 0) & (pixels[:, 1] < img_h)
     )
 
     if not np.any(inside_mask):
@@ -149,8 +140,7 @@ def check_object_in_view(
         return (False, np.inf) if return_depth else False
 
     # ---- 5. Depth constraint ----
-    mean_depth = np.mean(obj_points_cam[inside_mask, 2]) if np.any(
-        inside_mask) else np.inf
+    mean_depth = np.mean(obj_points_cam[inside_mask, 2]) if np.any(inside_mask) else np.inf
     if mean_depth > max_depth:
         return (False, mean_depth) if return_depth else False
 
@@ -174,7 +164,8 @@ def find_intersection_share(map_points, obj_points, radius=0.05):
 
     # Query all points in pcd1 for nearby points in pcd2
     _, indices = obj_tree_points.query(
-        map_points, k=1, distance_upper_bound=radius, p=2, workers=-1)
+        map_points, k=1, distance_upper_bound=radius, p=2, workers=-1
+    )
     # Remove indices that are out of range
     indices = indices[indices != obj_points.shape[0]]
 
@@ -231,15 +222,12 @@ def compute_room_embeddings(
     cmap = cm.get_cmap("tab20")
     for room_idx, room_pcd in enumerate(room_pcds):
         room_2d_points = np.stack(
-            [np.asarray(room_pcd.points)[:, 0], np.asarray(room_pcd.points)[:, 2]], axis=1)
-        plt.scatter(room_2d_points[:, 0],
-                    room_2d_points[:, 1], s=0.1, c=cmap(room_idx))
+            [np.asarray(room_pcd.points)[:, 0], np.asarray(room_pcd.points)[:, 2]], axis=1
+        )
+        plt.scatter(room_2d_points[:, 0], room_2d_points[:, 1], s=0.1, c=cmap(room_idx))
         flattened_room_points.append(room_2d_points)
 
-    pbar = tqdm(
-        enumerate(pose_list),
-        total=len(pose_list),
-        desc="assign camera to room")
+    pbar = tqdm(enumerate(pose_list), total=len(pose_list), desc="assign camera to room")
     pose_cmap = cm.get_cmap("Set1")
     for i, pose in pbar:
         pos = pose[0, 3], pose[2, 3]
@@ -252,12 +240,8 @@ def compute_room_embeddings(
         room_dists = []
         for room_points in flattened_room_points:
             room_dists.append(
-                np.min(
-                    distance.cdist(
-                        np.array(
-                            [pos]),
-                        np.array(room_points),
-                        metric="euclidean")))
+                np.min(distance.cdist(np.array([pos]), np.array(room_points), metric="euclidean"))
+            )
         closest_room_idx = np.argmin(room_dists)
         plt.scatter(pos[0], pos[1], s=3.0, c=pose_cmap(closest_room_idx))
 
@@ -272,7 +256,8 @@ def compute_room_embeddings(
             pbar = tqdm(
                 enumerate(pose_list),
                 total=len(pose_list),
-                desc="find closest camera pose to room w/o assigned image")
+                desc="find closest camera pose to room w/o assigned image",
+            )
             for i, pose in pbar:
                 pos = pose[0, 3], pose[2, 3]
                 z = pose[1, 3]
@@ -281,9 +266,12 @@ def compute_room_embeddings(
                     closest_cam_pose.append(
                         np.min(
                             distance.cdist(
-                                np.array(
-                                    [pos]), np.array(
-                                    flattened_room_points[room_id]), metric="euclidean")))
+                                np.array([pos]),
+                                np.array(flattened_room_points[room_id]),
+                                metric="euclidean",
+                            )
+                        )
+                    )
                 else:
                     closest_cam_pose.append(np.inf)
             assert len(closest_cam_pose) == len(pose_list)
@@ -300,9 +288,9 @@ def compute_room_embeddings(
     cmap = cm.get_cmap("tab20")
     for room_idx, room_pcd in enumerate(room_pcds):
         room_2d_points = np.stack(
-            [np.asarray(room_pcd.points)[:, 0], np.asarray(room_pcd.points)[:, 2]], axis=1)
-        plt.scatter(room_2d_points[:, 0],
-                    room_2d_points[:, 1], s=0.1, c=cmap(room_idx))
+            [np.asarray(room_pcd.points)[:, 0], np.asarray(room_pcd.points)[:, 2]], axis=1
+        )
+        plt.scatter(room_2d_points[:, 0], room_2d_points[:, 1], s=0.1, c=cmap(room_idx))
 
     for room_id in range(len(flattened_room_points)):
         img_ids = room_id2img_id[room_id]  # get image ids for the room
@@ -317,8 +305,7 @@ def compute_room_embeddings(
         repr_img_ids = []
         repr_embs = []
         room_clip_embeddings = [emb_list[i] for i in img_ids]
-        room_clip_embeddings = np.squeeze(
-            np.array(room_clip_embeddings), axis=1)
+        room_clip_embeddings = np.squeeze(np.array(room_clip_embeddings), axis=1)
         room_clip_embeddings_list.append(room_clip_embeddings)
         if len(img_ids) < num_views:
             repr_img_ids_list.append(img_ids)
@@ -326,11 +313,9 @@ def compute_room_embeddings(
             continue
         # To tune the parameter, follow the guideline here:
         # https://scikit-learn.org/stable/auto_examples/text/plot_document_clustering.html#clustering-sparse-data-with-k-means
-        kmeans = KMeans(
-            n_clusters=num_views,
-            max_iter=100,
-            n_init=5,
-            random_state=0).fit(room_clip_embeddings)
+        kmeans = KMeans(n_clusters=num_views, max_iter=100, n_init=5, random_state=0).fit(
+            room_clip_embeddings
+        )
         labels = kmeans.labels_
         centers = kmeans.cluster_centers_
         unique_labels = np.unique(labels)
@@ -431,8 +416,7 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
     # It is needed for findContours()
     dist_8u = dist.astype("uint8")
     # Find total markers
-    contours, _ = cv2.findContours(
-        dist_8u, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(dist_8u, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     print("number of seeds, aka rooms: ", len(contours))
 
     # print the area of each seed
@@ -466,11 +450,7 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
     #     room_vertices.append(np.where(markers == i + 1))
     # room_vertices = np.array(room_vertices, dtype=object).squeeze()
     for i in range(len(contours)):
-        room_vertices.append(
-            tuple(
-                np.where(
-                    markers == i +
-                    1)))  # each element is (rows, cols)
+        room_vertices.append(tuple(np.where(markers == i + 1)))  # each element is (rows, cols)
 
     plt.figure()
     plt.imshow(markers, cmap="jet", origin="lower")
@@ -479,8 +459,9 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
         if len(room[0]) == 0:
             continue
         cy, cx = np.mean(room[0]), np.mean(room[1])  # y is row, x is column
-        plt.text(cx, cy, str(i), color="white", fontsize=8,
-                 ha="center", va="center", fontweight="bold")
+        plt.text(
+            cx, cy, str(i), color="white", fontsize=8, ha="center", va="center", fontweight="bold"
+        )
 
     plt.savefig(os.path.join(tmp_path, "markers.png"))
 
@@ -569,9 +550,7 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
 #     return room_vertices
 
 
-def compute_iou_batch(
-        bbox1: torch.Tensor,
-        bbox2: torch.Tensor) -> torch.Tensor:
+def compute_iou_batch(bbox1: torch.Tensor, bbox2: torch.Tensor) -> torch.Tensor:
     """
     Taken from ConceptGraphs Compute IoU between two sets of axis-aligned 3D
     bounding boxes.
@@ -599,12 +578,7 @@ def compute_iou_batch(
     inter_max = torch.min(bbox1_max, bbox2_max)  # Shape: (M, N, 3)
 
     # Compute volume of intersection box
-    inter_vol = torch.prod(
-        torch.clamp(
-            inter_max -
-            inter_min,
-            min=0),
-        dim=2)  # Shape: (M, N)
+    inter_vol = torch.prod(torch.clamp(inter_max - inter_min, min=0), dim=2)  # Shape: (M, N)
 
     # Compute volumes of the two sets of boxes
     bbox1_vol = torch.prod(bbox1_max - bbox1_min, dim=2)  # Shape: (M, 1)
@@ -630,11 +604,7 @@ def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02):
     Returns:
     float: Overlapping ratio between 0 and 1.
     """
-    if isinstance(
-            pcd1,
-            o3d.geometry.PointCloud) and isinstance(
-            pcd2,
-            o3d.geometry.PointCloud):
+    if isinstance(pcd1, o3d.geometry.PointCloud) and isinstance(pcd2, o3d.geometry.PointCloud):
         pcd1 = np.asarray(pcd1.points)
         pcd2 = np.asarray(pcd2.points)
 
@@ -656,10 +626,10 @@ def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02):
 
     overlapping_ratio = np.max(
         [
-            number_of_points_overlapping1 /
-            pcd1.shape[0],
-            number_of_points_overlapping2 /
-            pcd2.shape[0]])
+            number_of_points_overlapping1 / pcd1.shape[0],
+            number_of_points_overlapping2 / pcd2.shape[0],
+        ]
+    )
 
     return overlapping_ratio
 
@@ -692,10 +662,7 @@ def feats_denoise_dbscan(feats, eps=0.02, min_points=2):
     # Convert to numpy arrays
     feats = np.array(feats)
     # Create DBSCAN object
-    clustering = DBSCAN(
-        eps=eps,
-        min_samples=min_points,
-        metric="cosine").fit(feats)
+    clustering = DBSCAN(eps=eps, min_samples=min_points, metric="cosine").fit(feats)
 
     # Get the labels
     labels = clustering.labels_
@@ -728,11 +695,7 @@ def feats_denoise_dbscan(feats, eps=0.02, min_points=2):
     return feats
 
 
-def pcd_denoise_dbscan_vis(
-        pcd: o3d.geometry.PointCloud,
-        eps=0.02,
-        min_points=10,
-        visualize=True):
+def pcd_denoise_dbscan_vis(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10, visualize=True):
     """
     Denoise the point cloud using DBSCAN and visualize clustering results.
 
@@ -742,17 +705,14 @@ def pcd_denoise_dbscan_vis(
     :param visualize: Whether to visualize clustering results.
     :return: Denoised point cloud (largest cluster).
     """
-    labels = np.array(
-        pcd.cluster_dbscan(eps=eps, min_points=min_points, print_progress=True)
-    )
+    labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_points, print_progress=True))
 
     # Convert to numpy arrays
     obj_points = np.asarray(pcd.points)
     obj_colors = np.zeros_like(obj_points)  # initialize color array
 
     max_label = labels.max()
-    print(
-        f"[INFO] Point cloud has {max_label + 1} clusters and {np.sum(labels==-1)} noise points")
+    print(f"[INFO] Point cloud has {max_label + 1} clusters and {np.sum(labels==-1)} noise points")
 
     # Assign a unique color to each cluster
     cmap = plt.get_cmap("tab20")
@@ -770,8 +730,7 @@ def pcd_denoise_dbscan_vis(
 
     # Optionally visualize all clusters
     if visualize:
-        o3d.visualization.draw_geometries(
-            [pcd], window_name="DBSCAN Clustering Result")
+        o3d.visualization.draw_geometries([pcd], window_name="DBSCAN Clustering Result")
 
     # Keep only the largest cluster (if any)
     counter = Counter(labels)
@@ -784,20 +743,14 @@ def pcd_denoise_dbscan_vis(
 
         if np.sum(keep_mask) >= 5:
             denoised_pcd = o3d.geometry.PointCloud()
-            denoised_pcd.points = o3d.utility.Vector3dVector(
-                obj_points[keep_mask])
-            denoised_pcd.colors = o3d.utility.Vector3dVector(
-                obj_colors[keep_mask])
+            denoised_pcd.points = o3d.utility.Vector3dVector(obj_points[keep_mask])
+            denoised_pcd.colors = o3d.utility.Vector3dVector(obj_colors[keep_mask])
             return denoised_pcd
 
     return pcd  # fallback if no good cluster
 
 
-def pcd_denoise_statistical(
-        pcd,
-        nb_neighbors=20,
-        std_ratio=1.0,
-        visualize=True):
+def pcd_denoise_statistical(pcd, nb_neighbors=20, std_ratio=1.0, visualize=True):
     """
     Remove outliers using statistical outlier removal.
 
@@ -808,18 +761,17 @@ def pcd_denoise_statistical(
     :param visualize: Whether to visualize the result
     :return: Denoised point cloud
     """
-    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors,
-                                             std_ratio=std_ratio)
+    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
 
     inlier_cloud = pcd.select_by_index(ind)
     outlier_cloud = pcd.select_by_index(ind, invert=True)
     outlier_cloud.paint_uniform_color([0, 0, 0])  # black for outliers
 
     if visualize:
-        print(
-            f"[INFO] Kept {len(ind)} inliers, removed {len(pcd.points)-len(ind)} outliers")
-        o3d.visualization.draw_geometries([inlier_cloud, outlier_cloud],
-                                          window_name="Statistical Outlier Removal")
+        print(f"[INFO] Kept {len(ind)} inliers, removed {len(pcd.points)-len(ind)} outliers")
+        o3d.visualization.draw_geometries(
+            [inlier_cloud, outlier_cloud], window_name="Statistical Outlier Removal"
+        )
 
     return inlier_cloud
 
@@ -870,10 +822,8 @@ def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10):
 
         # Create a new PointCloud object
         largest_cluster_pcd = o3d.geometry.PointCloud()
-        largest_cluster_pcd.points = o3d.utility.Vector3dVector(
-            largest_cluster_points)
-        largest_cluster_pcd.colors = o3d.utility.Vector3dVector(
-            largest_cluster_colors)
+        largest_cluster_pcd.points = o3d.utility.Vector3dVector(largest_cluster_points)
+        largest_cluster_pcd.colors = o3d.utility.Vector3dVector(largest_cluster_colors)
 
         pcd = largest_cluster_pcd
 
@@ -915,11 +865,7 @@ def compute_3d_bbox_iou(bbox1, bbox2, padding=0):
     return iou
 
 
-def merge_3d_masks(
-        mask_list,
-        overlap_threshold=0.5,
-        radius=0.02,
-        iou_thresh=0.05):
+def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.05):
     """
     Merge the overlapped 3D masks in the list of masks using matrix :param
     pcd_list (list): list of point clouds :param overlap_threshold (float):
@@ -938,20 +884,21 @@ def merge_3d_masks(
         for j in range(i + 1, len(mask_list)):
             if compute_3d_bbox_iou(aa_bb[i], aa_bb[j]) > iou_thresh:
                 overlap_matrix[i, j] = find_overlapping_ratio_faiss(
-                    mask_list[i], mask_list[j], radius=1.5 * radius)
+                    mask_list[i], mask_list[j], radius=1.5 * radius
+                )
 
     # check if overlap_matrix is zero size
     if overlap_matrix.size == 0:
         return mask_list
     graph = overlap_matrix > overlap_threshold
     n_components, component_labels = connected_components(graph)
-    component_indices = [np.where(component_labels == i)[0]
-                         for i in range(n_components)]
+    component_indices = [np.where(component_labels == i)[0] for i in range(n_components)]
     # merge the masks in each component
     pcd_list_merged = []
     for indices in component_indices:
-        pcd_list_merged.append(merge_point_clouds_list(
-            [mask_list[i] for i in indices], voxel_size=0.5 * radius))
+        pcd_list_merged.append(
+            merge_point_clouds_list([mask_list[i] for i in indices], voxel_size=0.5 * radius)
+        )
 
     return pcd_list_merged
 
@@ -999,16 +946,13 @@ def hierarchical_merge(frames_pcd, th, th_factor, down_size, proxy_th):
     while len(frames_pcd) > 1:
         frames_pcd = merge_adjacent_frames(frames_pcd, th, down_size, proxy_th)
         if len(frames_pcd) > 1:
-            th -= th_factor * (len(frames_pcd) - 2) / \
-                max(1, len(frames_pcd) - 1)
+            th -= th_factor * (len(frames_pcd) - 2) / max(1, len(frames_pcd) - 1)
             print("th: ", th)
     # apply one more merge
     frames_pcd = frames_pcd[0]
     frames_pcd = merge_3d_masks(
-        frames_pcd,
-        overlap_threshold=0.75,
-        radius=down_size,
-        iou_thresh=proxy_th)
+        frames_pcd, overlap_threshold=0.75, radius=down_size, iou_thresh=proxy_th
+    )
     return frames_pcd
 
 
@@ -1031,8 +975,6 @@ def seq_merge(frames_pcd, th, down_size, proxy_th):
 
     # apply one more merge
     global_masks = merge_3d_masks(
-        global_masks,
-        overlap_threshold=th,
-        radius=down_size,
-        iou_thresh=proxy_th)
+        global_masks, overlap_threshold=th, radius=down_size, iou_thresh=proxy_th
+    )
     return global_masks

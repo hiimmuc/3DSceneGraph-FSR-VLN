@@ -3,33 +3,34 @@
 # Edit this file and run:  python scripts/rosbag_2_dataset.py
 
 # Path to the ROS2 bag directory (e.g. rosbag2_xxx/)
-bag: /path/to/rosbag2_xxx/
+bag: ./data/rosbag2_2026_03_11-14_26_05
 
 # Output dataset directory (will be created if it does not exist)
-output: /path/to/output/
+output: ./data/dataset_converted
 
 # Topics
-rgb_topic: /camera/color/image_raw
-depth_topic: /camera/depth/image_rect_raw
+rgb_topic: /zed_x_mini/colored_image
+depth_topic: /zed_x_mini/depth_image
 # Set to "" to skip auto-reading intrinsics from the bag and use fx/fy/cx/cy below
-camera_info_topic: /camera/color/camera_info
+camera_info_topic: /zed_x_mini/camera_info
 
 # TF frames
-tf_parent: map
-tf_child: camera_color_optical_frame
+tf_parent: camera_init
+tf_child: body
 
 # Fallback camera intrinsics (used when camera_info_topic is empty or unavailable)
-fx: 615.0
-fy: 615.0
-cx: 320.0
-cy: 240.0
-width: 640
-height: 480
+fx: 744.18408203125
+fy: 744.18408203125
+cx: 924.4273681640625
+cy: 561.051025390625
+width: 1920
+height: 1080
 
 # Processing options
 # Save every (skip+1)-th RGB frame; 0 = save all frames
 skip: 0
 # Clip depth values above this threshold (millimetres)
-max_depth_mm: 1000
+max_depth_mm: 10000.0  # e.g. 5000 = 5 metres
+
 # Max TF interpolation gap in seconds; frames outside this window get identity pose
 max_interp_gap: 0.1

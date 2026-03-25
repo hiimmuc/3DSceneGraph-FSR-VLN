@@ -1,36 +1,43 @@
 name: fsrvln
+
 channels:
-    - pytorch
-    - nvidia
-    - conda-forge
-    - defaults
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
 
 dependencies:
-    - python=3.9
-    - numpy
-    - pytorch=2.4.1
-    - torchvision=0.19.1
-    - torchaudio=2.4.1
-    - pytorch-cuda=11.8
-    - faiss-gpu=1.7.2
-    - pip
+  - python=3.9
+  - numpy
 
-    - pip:
-          - matplotlib==3.7.3
-          - scipy
-          - open3d==0.18.0
-          - opencv-python
-          - git+ssh://git@github.com/facebookresearch/segment-anything.git
-          - torchmetrics
-          - ftfy
-          - tqdm
-          - open-clip-torch
-          - transformers
-          - openai
-          - plyfile
-          - hydra-core
-          - pyvista
-          - scikit-fmm
-          - pathos
-          - oss2==2.9.1
-          - opencv-python-headless==4.8.1.78
+  # PyTorch stack (CUDA 11.8)
+  - pytorch=2.5.1
+  - torchvision=0.20.1
+  - torchaudio=2.5.1
+  - pytorch-cuda=11.8
+
+  # FIX: Pull FAISS from the pytorch channel and unpin the old version 
+  # to prevent it from downgrading your CUDA runtime.
+  - pytorch::faiss-gpu
+
+  # common compiled deps better installed via conda
+  - scipy
+  - matplotlib=3.7.3
+  - pip
+
+  - pip:
+      - open3d==0.18.0
+      - opencv-python-headless==4.8.1.78
+      - git+ssh://git@github.com/facebookresearch/segment-anything.git
+      - torchmetrics
+      - ftfy
+      - tqdm
+      - open-clip-torch
+      - transformers
+      - openai
+      - plyfile
+      - hydra-core
+      - pyvista
+      - scikit-fmm
+      - pathos
+      - oss2==2.9.1
