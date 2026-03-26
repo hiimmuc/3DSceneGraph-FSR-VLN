@@ -44,8 +44,6 @@ Dependencies
   #   https://github.com/rpng/rosbags
 """
 
-import os
-import struct
 import sys
 from pathlib import Path
 
@@ -53,7 +51,7 @@ import cv2
 import numpy as np
 import yaml
 from scipy.spatial.transform import Rotation, Slerp
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
 # rosbags: pure-Python ROS2 bag parser (works with both .db3 and .mcap)
@@ -252,9 +250,20 @@ def convert(
     skip: int,
     max_depth_mm: int,
     max_interp_gap: float,
+    extrinsics=None,
 ):
     bag_path = Path(bag_path)
     output_dir = Path(output_dir)
+
+    # Build 4×4 extrinsics matrix (axes transformation applied to each pose)
+    if extrinsics is not None:
+        ext_matrix = np.array(extrinsics, dtype=np.float64)
+        if ext_matrix.shape != (4, 4):
+            sys.exit(f"ERROR: 'extrinsics' must be a 4×4 matrix, got shape {ext_matrix.shape}")
+        print(f"  Extrinsics (axes transform):\n{ext_matrix}")
+    else:
+        ext_matrix = np.eye(4, dtype=np.float64)
+        print("  Extrinsics: not defined, using identity matrix")
 
     img_dir = output_dir / "images"
     depth_dir = output_dir / "depth"
@@ -372,6 +381,16 @@ def convert(
                 pose = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
             tx, ty, tz, qx, qy, qz, qw = pose
+
+            # Apply axes transformation (extrinsics)
+            rot_mat = Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
+            pose_mat = np.eye(4)
+            pose_mat[:3, :3] = rot_mat
+            pose_mat[:3, 3] = [tx, ty, tz]
+            pose_mat = ext_matrix @ pose_mat
+            tx, ty, tz = pose_mat[:3, 3].tolist()
+            qx, qy, qz, qw = Rotation.from_matrix(pose_mat[:3, :3]).as_quat().tolist()
+
             pose_lines.append(
                 f"{ts_str} {tx:.6f} {ty:.6f} {tz:.6f} " f"{qx:.6f} {qy:.6f} {qz:.6f} {qw:.6f}"
             )
@@ -391,7 +410,7 @@ def convert(
     print(f"  images/ : {len(list(img_dir.glob('*.png')))} files")
     print(f"  depth/  : {len(list(depth_dir.glob('*.png')))} files")
     print(f"  poses.txt: {len(pose_lines)} entries")
-    print(f"  camera_info.yaml: written")
+    print("  camera_info.yaml: written")
 
     print("\n-- Next step --")
     print("  Edit fsr_vln/config/semantic_scene_reconstruction_custom.yaml:")
@@ -425,6 +444,7 @@ _DEFAULTS = {
     "skip": 0,
     "max_depth_mm": 10000,
     "max_interp_gap": 0.1,
+    "extrinsics": None,  # 4×4 axes-transformation matrix; None → identity
 }
 
 
@@ -482,4 +502,5 @@ if __name__ == "__main__":
         skip=int(cfg["skip"]),
         max_depth_mm=int(cfg["max_depth_mm"]),
         max_interp_gap=float(cfg["max_interp_gap"]),
+        extrinsics=cfg.get("extrinsics"),
     )
