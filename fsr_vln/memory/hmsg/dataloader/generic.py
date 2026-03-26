@@ -104,14 +104,25 @@ class RGBDDataset(Dataset, ABC):
         # depth[clip_depth_mask] = 0
         if mask_img:
             depth = depth * rgb
-        mask = depth > 0
+        # Filter: positive, finite (no NaN/Inf from e.g. ZED 32FC1 invalid pixels)
+        mask = (depth > 0) & np.isfinite(depth)
         x = x[mask]
         y = y[mask]
         depth = depth[mask]
+        if depth.size == 0:
+            return o3d.geometry.PointCloud()
+
         # convert to 3D
         X = (x - camera_matrix[0, 2]) * depth / camera_matrix[0, 0]
         Y = (y - camera_matrix[1, 2]) * depth / camera_matrix[1, 1]
         Z = depth
+
+        # Drop any NaN/Inf introduced by degenerate intrinsics
+        valid = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
+        X, Y, Z = X[valid], Y[valid], Z[valid]
+        if Z.size == 0:
+            return o3d.geometry.PointCloud()
+
         # Mean depth in the camera coordinate system for this frame
         if Z.mean() > filter_distance:
             return o3d.geometry.PointCloud()
@@ -120,7 +131,7 @@ class RGBDDataset(Dataset, ABC):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         if not mask_img:
-            colors = rgb[mask]
+            colors = rgb[mask][valid]
             pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
         # Transform point cloud from camera coordinates to world coordinates
         pcd.transform(camera_pose)

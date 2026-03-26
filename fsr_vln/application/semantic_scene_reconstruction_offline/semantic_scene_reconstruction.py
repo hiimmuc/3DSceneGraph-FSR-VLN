@@ -50,13 +50,13 @@ import os
 import hydra
 from omegaconf import DictConfig
 import sys
+import warnings
+
+warnings.filterwarnings("ignore")
 # Add project root directory to Python path
-sys.path.insert(
-    0, os.path.dirname(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from memory.hmsg.graph.graph import Graph
+
 
 def run_scene_reconstruction(params: DictConfig):
     """
@@ -80,25 +80,17 @@ def run_scene_reconstruction(params: DictConfig):
     """
     scene_ids = [params.main.scene_id]  # Use the scene ID specified in the config
 
-    if hasattr(
-            params,
-            'main') and hasattr(
-            params.main,
-            'scene_ids') and params.main.scene_ids:
+    if hasattr(params, "main") and hasattr(params.main, "scene_ids") and params.main.scene_ids:
         # If multiple scene IDs are defined in the config, use them
         scene_ids = params.main.scene_ids
 
     for scene_id in scene_ids:
         # Update the scene_id in params
-        if hasattr(params, 'main'):
+        if hasattr(params, "main"):
             params.main.scene_id = scene_id
         # Create save directory
-        params.main.dataset_path = os.path.join(
-            params.main.dataset_path, scene_id)
-        save_dir = os.path.join(
-            params.main.save_path,
-            params.main.dataset,
-            scene_id)
+        params.main.dataset_path = os.path.join(params.main.dataset_path, scene_id)
+        save_dir = os.path.join(params.main.save_path, params.main.dataset, scene_id)
         params.main.save_path = save_dir
         if not os.path.exists(save_dir):
             os.makedirs(save_dir, exist_ok=True)
@@ -109,7 +101,7 @@ def run_scene_reconstruction(params: DictConfig):
         hmsg = Graph(params)
 
         # Semantic scene reconstruction
-        hmsg.create_feature_map()
+        hmsg.create_feature_map()  # NOTE: warnings show from here
 
         # Save full point cloud, features, and masked point clouds (pcd for all
         # objects)
@@ -127,8 +119,11 @@ def run_scene_reconstruction(params: DictConfig):
         hmsg.build_hier_multimodal_scene_graph(save_path=save_dir)
 
 
-@hydra.main(version_base=None, config_path="../../config/semantic_scene_reconstruction",
-            config_name="semantic_scene_reconstruction_ic4f")  # Default: use ic4f config
+@hydra.main(
+    version_base=None,
+    config_path="../../config/semantic_scene_reconstruction",
+    config_name="semantic_scene_reconstruction_ic4f",
+)  # Default: use ic4f config
 def main(params: DictConfig):
     """
     Main function that loads configuration via Hydra and runs scene reconstruction.

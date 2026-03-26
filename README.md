@@ -204,8 +204,7 @@ pipeline:
 
 ```bash
 cd fsr_vln/
-python application/semantic_scene_reconstrucion_offline/semantic_scene_reconstruction.py \
-    --config-name=semantic_scene_reconstruction_custom
+python application/semantic_scene_reconstruction_offline/semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_custom
 ```
 
 Expected console output:

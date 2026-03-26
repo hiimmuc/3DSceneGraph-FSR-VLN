@@ -7,9 +7,43 @@ import openai
 from openai import AzureOpenAI, OpenAI
 
 
-from openai import AzureOpenAI
+# ---------------------------------------------------------------------------
+# LLM provider factory
+# Set LLM_PROVIDER=azure to use Azure OpenAI; defaults to Ollama (qwen2.5).
+# Relevant env vars:
+#   LLM_PROVIDER          : "ollama" (default) | "azure"
+#   OLLAMA_BASE_URL       : default http://localhost:11434/v1
+#   OLLAMA_MODEL          : default qwen2.5
+#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_VERSION
+#   AZURE_OPENAI_MODEL
+# ---------------------------------------------------------------------------
+_DEFAULT_OLLAMA_MODEL = "qwen3-vl:4b"
+_DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
-# TODO: use Ollama instead of AzureOpenAI, keep the interface same for easy switching between different LLM providers.
+
+def create_llm_client(provider: str = None):
+    """Return (client, model_name) for the configured LLM provider.
+
+    The returned client exposes the same ``client.chat.completions.create``
+    interface regardless of the backend, making it trivial to switch.
+    """
+    if provider is None:
+        provider = os.environ.get("LLM_PROVIDER", "ollama")
+
+    if provider == "azure":
+        client = AzureOpenAI(
+            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", "xxxx"),
+            api_key=os.environ.get("AZURE_OPENAI_API_KEY", "xxxx"),
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "xxxx"),
+        )
+        model = os.environ.get("AZURE_OPENAI_MODEL", "xxxx")
+    else:  # ollama (default)
+        base_url = os.environ.get("OLLAMA_BASE_URL", _DEFAULT_OLLAMA_BASE_URL)
+        model = os.environ.get("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL)
+        client = OpenAI(base_url=base_url, api_key="ollama")
+
+    return client, model
+
 
 def infer_floor_id_from_query(floor_ids: List[int], query: str) -> int:
     """
@@ -65,24 +99,13 @@ def infer_room_type_from_object_list_chat(
         str: a text describing the room type
     """
 
-    end_point = "xxxx"
-    api_key = 'xxxx'
-    api_version = "xxxx"
-    gpt_model = "xxxx"
-
-    client = AzureOpenAI(
-        azure_endpoint=end_point,
-        api_key=api_key,
-        api_version=api_version,
-    )
+    client, gpt_model = create_llm_client()
 
     room_types = ""
     if default_room_type is not None:
         room_types = ", ".join(default_room_type)
         room_types = (
-            "Please pick the most matching room type from the following list: "
-            + room_types
-            + "."
+            "Please pick the most matching room type from the following list: " + room_types + "."
         )
 
     objects = ", ".join(object_list)
@@ -128,9 +151,7 @@ def infer_room_type_from_object_list_chat(
 
 
 class Conversation:
-    def __init__(
-        self, messages: List[dict], include_env_messages: bool = False
-    ) -> None:
+    def __init__(self, messages: List[dict], include_env_messages: bool = False) -> None:
         """
         An interface to OPENAI chat API.
 
@@ -149,11 +170,7 @@ class Conversation:
         if self._include_env_messages:
             return self._messages
         else:
-            return [
-                m
-                for m in self._messages
-                if m["role"].lower() not in ["env", "environment"]
-            ]
+            return [m for m in self._messages if m["role"].lower() not in ["env", "environment"]]
 
     @property
     def messages_including_env(self):
@@ -191,16 +208,7 @@ def parse_hier_query(params, instruction: str) -> Tuple[str, str, str]:
     Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
     """
 
-    azure_endpoint = "xxxx"
-    azure_api_key = "xxxx"
-    azure_api_version = "xxxx"
-    gpt_model = "xxxx"
-
-    client = AzureOpenAI(
-        azure_endpoint=azure_endpoint,
-        api_key=azure_api_key,
-        api_version=azure_api_version,
-    )
+    client, gpt_model = create_llm_client()
 
     # Depending on the query spec, parse the query differently:
     if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
@@ -208,11 +216,15 @@ def parse_hier_query(params, instruction: str) -> Tuple[str, str, str]:
         prompt = f"Please parse the following: {instruction}"
         prompt += "Output Response Format: Comma-separated list of these three things such as [floor 2, living room, couch]"
     elif set(params.main.long_query.spec) == {"obj", "room"}:
-        system_prompt = "You are a query parser. You have to parse a sentence into a room and an object."
+        system_prompt = (
+            "You are a query parser. You have to parse a sentence into a room and an object."
+        )
         prompt = f"Please parse the following: {instruction}"
         prompt += "Output Response Format: Comma-separated list of these two things such as [living room, couch]"
     elif set(params.main.long_query.spec) == {"obj", "floor"}:
-        system_prompt = "You are a query parser. You have to parse a sentence into a floor and an object."
+        system_prompt = (
+            "You are a query parser. You have to parse a sentence into a floor and an object."
+        )
         prompt = f"Please parse the following: {instruction}"
         prompt += "Output Response Format: Comma-separated list of these two things such as [floor 2, couch]"
     elif set(params.main.long_query.spec) == {"obj"}:
@@ -227,13 +239,8 @@ def parse_hier_query(params, instruction: str) -> Tuple[str, str, str]:
         ]
     )
 
-    response = send_query(
-        client,
-        messages=conversation.messages,
-        model=gpt_model,
-        temperature=0.0)
-    raw_result = response.choices[0].message.content.strip().rstrip(
-        "]").lstrip("[")
+    response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
+    raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
 
     # Split safely
     spec = set(params.main.long_query.spec)
@@ -308,22 +315,13 @@ def generate_clip_probes(self, instruction):
     return text_probes
 
 
-def parse_hier_query_use_prompt_insentence_parse(
-        params, instruction: str) -> Tuple[str, str, str]:
+def parse_hier_query_use_prompt_insentence_parse(params, instruction: str) -> Tuple[str, str, str]:
     """
     Parse long language query into a list of short queries at floor, room, and object level
     Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
     """
 
-    end_point = "xxxx"
-    api_key = 'xxxx'
-    api_version = "xxxx"
-    gpt_model = "xxxx"
-    client = AzureOpenAI(
-        azure_endpoint=end_point,
-        api_key=api_key,
-        api_version=api_version,
-    )
+    client, gpt_model = create_llm_client()
 
     # Depending on the query spec, parse the query differently:
     if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
@@ -352,13 +350,8 @@ def parse_hier_query_use_prompt_insentence_parse(
         ]
     )
 
-    response = send_query(
-        client,
-        messages=conversation.messages,
-        model=gpt_model,
-        temperature=0.0)
-    raw_result = response.choices[0].message.content.strip().rstrip(
-        "]").lstrip("[")
+    response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
+    raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
     print("raw_result:", raw_result)
     # import pdb; pdb.set_trace()
     # Split safely
@@ -382,20 +375,13 @@ def parse_hier_query_use_prompt_insentence_parse(
 
 
 def parse_hier_query_use_prompt_insentence_parse_icra(
-        params, instruction: str) -> Tuple[str, str, str]:
+    params, instruction: str
+) -> Tuple[str, str, str]:
     """
     Parse long language query into a list of short queries at floor, room, and object level
     Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
     """
-    azure_endpoint = "xxxx"
-    azure_api_key = "xxxx"
-    azure_api_version = "xxxx"
-    gpt_model = "xxxx"
-    client = AzureOpenAI(
-        azure_endpoint=azure_endpoint,
-        api_key=azure_api_key,
-        api_version=azure_api_version,
-    )
+    client, gpt_model = create_llm_client()
 
     # Depending on the query spec, parse the query differently:
     if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
@@ -439,13 +425,8 @@ def parse_hier_query_use_prompt_insentence_parse_icra(
         ]
     )
 
-    response = send_query(
-        client,
-        messages=conversation.messages,
-        model=gpt_model,
-        temperature=0.0)
-    raw_result = response.choices[0].message.content.strip().rstrip(
-        "]").lstrip("[")
+    response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
+    raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
     print("raw_result:", raw_result)
     # Split safely
     spec = set(params.main.long_query.spec)
@@ -473,9 +454,7 @@ def parse_floor_room_object_gpt35(instruction: str) -> Tuple[str, str, str]:
     Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
     """
 
-    openai_key = os.environ["OPENAI_KEY"]
-    openai.api_key = openai_key
-    client = openai.OpenAI(api_key=openai_key)
+    client, gpt_model = create_llm_client()
     response = client.chat.completions.create(
         model=gpt_model,
         messages=[
@@ -535,12 +514,12 @@ def parse_floor_room_object_gpt35(instruction: str) -> Tuple[str, str, str]:
         ],
     )
     print(response.choices[0].message.content)
-    result = response.choices[0].message.content.strip().rstrip(
-        "]").lstrip("[")
+    result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
     print("floor, room, object:", result)
     decomposition = [x.strip() for x in result.split(",")]
     assert len(decomposition) == 3 and (
-        decomposition[0] != "" or decomposition[1] != "" or decomposition[2] != "")
+        decomposition[0] != "" or decomposition[1] != "" or decomposition[2] != ""
+    )
     return decomposition
 
 
@@ -550,16 +529,7 @@ def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:
     Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
     """
 
-    azure_endpoint = "xxxx"
-    azure_api_key = "xxxx"
-    azure_api_version = "xxxx"
-    gpt_model = "xxxx"
-
-    client = AzureOpenAI(
-        azure_endpoint=azure_endpoint,
-        api_key=azure_api_key,
-        api_version=azure_api_version,
-    )
+    client, gpt_model = create_llm_client()
 
     response = client.chat.completions.create(
         model=gpt_model,
@@ -620,12 +590,12 @@ def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:
         ],
     )
     print(response.choices[0].message.content)
-    result = response.choices[0].message.content.strip().rstrip(
-        "]").lstrip("[")
+    result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
     print("floor, room, object:", result)
     decomposition = [x.strip() for x in result.split(",")]
     assert len(decomposition) == 3 and (
-        decomposition[0] != "" or decomposition[1] != "" or decomposition[2] != "")
+        decomposition[0] != "" or decomposition[1] != "" or decomposition[2] != ""
+    )
     return decomposition
 
 

@@ -53,7 +53,7 @@ import cv2
 import numpy as np
 import yaml
 from scipy.spatial.transform import Rotation, Slerp
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 # ---------------------------------------------------------------------------
 # rosbags: pure-Python ROS2 bag parser (works with both .db3 and .mcap)
@@ -269,7 +269,7 @@ def convert(
         available_topics = {c.topic for c in reader.connections}
         print(f"  Available topics: {sorted(available_topics)}")
 
-        # ── Camera intrinsics ───────────────────────────────────────────
+        # Camera intrinsics
         if camera_info_topic and camera_info_topic in available_topics:
             print(f"  Reading camera info from {camera_info_topic} …")
             info = extract_camera_info(reader, typestore, camera_info_topic)
@@ -291,7 +291,7 @@ def convert(
             height,
         )
 
-        # ── TF trajectory ───────────────────────────────────────────────
+        # TF trajectory
         print(f"  Extracting TF: '{tf_parent}' → '{tf_child}' …")
         ts_tf, trans_tf, quat_tf = extract_tf(reader, typestore, tf_parent, tf_child)
 
@@ -304,7 +304,7 @@ def convert(
                 "poses.txt manually."
             )
 
-        # ── RGB + depth messages ─────────────────────────────────────────
+        # RGB + depth messages
         rgb_conns = [c for c in reader.connections if c.topic == rgb_topic]
         depth_conns = [c for c in reader.connections if c.topic == depth_topic]
 
@@ -323,15 +323,18 @@ def convert(
 
         depth_ts_arr = np.array(sorted(depth_cache.keys()))
 
-        # ── Process RGB frames ───────────────────────────────────────────
+        # Process RGB frames
         pose_lines: list[str] = []
         saved = 0
         skipped = 0
 
         print("  Processing RGB frames …")
         rgb_iter = reader.messages(connections=rgb_conns)
+        total_rgb = sum(c.msgcount for c in rgb_conns)
 
-        for frame_idx, (conn, ts_ns, raw) in enumerate(tqdm(rgb_iter, unit="frame")):
+        for frame_idx, (conn, ts_ns, raw) in enumerate(
+            tqdm(rgb_iter, total=total_rgb, unit="frame")
+        ):
 
             if frame_idx % (skip + 1) != 0:
                 skipped += 1
@@ -341,14 +344,14 @@ def convert(
             ts = stamp_to_sec(msg.header.stamp)
             ts_str = f"{ts:.4f}"
 
-            # ── RGB image ────────────────────────────────────────────────
+            # RGB image
             try:
                 bgr = msg_to_bgr(msg, typestore)
             except ValueError as e:
                 print(f"  [WARN] frame {frame_idx}: {e} — skipping")
                 continue
 
-            # ── Sync depth: find nearest depth frame ─────────────────────
+            # Sync depth: find nearest depth frame
             if len(depth_ts_arr) > 0:
                 nearest_idx = np.argmin(np.abs(depth_ts_arr - ts))
                 nearest_ts = depth_ts_arr[nearest_idx]
@@ -358,7 +361,7 @@ def convert(
             else:
                 depth_frame = np.zeros((bgr.shape[0], bgr.shape[1]), dtype=np.uint16)
 
-            # ── Camera pose from TF ───────────────────────────────────────
+            # Camera pose from TF
             if len(ts_tf) > 0:
                 pose = interpolate_pose(ts, ts_tf, trans_tf, quat_tf, max_interp_gap)
             else:
@@ -373,12 +376,12 @@ def convert(
                 f"{ts_str} {tx:.6f} {ty:.6f} {tz:.6f} " f"{qx:.6f} {qy:.6f} {qz:.6f} {qw:.6f}"
             )
 
-            # ── Save frames ───────────────────────────────────────────────
+            # Save frames
             cv2.imwrite(str(img_dir / f"{ts_str}.png"), bgr)
             cv2.imwrite(str(depth_dir / f"{ts_str}.png"), depth_frame)
             saved += 1
 
-    # ── poses.txt ────────────────────────────────────────────────────────────
+    # Write to poses.txt
     poses_path = output_dir / "poses.txt"
     with open(poses_path, "w") as f:
         f.write("\n".join(pose_lines) + "\n")
@@ -390,7 +393,7 @@ def convert(
     print(f"  poses.txt: {len(pose_lines)} entries")
     print(f"  camera_info.yaml: written")
 
-    print("\n── Next step ────────────────────────────────────────────────────")
+    print("\n-- Next step --")
     print("  Edit fsr_vln/config/semantic_scene_reconstruction_custom.yaml:")
     print(f"    main.dataset_path: {output_dir.parent}/")
     print(f"    main.scene_id:     {output_dir.name}")

@@ -3,10 +3,10 @@
 # Edit this file and run:  python scripts/rosbag_2_dataset.py
 
 # Path to the ROS2 bag directory (e.g. rosbag2_xxx/)
-bag: ./data/rosbag2_2026_03_11-14_26_05
+bag: ../../data/rosbag2_2026_03_11-14_26_05
 
 # Output dataset directory (will be created if it does not exist)
-output: ./data/dataset_converted
+output: ../../data/HoloAgent/dataset_converted
 
 # Topics
 rgb_topic: /zed_x_mini/colored_image
@@ -28,7 +28,7 @@ height: 1080
 
 # Processing options
 # Save every (skip+1)-th RGB frame; 0 = save all frames
-skip: 0
+skip: 9
 # Clip depth values above this threshold (millimetres)
 max_depth_mm: 10000.0  # e.g. 5000 = 5 metres
 

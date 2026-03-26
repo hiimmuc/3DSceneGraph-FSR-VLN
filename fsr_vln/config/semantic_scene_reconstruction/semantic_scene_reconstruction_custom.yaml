@@ -3,9 +3,9 @@ main:
     use_gpt: false
     dataset: horizon #scannet # hm3dsem #replica #iphone
     scene_id: dataset_converted
-    dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/
+    dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/HoloAgent
     depth_cut: 6.0
-    save_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/outputs/built_graphs
+    save_path: outputs/built_graphs
 models:
     clip:
         type: ViT-L/14 # ViT-B-32 # ViT-H-14
@@ -34,5 +34,5 @@ pipeline:
     grid_resolution: 0.05
     merge_type: sequential # hierarchical
     save_intermediate_results: true
-    obj_labels: SCANNET200 #FINALLABEL #SCANNET200 #COCO_STUFF_CLASSES #IMAGENET21K_LABELS #HM3DSEM_LABELS
+    obj_labels: IMAGENET21K_LABELS #FINALLABEL #SCANNET200 #COCO_STUFF_CLASSES #IMAGENET21K_LABELS #HM3DSEM_LABELS
     merge_objects_graph: false

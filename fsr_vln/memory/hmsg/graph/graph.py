@@ -1,4 +1,5 @@
 """Class to represent the HMSG graph."""
+
 try:
     from oss2.credentials import EnvironmentVariableCredentialsProvider
     import oss2
@@ -72,7 +73,12 @@ from omegaconf import DictConfig
 import numpy as np
 import open3d as o3d
 import matplotlib
-matplotlib.use('Agg')  # Use non-GUI backend
+import open3d.utility as utility
+
+utility.set_verbosity_level(utility.VerbosityLevel.Error)
+
+
+matplotlib.use("Agg")  # Use non-GUI backend
 
 
 # pylint: disable=all
@@ -118,7 +124,7 @@ class Graph:
                 "ViT-B-32",
                 pretrained=str(self.cfg.models.clip.checkpoint),
                 device=self.device,
-                precision='fp16',
+                precision="fp16",
             )
             self.clip_feat_dim = CLIP_DIM["ViT-B-32"]
 
@@ -128,7 +134,7 @@ class Graph:
             self.graph_path = self.cfg.main.graph_path
 
             end_point = "xxxx"
-            api_key = 'xxxx'
+            api_key = "xxxx"
             api_version = "xxxx"
             self.gpt_model = "xxxx"
 
@@ -142,7 +148,8 @@ class Graph:
             dataset_cfg = {
                 "root_dir": self.cfg.main.dataset_path,
                 "transforms": None,
-                "depth_cut": self.cfg.main.depth_cut}
+                "depth_cut": self.cfg.main.depth_cut,
+            }
             # import pdb; pdb.set_trace()
             if self.cfg.main.dataset == "hm3dsem":
                 self.dataset = HM3DSemDataset(dataset_cfg)
@@ -162,8 +169,7 @@ class Graph:
             if not os.path.exists(self.graph_tmp_folder):
                 os.makedirs(self.graph_tmp_folder)
 
-            self.vln_result_dir = os.path.join(
-                cfg.main.save_path, "vln_result_presentation")
+            self.vln_result_dir = os.path.join(cfg.main.save_path, "vln_result_presentation")
             if not os.path.exists(self.vln_result_dir):
                 os.makedirs(self.vln_result_dir)
             self.curr_query_save_dir = self.vln_result_dir
@@ -176,8 +182,7 @@ class Graph:
             if not os.path.exists(self.graph_tmp_folder):
                 os.makedirs(self.graph_tmp_folder)
 
-            self.vln_result_dir = os.path.join(
-                cfg.main.save_path, "vln_result_presentation")
+            self.vln_result_dir = os.path.join(cfg.main.save_path, "vln_result_presentation")
             if not os.path.exists(self.vln_result_dir):
                 os.makedirs(self.vln_result_dir)
 
@@ -207,7 +212,8 @@ class Graph:
             dataset_cfg = {
                 "root_dir": self.cfg.main.dataset_path,
                 "transforms": None,
-                "depth_cut": self.cfg.main.depth_cut}
+                "depth_cut": self.cfg.main.depth_cut,
+            }
             if self.cfg.main.dataset == "hm3dsem":
                 self.dataset = HM3DSemDataset(dataset_cfg)
             elif self.cfg.main.dataset == "scannet":
@@ -277,11 +283,11 @@ class Graph:
         self.run_mobilityvln = False
         if self.run_mobilityvln:
             from scipy.spatial.transform import Rotation as R
+
             now_str = datetime.now().strftime("%Y%m%d%H%M%S")
             self.episode_root = f"/home/unitree/code_vln/results/{now_str}"
             os.makedirs(self.episode_root, exist_ok=True)
-            self.colmap_data_dir = os.path.join(
-                self.episode_root, "colmap_data")
+            self.colmap_data_dir = os.path.join(self.episode_root, "colmap_data")
             self.colmap_img_dir = os.path.join(self.colmap_data_dir, "images")
             self.colmap_depth_dir = os.path.join(self.colmap_data_dir, "depth")
             os.makedirs(self.colmap_data_dir, exist_ok=True)
@@ -289,24 +295,19 @@ class Graph:
             os.makedirs(self.colmap_depth_dir, exist_ok=True)
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             self.video_writer = cv2.VideoWriter(
-                os.path.join(self.episode_root, "output_video.mp4"),
-                fourcc,
-                5,
-                (640, 480))
+                os.path.join(self.episode_root, "output_video.mp4"), fourcc, 5, (640, 480)
+            )
             self.camera_id = 1
             self.frame_count = 0
-            self.fp = open(
-                os.path.join(
-                    self.colmap_data_dir,
-                    "images.txt"),
-                "w+")
-            self.T_switch_axis = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [
-                                          0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64)  # g1_navi
+            self.fp = open(os.path.join(self.colmap_data_dir, "images.txt"), "w+")
+            self.T_switch_axis = np.array(
+                [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64
+            )  # g1_navi
             self.T_tomap = np.linalg.inv(self.T_switch_axis)
-            for i in tqdm(range(0,
-                                len(self.dataset),
-                                self.cfg.pipeline.skip_frames),
-                          desc="Generating tourvideo for mobilityvln"):
+            for i in tqdm(
+                range(0, len(self.dataset), self.cfg.pipeline.skip_frames),
+                desc="Generating tourvideo for mobilityvln",
+            ):
                 rgb_image, depth_image, pose, _, depth_intrinsics = self.dataset[i]
                 pose = self.T_tomap @ pose
                 rgb = np.array(rgb_image)
@@ -317,16 +318,8 @@ class Graph:
                 # Save image
                 image_name = f"image{self.frame_count:05}.png"
                 depth_name = f"depth{self.frame_count:05}.png"
-                cv2.imwrite(
-                    os.path.join(
-                        self.colmap_img_dir,
-                        image_name),
-                    img_bgr)
-                cv2.imwrite(
-                    os.path.join(
-                        self.colmap_depth_dir,
-                        depth_name),
-                    depth)
+                cv2.imwrite(os.path.join(self.colmap_img_dir, image_name), img_bgr)
+                cv2.imwrite(os.path.join(self.colmap_depth_dir, depth_name), depth)
                 #  Extract pose information
                 tx, ty, tz = pose[0, 3], pose[1, 3], pose[2, 3]
                 rot_mat = pose[:3, :3]
@@ -336,32 +329,31 @@ class Graph:
                 yaw, pitch, roll = r.as_euler("zyx", degrees=False)
                 # Write pose to file
                 self.fp.write(
-                    f"{self.frame_count} {qw} {qx} {qy} {qz} {tx} {ty} {tz} {yaw} {self.camera_id} {image_name}\n\n")
+                    f"{self.frame_count} {qw} {qx} {qy} {qz} {tx} {ty} {tz} {yaw} {self.camera_id} {image_name}\n\n"
+                )
                 self.frame_count += 1
 
         # create the RGB-D point cloud
-        for loop_idx, i in enumerate(tqdm(range(0,
-                            len(self.dataset),
-                            self.cfg.pipeline.skip_frames),
-                      desc="Creating RGB-D point cloud")):
+        for loop_idx, i in enumerate(
+            tqdm(
+                range(0, len(self.dataset), self.cfg.pipeline.skip_frames),
+                desc="Creating RGB-D point cloud",
+            )
+        ):
             rgb_image, depth_image, pose, _, depth_intrinsics = self.dataset[i]
-            self.full_pcd += self.dataset.create_pcd(
-                rgb_image, depth_image, pose, idx=i)
+            self.full_pcd += self.dataset.create_pcd(rgb_image, depth_image, pose, idx=i)
             # Periodically downsample to keep memory usage bounded
             if loop_idx % 10 == 9:
                 self.full_pcd = self.full_pcd.voxel_down_sample(
-                    voxel_size=self.cfg.pipeline.voxel_size)
+                    voxel_size=self.cfg.pipeline.voxel_size
+                )
 
         # filter point cloud
-        self.full_pcd = self.full_pcd.voxel_down_sample(
-            voxel_size=self.cfg.pipeline.voxel_size
-        )
+        self.full_pcd = self.full_pcd.voxel_down_sample(voxel_size=self.cfg.pipeline.voxel_size)
         # self.full_pcd = pcd_denoise_dbscan_vis(self.full_pcd, eps=0.05, min_points=50, visualize=True)
-        self.full_pcd = pcd_denoise_dbscan(
-            self.full_pcd, eps=0.01, min_points=100)
+        self.full_pcd = pcd_denoise_dbscan(self.full_pcd, eps=0.01, min_points=100)
         # self.full_pcd = pcd_denoise_statistical(self.full_pcd)
-        cl, ind = self.full_pcd.remove_radius_outlier(
-            nb_points=1000, radius=1.0)  # 0.05,
+        cl, ind = self.full_pcd.remove_radius_outlier(nb_points=1000, radius=1.0)  # 0.05,
         inlier_cloud = self.full_pcd.select_by_index(ind)
         self.full_pcd = inlier_cloud
         self.save_full_pcd(path=self.cfg.main.save_path)
@@ -369,19 +361,17 @@ class Graph:
         # create tree from full point cloud
         locs_in = np.array(self.full_pcd.points)
         print("full_pcd point num: ", locs_in.shape)
-        tree_pcd = cKDTree(locs_in)
+        tree_pcd = cKDTree(locs_in)  # NOTE: shows too much warnings
         n_points = locs_in.shape[0]
         counter = torch.zeros((n_points, 1), device="cpu")
-        sum_features = torch.zeros(
-            (n_points, self.clip_feat_dim), device="cpu")
+        sum_features = torch.zeros((n_points, self.clip_feat_dim), device="cpu")
 
         # extract features for each frame
         frames_pcd = []
         frames_feats = []
-        for i in tqdm(range(0,
-                            len(self.dataset),
-                            self.cfg.pipeline.skip_frames),
-                      desc="Extracting features"):
+        for i in tqdm(
+            range(0, len(self.dataset), self.cfg.pipeline.skip_frames), desc="Extracting features"
+        ):
             rgb_image, depth_image, pose, _, _ = self.dataset[i]
             if rgb_image.size != depth_image.size:
                 rgb_image = rgb_image.resize(depth_image.size)
@@ -417,6 +407,8 @@ class Graph:
             dis, idx = tree_pcd.query(np.asarray(pcd.points), k=1, workers=-1)
             sum_features[idx] += F_2D
             counter[idx] += 1
+            pass
+
         # compute the average features
         counter[counter == 0] = 1e-5
         sum_features = sum_features / counter
@@ -445,7 +437,7 @@ class Graph:
                 frames_pcd,
                 self.cfg.pipeline.init_overlap_thresh,
                 self.cfg.pipeline.voxel_size,
-                self.cfg.pipeline.iou_thresh
+                self.cfg.pipeline.iou_thresh,
             )
 
         # remove any small pcds
@@ -457,8 +449,7 @@ class Graph:
         # fuse point features in every 3d mask
         # self.mask_pcds, finally merged 3d instances
         masks_feats = []
-        for i, mask_3d in tqdm(enumerate(self.mask_pcds),
-                               desc="Fusing features"):
+        for i, mask_3d in tqdm(enumerate(self.mask_pcds), desc="Fusing features"):
             # find the points in the mask
             # mask_3d = mask_3d.voxel_down_sample(self.cfg.pipeline.voxel_size * 2)
             mask_3d = mask_3d.voxel_down_sample(self.cfg.pipeline.voxel_size)
@@ -470,15 +461,14 @@ class Graph:
             n_valid = int(valid_mask.sum())
             n_removed = n_total - n_valid
             if n_removed > 0:
-                tqdm.write(
-                    f"mask {i}: removed {n_removed}/{n_total} points with dist > {0.1}")
+                tqdm.write(f"mask {i}: removed {n_removed}/{n_total} points with dist > {0.1}")
             # if n_valid == 0:
             #     # All points are too far; insert a zero vector as fallback
             #     masks_feats.append(
             #         np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
             #     )
             #     continue
-             # Keep only valid indices
+            # Keep only valid indices
             valid_idx = idx[valid_mask]
             # shape = (n_valid, clip_feat_dim)
             feats = self.full_feats_array[valid_idx]
@@ -486,8 +476,8 @@ class Graph:
             # filter feats with dbscan
             if feats.shape[0] == 0:
                 masks_feats.append(
-                    np.zeros(
-                        (1, self.clip_feat_dim), dtype=self.full_feats_array.dtype))
+                    np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
+                )
                 continue
             feats = feats_denoise_dbscan(feats, eps=0.01, min_points=100)
             # feats = feats_denoise_dbscan(feats, eps=1.0, min_points=50) # set
@@ -505,9 +495,7 @@ class Graph:
         downpcd = self.full_pcd.voxel_down_sample(voxel_size=0.05)
         # flip the z and y axis
         if flip_zy:
-            downpcd.points = o3d.utility.Vector3dVector(
-                np.array(downpcd.points)[:, [0, 2, 1]]
-            )
+            downpcd.points = o3d.utility.Vector3dVector(np.array(downpcd.points)[:, [0, 2, 1]])
             downpcd.transform(np.eye(4) * np.array([1, 1, -1, 1]))
         # rotate the point cloud to align floor with the y axis
         T1 = np.eye(4)
@@ -517,8 +505,7 @@ class Graph:
 
         # divide z axis range into 0.01m bin
         reselotion = 0.01
-        bins = np.abs(np.max(downpcd[:, 1]) -
-                      np.min(downpcd[:, 1])) / reselotion
+        bins = np.abs(np.max(downpcd[:, 1]) - np.min(downpcd[:, 1])) / reselotion
         print("min, max", np.min(downpcd[:, 1]), np.max(downpcd[:, 1]))
         print("bins", bins)
         z_hist = np.histogram(downpcd[:, 1], bins=int(bins))
@@ -531,27 +518,19 @@ class Graph:
         print(np.mean(z_hist_smooth))
         min_peak_height = np.percentile(z_hist_smooth, 90)
         print("min_peak_height", min_peak_height)
-        peaks, _ = find_peaks(
-            z_hist_smooth, distance=distance, height=min_peak_height)
+        peaks, _ = find_peaks(z_hist_smooth, distance=distance, height=min_peak_height)
 
         # plot the histogram
         if self.cfg.pipeline.save_intermediate_results:
             plt.figure()
             plt.plot(z_hist[1][:-1], z_hist_smooth)
             plt.plot(z_hist[1][peaks], z_hist_smooth[peaks], "x")
-            plt.hlines(
-                min_peak_height, np.min(
-                    z_hist[1]), np.max(
-                    z_hist[1]), colors="r")
-            plt.savefig(
-                os.path.join(
-                    self.graph_tmp_folder,
-                    "floor_histogram.png"))
+            plt.hlines(min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r")
+            plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram.png"))
 
         # cluster the peaks using DBSCAN
         peaks_locations = z_hist[1][peaks]
-        clustering = DBSCAN(eps=1, min_samples=1).fit(
-            peaks_locations.reshape(-1, 1))
+        clustering = DBSCAN(eps=1, min_samples=1).fit(peaks_locations.reshape(-1, 1))
         labels = clustering.labels_
 
         # plot the histogram
@@ -559,10 +538,7 @@ class Graph:
             plt.figure()
             plt.plot(z_hist[1][:-1], z_hist_smooth)
             plt.plot(z_hist[1][peaks], z_hist_smooth[peaks], "x")
-            plt.hlines(
-                min_peak_height, np.min(
-                    z_hist[1]), np.max(
-                    z_hist[1]), colors="r")
+            plt.hlines(min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r")
             # plot the clusters
             for i in range(len(np.unique(labels))):
                 plt.plot(
@@ -570,10 +546,7 @@ class Graph:
                     z_hist_smooth[peaks[labels == i]],
                     "o",
                 )
-            plt.savefig(
-                os.path.join(
-                    self.graph_tmp_folder,
-                    "floor_histogram_cluster.png"))
+            plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram_cluster.png"))
 
         # for each cluster find the top 2 peaks
         clustred_peaks = []
@@ -589,8 +562,7 @@ class Graph:
             top_p = p[np.argsort(z_hist_smooth[p])[-2:]].tolist()
             top_p = [z_hist[1][p] for p in top_p]
             clustred_peaks.append(top_p)
-        clustred_peaks = [
-            item for sublist in clustred_peaks for item in sublist]
+        clustred_peaks = [item for sublist in clustred_peaks for item in sublist]
         clustred_peaks = np.sort(clustred_peaks)
         print("clustred_peaks", clustred_peaks)
 
@@ -621,8 +593,7 @@ class Graph:
             bbox = floor_pcd.get_axis_aligned_bounding_box()
             floor_obj.vertices = np.asarray(bbox.get_box_points())
             floor_obj.pcd = floor_pcd
-            floor_obj.floor_zero_level = np.min(
-                np.array(floor_pcd.points)[:, 1])
+            floor_obj.floor_zero_level = np.min(np.array(floor_pcd.points)[:, 1])
             floor_obj.floor_height = floor[1] - floor_obj.floor_zero_level
             self.floors.append(floor_obj)
             floors_pcd.append(floor_pcd)
@@ -633,7 +604,8 @@ class Graph:
         """Segment the floors from the full point cloud :param path: str, The
         path to save the intermediate results."""
         import matplotlib
-        matplotlib.use('Agg')  # Use non-interactive backend
+
+        matplotlib.use("Agg")  # Use non-interactive backend
         import matplotlib.pyplot as plt
 
         # downsample the point cloud
@@ -641,9 +613,7 @@ class Graph:
         downpcd = self.full_pcd.voxel_down_sample(voxel_size=0.05)
         # flip the z and y axis
         if flip_zy:
-            downpcd.points = o3d.utility.Vector3dVector(
-                np.array(downpcd.points)[:, [0, 2, 1]]
-            )
+            downpcd.points = o3d.utility.Vector3dVector(np.array(downpcd.points)[:, [0, 2, 1]])
             downpcd.transform(np.eye(4) * np.array([1, 1, -1, 1]))
         # rotate the point cloud to align floor with the y axis
         T1 = np.eye(4)
@@ -653,8 +623,7 @@ class Graph:
 
         # divide z axis range into 0.01m bin
         reselotion = 0.01
-        bins = np.abs(np.max(downpcd[:, 1]) -
-                      np.min(downpcd[:, 1])) / reselotion
+        bins = np.abs(np.max(downpcd[:, 1]) - np.min(downpcd[:, 1])) / reselotion
         print("min, max", np.min(downpcd[:, 1]), np.max(downpcd[:, 1]))
         print("bins", bins)
         z_hist = np.histogram(downpcd[:, 1], bins=int(bins))
@@ -667,27 +636,19 @@ class Graph:
         print(np.mean(z_hist_smooth))
         min_peak_height = np.percentile(z_hist_smooth, 90)
         print("min_peak_height", min_peak_height)
-        peaks, _ = find_peaks(
-            z_hist_smooth, distance=distance, height=min_peak_height)
+        peaks, _ = find_peaks(z_hist_smooth, distance=distance, height=min_peak_height)
 
         # plot the histogram
         if self.cfg.pipeline.save_intermediate_results:
             plt.figure()
             plt.plot(z_hist[1][:-1], z_hist_smooth)
             plt.plot(z_hist[1][peaks], z_hist_smooth[peaks], "x")
-            plt.hlines(
-                min_peak_height, np.min(
-                    z_hist[1]), np.max(
-                    z_hist[1]), colors="r")
-            plt.savefig(
-                os.path.join(
-                    self.graph_tmp_folder,
-                    "floor_histogram.png"))
+            plt.hlines(min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r")
+            plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram.png"))
 
         # cluster the peaks using DBSCAN
         peaks_locations = z_hist[1][peaks]
-        clustering = DBSCAN(eps=1, min_samples=1).fit(
-            peaks_locations.reshape(-1, 1))
+        clustering = DBSCAN(eps=1, min_samples=1).fit(peaks_locations.reshape(-1, 1))
         labels = clustering.labels_
 
         # plot the histogram
@@ -695,10 +656,7 @@ class Graph:
             plt.figure()
             plt.plot(z_hist[1][:-1], z_hist_smooth)
             plt.plot(z_hist[1][peaks], z_hist_smooth[peaks], "x")
-            plt.hlines(
-                min_peak_height, np.min(
-                    z_hist[1]), np.max(
-                    z_hist[1]), colors="r")
+            plt.hlines(min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r")
             # plot the clusters
             for i in range(len(np.unique(labels))):
                 plt.plot(
@@ -706,10 +664,7 @@ class Graph:
                     z_hist_smooth[peaks[labels == i]],
                     "o",
                 )
-            plt.savefig(
-                os.path.join(
-                    self.graph_tmp_folder,
-                    "floor_histogram_cluster.png"))
+            plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram_cluster.png"))
 
         # for each cluster find the top 2 peaks
         clustred_peaks = []
@@ -725,8 +680,7 @@ class Graph:
             top_p = p[np.argsort(z_hist_smooth[p])[-2:]].tolist()
             top_p = [z_hist[1][p] for p in top_p]
             clustred_peaks.append(top_p)
-        clustred_peaks = [
-            item for sublist in clustred_peaks for item in sublist]
+        clustred_peaks = [item for sublist in clustred_peaks for item in sublist]
         clustred_peaks = np.sort(clustred_peaks)
         print("clustred_peaks", clustred_peaks)
 
@@ -764,9 +718,7 @@ class Graph:
 
         # Debug output: print clustred_peaks and adjusted_peaks
         print("Original clustred_peaks:", clustred_peaks)
-        print(
-            "Adjusted clustred_peaks after inserting virtual boundaries:",
-            adjusted_peaks)
+        print("Adjusted clustred_peaks after inserting virtual boundaries:", adjusted_peaks)
 
         # Debug output: print floor ranges
         print("Generated floor ranges:", floors)
@@ -786,8 +738,7 @@ class Graph:
             bbox = floor_pcd.get_axis_aligned_bounding_box()
             floor_obj.vertices = np.asarray(bbox.get_box_points())
             floor_obj.pcd = floor_pcd
-            floor_obj.floor_zero_level = np.min(
-                np.array(floor_pcd.points)[:, 1])
+            floor_obj.floor_zero_level = np.min(np.array(floor_pcd.points)[:, 1])
             floor_obj.floor_height = floor[1] - floor_obj.floor_zero_level
             self.floors.append(floor_obj)
             floors_pcd.append(floor_pcd)
@@ -801,9 +752,7 @@ class Graph:
         downpcd = self.full_pcd.voxel_down_sample(voxel_size=0.05)
         # flip the z and y axis
         if flip_zy:
-            downpcd.points = o3d.utility.Vector3dVector(
-                np.array(downpcd.points)[:, [0, 2, 1]]
-            )
+            downpcd.points = o3d.utility.Vector3dVector(np.array(downpcd.points)[:, [0, 2, 1]])
             downpcd.transform(np.eye(4) * np.array([1, 1, -1, 1]))
         # rotate the point cloud to align floor with the y axis
         T1 = np.eye(4)
@@ -813,8 +762,7 @@ class Graph:
 
         # divide z axis range into 0.01m bin
         reselotion = 0.01
-        bins = np.abs(np.max(downpcd[:, 1]) -
-                      np.min(downpcd[:, 1])) / reselotion
+        bins = np.abs(np.max(downpcd[:, 1]) - np.min(downpcd[:, 1])) / reselotion
         print("min, max", np.min(downpcd[:, 1]), np.max(downpcd[:, 1]))
         print("bins", bins)
         z_hist = np.histogram(downpcd[:, 1], bins=int(bins))
@@ -827,27 +775,19 @@ class Graph:
         print(np.mean(z_hist_smooth))
         min_peak_height = np.percentile(z_hist_smooth, 90)
         print("min_peak_height", min_peak_height)
-        peaks, _ = find_peaks(
-            z_hist_smooth, distance=distance, height=min_peak_height)
+        peaks, _ = find_peaks(z_hist_smooth, distance=distance, height=min_peak_height)
 
         # plot the histogram
         if self.cfg.pipeline.save_intermediate_results:
             plt.figure()
             plt.plot(z_hist[1][:-1], z_hist_smooth)
             plt.plot(z_hist[1][peaks], z_hist_smooth[peaks], "x")
-            plt.hlines(
-                min_peak_height, np.min(
-                    z_hist[1]), np.max(
-                    z_hist[1]), colors="r")
-            plt.savefig(
-                os.path.join(
-                    self.graph_tmp_folder,
-                    "floor_histogram.png"))
+            plt.hlines(min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r")
+            plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram.png"))
 
         # cluster the peaks using DBSCAN
         peaks_locations = z_hist[1][peaks]
-        clustering = DBSCAN(eps=1, min_samples=1).fit(
-            peaks_locations.reshape(-1, 1))
+        clustering = DBSCAN(eps=1, min_samples=1).fit(peaks_locations.reshape(-1, 1))
         labels = clustering.labels_
 
         # plot the histogram
@@ -855,10 +795,7 @@ class Graph:
             plt.figure()
             plt.plot(z_hist[1][:-1], z_hist_smooth)
             plt.plot(z_hist[1][peaks], z_hist_smooth[peaks], "x")
-            plt.hlines(
-                min_peak_height, np.min(
-                    z_hist[1]), np.max(
-                    z_hist[1]), colors="r")
+            plt.hlines(min_peak_height, np.min(z_hist[1]), np.max(z_hist[1]), colors="r")
             # plot the clusters
             for i in range(len(np.unique(labels))):
                 plt.plot(
@@ -866,10 +803,7 @@ class Graph:
                     z_hist_smooth[peaks[labels == i]],
                     "o",
                 )
-            plt.savefig(
-                os.path.join(
-                    self.graph_tmp_folder,
-                    "floor_histogram_cluster.png"))
+            plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram_cluster.png"))
 
         # for each cluster find the top 2 peaks
         clustred_peaks = []
@@ -885,8 +819,7 @@ class Graph:
             top_p = p[np.argsort(z_hist_smooth[p])[-2:]].tolist()
             top_p = [z_hist[1][p] for p in top_p]
             clustred_peaks.append(top_p)
-        clustred_peaks = [
-            item for sublist in clustred_peaks for item in sublist]
+        clustred_peaks = [item for sublist in clustred_peaks for item in sublist]
         clustred_peaks = np.sort(clustred_peaks)
         print("clustred_peaks", clustred_peaks)
 
@@ -917,8 +850,7 @@ class Graph:
             bbox = floor_pcd.get_axis_aligned_bounding_box()
             floor_obj.vertices = np.asarray(bbox.get_box_points())
             floor_obj.pcd = floor_pcd
-            floor_obj.floor_zero_level = np.min(
-                np.array(floor_pcd.points)[:, 1])
+            floor_obj.floor_zero_level = np.min(np.array(floor_pcd.points)[:, 1])
             floor_obj.floor_height = floor[1] - floor_obj.floor_zero_level
             self.floors.append(floor_obj)
             floors_pcd.append(floor_pcd)
@@ -941,18 +873,14 @@ class Graph:
         # import pdb; pdb.set_trace()
         floor_zero_level = floor.floor_zero_level
         floor_height = floor.floor_height
-        print(
-            "floor_zero_level, floor_height = ",
-            floor_zero_level,
-            floor_height)
+        print("floor_zero_level, floor_height = ", floor_zero_level, floor_height)
         # import pdb; pdb.set_trace()
         ## Slice below the ceiling ##
         xyz = xyz[xyz[:, 1] < floor_zero_level + floor_height - 0.3]
         # xyz = xyz[xyz[:, 1] >= floor_zero_level + 1.5]
         xyz = xyz[xyz[:, 1] >= floor_zero_level + 0.3]
         # xyz = xyz[xyz[:, 1] >= floor_zero_level + 0.5]
-        xyz_full = xyz_full[xyz_full[:, 1] <
-                            floor_zero_level + floor_height - 0.2]
+        xyz_full = xyz_full[xyz_full[:, 1] < floor_zero_level + floor_height - 0.2]
         ## Slice above the floor and below the ceiling ##
         # xyz = xyz[xyz[:, 1] < floor_zero_level + 1.8]
         # xyz = xyz[xyz[:, 1] > floor_zero_level + 0.8]
@@ -976,33 +904,21 @@ class Graph:
 
         # calc 2d histogram of the floor using the xyz point cloud to extract
         # the walls skeleton
-        num_bins = (int(grid_size[0] // resolution),
-                    int(grid_size[1] // resolution))
+        num_bins = (int(grid_size[0] // resolution), int(grid_size[1] // resolution))
         num_bins = (num_bins[1] + 1, num_bins[0] + 1)
         hist, _, _ = np.histogram2d(pcd_2d[:, 1], pcd_2d[:, 0], bins=num_bins)
         if self.cfg.pipeline.save_intermediate_results:
             # plot the histogram
             plt.figure()
-            plt.imshow(
-                hist,
-                interpolation="nearest",
-                cmap="jet",
-                origin="lower")
+            plt.imshow(hist, interpolation="nearest", cmap="jet", origin="lower")
             plt.colorbar()
             plt.savefig(os.path.join(tmp_floor_path, "2D_histogram.png"))
 
         # applythresholding
-        hist = cv2.normalize(
-            hist,
-            hist,
-            0,
-            255,
-            cv2.NORM_MINMAX).astype(
-            np.uint8)
+        hist = cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         hist = cv2.GaussianBlur(hist, (5, 5), 1)
         hist_threshold = 0.25 * np.max(hist)
-        _, walls_skeleton = cv2.threshold(
-            hist, hist_threshold, 255, cv2.THRESH_BINARY)
+        _, walls_skeleton = cv2.threshold(hist, hist_threshold, 255, cv2.THRESH_BINARY)
 
         # create a bigger image to avoid losing the walls
         walls_skeleton = cv2.copyMakeBorder(
@@ -1011,23 +927,13 @@ class Graph:
 
         # apply closing to the walls skeleton
         kernal = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-        walls_skeleton = cv2.morphologyEx(
-            walls_skeleton, cv2.MORPH_CLOSE, kernal, iterations=1
-        )
+        walls_skeleton = cv2.morphologyEx(walls_skeleton, cv2.MORPH_CLOSE, kernal, iterations=1)
 
         # extract outside boundary from histogram of xyz_full
-        hist_full, _, _ = np.histogram2d(
-            xyz_full[:, 1], xyz_full[:, 0], bins=num_bins)
-        hist_full = cv2.normalize(
-            hist_full,
-            hist_full,
-            0,
-            255,
-            cv2.NORM_MINMAX).astype(
-            np.uint8)
+        hist_full, _, _ = np.histogram2d(xyz_full[:, 1], xyz_full[:, 0], bins=num_bins)
+        hist_full = cv2.normalize(hist_full, hist_full, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         hist_full = cv2.GaussianBlur(hist_full, (21, 21), 2)
-        _, outside_boundary = cv2.threshold(
-            hist_full, 0, 255, cv2.THRESH_BINARY)
+        _, outside_boundary = cv2.threshold(hist_full, 0, 255, cv2.THRESH_BINARY)
 
         # create a bigger image to avoid losing the walls
         outside_boundary = cv2.copyMakeBorder(
@@ -1058,14 +964,11 @@ class Graph:
             plt.savefig(os.path.join(tmp_floor_path, "outside_boundary.png"))
 
         # combine the walls skelton and outside boundary
-        full_map = cv2.bitwise_or(
-            walls_skeleton,
-            cv2.bitwise_not(outside_boundary))
+        full_map = cv2.bitwise_or(walls_skeleton, cv2.bitwise_not(outside_boundary))
 
         # apply closing to the full map
         kernal = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        full_map = cv2.morphologyEx(
-            full_map, cv2.MORPH_CLOSE, kernal, iterations=2)
+        full_map = cv2.morphologyEx(full_map, cv2.MORPH_CLOSE, kernal, iterations=2)
 
         if self.cfg.pipeline.save_intermediate_results:
             # plot the full map
@@ -1073,8 +976,7 @@ class Graph:
             plt.imshow(full_map, cmap="gray", origin="lower")
             plt.savefig(os.path.join(tmp_floor_path, "full_map.png"))
         # apply distance transform to the full map
-        room_vertices = distance_transform(
-            full_map, resolution, tmp_floor_path)
+        room_vertices = distance_transform(full_map, resolution, tmp_floor_path)
         # room_vertices = [room_vertices[0]] # one room case
 
         # using the 2D room vertices, map the room back to the original point
@@ -1083,8 +985,7 @@ class Graph:
         room_masks = []
         room_2d_points = []
         floor_tree = cKDTree(np.array(floor_pcd.points))
-        for i in tqdm(range(len(room_vertices)),
-                      desc="Assign floor points to rooms"):
+        for i in tqdm(range(len(room_vertices)), desc="Assign floor points to rooms"):
             print("idx = ", i)
             room = np.zeros_like(full_map)
             room[room_vertices[i][0], room_vertices[i][1]] = 255
@@ -1093,15 +994,12 @@ class Graph:
             room_2d_points.append(room_m)
             # extrude the 2D room to 3D room by adding z value from floor zero
             # level to floor zero level + floor height, step by 0.1m
-            z_levels = np.arange(
-                floor_zero_level, floor_zero_level + floor_height, 0.05
-            )
+            z_levels = np.arange(floor_zero_level, floor_zero_level + floor_height, 0.05)
             z_levels = z_levels.reshape(-1, 1)
             z_levels *= -1
             room_m3dd = []
             for z in z_levels:
-                room_m3d = np.hstack(
-                    (room_m, np.ones((room_m.shape[0], 1)) * z))
+                room_m3d = np.hstack((room_m, np.ones((room_m.shape[0], 1)) * z))
                 room_m3dd.append(room_m3d)
             room_m3d = np.concatenate(room_m3dd, axis=0)
             pcd = o3d.geometry.PointCloud()
@@ -1125,15 +1023,11 @@ class Graph:
 
         all_global_clip_feats = dict()
         for i, img_id in tqdm(
-            enumerate(
-                range(
-                    0, len(
-                self.dataset), self.cfg.pipeline.skip_frames)), desc="Computing room features"):
+            enumerate(range(0, len(self.dataset), self.cfg.pipeline.skip_frames)),
+            desc="Computing room features",
+        ):
             rgb_image, _, pose, _, _ = self.dataset[img_id]
-            F_g = get_img_feats(
-                np.array(rgb_image),
-                self.preprocess,
-                self.clip_model)
+            F_g = get_img_feats(np.array(rgb_image), self.preprocess, self.clip_model)
             all_global_clip_feats[str(img_id)] = F_g
             rgb_list.append(rgb_image)
             pose_list.append(pose)
@@ -1147,8 +1041,11 @@ class Graph:
         pcd_max = np.max(np.array(floor_pcd.points), axis=0)
         assert pcd_min.shape[0] == 3
 
-        repr_embs_list, repr_img_ids_list, room_id2img_id, room_clip_embeddings_list = compute_room_embeddings(
-            room_pcds, pose_list, F_g_list, pcd_min, pcd_max, 24, tmp_floor_path)
+        repr_embs_list, repr_img_ids_list, room_id2img_id, room_clip_embeddings_list = (
+            compute_room_embeddings(
+                room_pcds, pose_list, F_g_list, pcd_min, pcd_max, 24, tmp_floor_path
+            )
+        )
         assert len(repr_embs_list) == len(room_2d_points)
         assert len(repr_img_ids_list) == len(room_2d_points)
         assert len(room_id2img_id) == len(room_2d_points)
@@ -1168,9 +1065,11 @@ class Graph:
             room.room_zero_level = floor.floor_zero_level
             room.embeddings = repr_embs_list[i]
             room.represent_images = [
-                int(k * self.cfg.pipeline.skip_frames) for k in repr_img_ids_list[i]]
+                int(k * self.cfg.pipeline.skip_frames) for k in repr_img_ids_list[i]
+            ]
             room.sample_images = [
-                int(k * self.cfg.pipeline.skip_frames) for k in room_id2img_id[i]]
+                int(k * self.cfg.pipeline.skip_frames) for k in room_id2img_id[i]
+            ]
             room.clip_embeddings = room_clip_embeddings_list[i]
             self.rooms.append(room)
             room_index += 1
@@ -1187,8 +1086,11 @@ class Graph:
             for i, img_id in enumerate(room_id2img_id[room_id]):
                 retarget_img_id = img_id * self.cfg.pipeline.skip_frames
                 img_path = self.dataset.frameId2imgPath[retarget_img_id]
-                view = View(str(floor.floor_id) + "_" + str(room_id) +
-                            "_" + str(view_index), room_id, retarget_img_id)
+                view = View(
+                    str(floor.floor_id) + "_" + str(room_id) + "_" + str(view_index),
+                    room_id,
+                    retarget_img_id,
+                )
                 view.img_path = img_path
                 # view.embedding = room_clip_embeddings_list[room_id][i]
                 self.views.append(view)
@@ -1212,18 +1114,14 @@ class Graph:
         # import pdb; pdb.set_trace()
         floor_zero_level = floor.floor_zero_level
         floor_height = floor.floor_height
-        print(
-            "floor_zero_level, floor_height = ",
-            floor_zero_level,
-            floor_height)
+        print("floor_zero_level, floor_height = ", floor_zero_level, floor_height)
         # import pdb; pdb.set_trace()
         ## Slice below the ceiling ##
         xyz = xyz[xyz[:, 1] < floor_zero_level + floor_height - 0.3]
         # xyz = xyz[xyz[:, 1] >= floor_zero_level + 1.5]
         xyz = xyz[xyz[:, 1] >= floor_zero_level + 1.0]
         # xyz = xyz[xyz[:, 1] >= floor_zero_level + 0.5]
-        xyz_full = xyz_full[xyz_full[:, 1] <
-                            floor_zero_level + floor_height - 0.2]
+        xyz_full = xyz_full[xyz_full[:, 1] < floor_zero_level + floor_height - 0.2]
         ## Slice above the floor and below the ceiling ##
         # xyz = xyz[xyz[:, 1] < floor_zero_level + 1.8]
         # xyz = xyz[xyz[:, 1] > floor_zero_level + 0.8]
@@ -1247,33 +1145,21 @@ class Graph:
 
         # calc 2d histogram of the floor using the xyz point cloud to extract
         # the walls skeleton
-        num_bins = (int(grid_size[0] // resolution),
-                    int(grid_size[1] // resolution))
+        num_bins = (int(grid_size[0] // resolution), int(grid_size[1] // resolution))
         num_bins = (num_bins[1] + 1, num_bins[0] + 1)
         hist, _, _ = np.histogram2d(pcd_2d[:, 1], pcd_2d[:, 0], bins=num_bins)
         if self.cfg.pipeline.save_intermediate_results:
             # plot the histogram
             plt.figure()
-            plt.imshow(
-                hist,
-                interpolation="nearest",
-                cmap="jet",
-                origin="lower")
+            plt.imshow(hist, interpolation="nearest", cmap="jet", origin="lower")
             plt.colorbar()
             plt.savefig(os.path.join(tmp_floor_path, "2D_histogram.png"))
 
         # applythresholding
-        hist = cv2.normalize(
-            hist,
-            hist,
-            0,
-            255,
-            cv2.NORM_MINMAX).astype(
-            np.uint8)
+        hist = cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         hist = cv2.GaussianBlur(hist, (5, 5), 1)
         hist_threshold = 0.25 * np.max(hist)
-        _, walls_skeleton = cv2.threshold(
-            hist, hist_threshold, 255, cv2.THRESH_BINARY)
+        _, walls_skeleton = cv2.threshold(hist, hist_threshold, 255, cv2.THRESH_BINARY)
 
         # create a bigger image to avoid losing the walls
         walls_skeleton = cv2.copyMakeBorder(
@@ -1282,23 +1168,13 @@ class Graph:
 
         # apply closing to the walls skeleton
         kernal = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-        walls_skeleton = cv2.morphologyEx(
-            walls_skeleton, cv2.MORPH_CLOSE, kernal, iterations=1
-        )
+        walls_skeleton = cv2.morphologyEx(walls_skeleton, cv2.MORPH_CLOSE, kernal, iterations=1)
 
         # extract outside boundary from histogram of xyz_full
-        hist_full, _, _ = np.histogram2d(
-            xyz_full[:, 1], xyz_full[:, 0], bins=num_bins)
-        hist_full = cv2.normalize(
-            hist_full,
-            hist_full,
-            0,
-            255,
-            cv2.NORM_MINMAX).astype(
-            np.uint8)
+        hist_full, _, _ = np.histogram2d(xyz_full[:, 1], xyz_full[:, 0], bins=num_bins)
+        hist_full = cv2.normalize(hist_full, hist_full, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         hist_full = cv2.GaussianBlur(hist_full, (21, 21), 2)
-        _, outside_boundary = cv2.threshold(
-            hist_full, 0, 255, cv2.THRESH_BINARY)
+        _, outside_boundary = cv2.threshold(hist_full, 0, 255, cv2.THRESH_BINARY)
 
         # create a bigger image to avoid losing the walls
         outside_boundary = cv2.copyMakeBorder(
@@ -1329,14 +1205,11 @@ class Graph:
             plt.savefig(os.path.join(tmp_floor_path, "outside_boundary.png"))
 
         # combine the walls skelton and outside boundary
-        full_map = cv2.bitwise_or(
-            walls_skeleton,
-            cv2.bitwise_not(outside_boundary))
+        full_map = cv2.bitwise_or(walls_skeleton, cv2.bitwise_not(outside_boundary))
 
         # apply closing to the full map
         kernal = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        full_map = cv2.morphologyEx(
-            full_map, cv2.MORPH_CLOSE, kernal, iterations=2)
+        full_map = cv2.morphologyEx(full_map, cv2.MORPH_CLOSE, kernal, iterations=2)
 
         if self.cfg.pipeline.save_intermediate_results:
             # plot the full map
@@ -1344,8 +1217,7 @@ class Graph:
             plt.imshow(full_map, cmap="gray", origin="lower")
             plt.savefig(os.path.join(tmp_floor_path, "full_map.png"))
         # apply distance transform to the full map
-        room_vertices = distance_transform(
-            full_map, resolution, tmp_floor_path)
+        room_vertices = distance_transform(full_map, resolution, tmp_floor_path)
         # room_vertices = [room_vertices[0]] # one room case
 
         # using the 2D room vertices, map the room back to the original point
@@ -1354,8 +1226,7 @@ class Graph:
         room_masks = []
         room_2d_points = []
         floor_tree = cKDTree(np.array(floor_pcd.points))
-        for i in tqdm(range(len(room_vertices)),
-                      desc="Assign floor points to rooms"):
+        for i in tqdm(range(len(room_vertices)), desc="Assign floor points to rooms"):
             print("idx = ", i)
             room = np.zeros_like(full_map)
             room[room_vertices[i][0], room_vertices[i][1]] = 255
@@ -1364,15 +1235,12 @@ class Graph:
             room_2d_points.append(room_m)
             # extrude the 2D room to 3D room by adding z value from floor zero
             # level to floor zero level + floor height, step by 0.1m
-            z_levels = np.arange(
-                floor_zero_level, floor_zero_level + floor_height, 0.05
-            )
+            z_levels = np.arange(floor_zero_level, floor_zero_level + floor_height, 0.05)
             z_levels = z_levels.reshape(-1, 1)
             z_levels *= -1
             room_m3dd = []
             for z in z_levels:
-                room_m3d = np.hstack(
-                    (room_m, np.ones((room_m.shape[0], 1)) * z))
+                room_m3d = np.hstack((room_m, np.ones((room_m.shape[0], 1)) * z))
                 room_m3dd.append(room_m3d)
             room_m3d = np.concatenate(room_m3dd, axis=0)
             pcd = o3d.geometry.PointCloud()
@@ -1396,15 +1264,11 @@ class Graph:
 
         all_global_clip_feats = dict()
         for i, img_id in tqdm(
-            enumerate(
-                range(
-                    0, len(
-                self.dataset), self.cfg.pipeline.skip_frames)), desc="Computing room features"):
+            enumerate(range(0, len(self.dataset), self.cfg.pipeline.skip_frames)),
+            desc="Computing room features",
+        ):
             rgb_image, _, pose, _, _ = self.dataset[img_id]
-            F_g = get_img_feats(
-                np.array(rgb_image),
-                self.preprocess,
-                self.clip_model)
+            F_g = get_img_feats(np.array(rgb_image), self.preprocess, self.clip_model)
             all_global_clip_feats[str(img_id)] = F_g
             rgb_list.append(rgb_image)
             pose_list.append(pose)
@@ -1418,8 +1282,11 @@ class Graph:
         pcd_max = np.max(np.array(floor_pcd.points), axis=0)
         assert pcd_min.shape[0] == 3
 
-        repr_embs_list, repr_img_ids_list, room_id2img_id, room_clip_embeddings = compute_room_embeddings(
-            room_pcds, pose_list, F_g_list, pcd_min, pcd_max, 10, tmp_floor_path)
+        repr_embs_list, repr_img_ids_list, room_id2img_id, room_clip_embeddings = (
+            compute_room_embeddings(
+                room_pcds, pose_list, F_g_list, pcd_min, pcd_max, 10, tmp_floor_path
+            )
+        )
         assert len(repr_embs_list) == len(room_2d_points)
         assert len(repr_img_ids_list) == len(room_2d_points)
 
@@ -1437,7 +1304,8 @@ class Graph:
             room.room_zero_level = floor.floor_zero_level
             room.embeddings = repr_embs_list[i]
             room.represent_images = [
-                int(k * self.cfg.pipeline.skip_frames) for k in repr_img_ids_list[i]]
+                int(k * self.cfg.pipeline.skip_frames) for k in repr_img_ids_list[i]
+            ]
             self.rooms.append(room)
             room_index += 1
         print(
@@ -1469,8 +1337,7 @@ class Graph:
             results
         """
         for i, pcd in enumerate(self.mask_pcds):
-            self.mask_pcds[i] = pcd_denoise_dbscan(
-                pcd, eps=0.05, min_points=10)
+            self.mask_pcds[i] = pcd_denoise_dbscan(pcd, eps=0.05, min_points=10)
         text_feats, classes = get_label_feats(
             self.clip_model,
             self.clip_feat_dim,
@@ -1480,10 +1347,7 @@ class Graph:
         # print("self.clip_feat_dim: ", self.clip_feat_dim)
         # print("text_feats.shape: ", text_feats.shape)
 
-        pbar = tqdm(
-            enumerate(
-                self.floors), total=len(
-                self.floors), desc="Floor: ")
+        pbar = tqdm(enumerate(self.floors), total=len(self.floors), desc="Floor: ")
         margin = 0.2
         for f_idx, floor in pbar:
             pbar.set_description(f"Floor: {f_idx}")
@@ -1553,21 +1417,18 @@ class Graph:
                         )
                         ax.set_aspect("equal")
 
-                        debug_objects_dir = os.path.join(
-                            self.graph_tmp_folder, "objects"
-                        )
+                        debug_objects_dir = os.path.join(self.graph_tmp_folder, "objects")
                         os.makedirs(debug_objects_dir, exist_ok=True)
                         plt.savefig(
                             os.path.join(
                                 debug_objects_dir,
                                 f"{floor.rooms[np.argmax(room_assoc)].room_id}_{floor.rooms[np.argmax(room_assoc)].object_counter}.png",
-                            ))
+                            )
+                        )
 
                 closest_room_idx = np.argmax(room_assoc)
 
-                name = self.identify_object(
-                    self.mask_feats[mask_idx], text_feats, classes
-                )
+                name = self.identify_object(self.mask_feats[mask_idx], text_feats, classes)
                 # if [i for i in ["wall", "floor", "ceiling", "window", "door", "roof", "railing"] if i in name]:
                 #     continue
                 parent_room = floor.rooms[closest_room_idx]
@@ -1577,12 +1438,9 @@ class Graph:
                 )
                 parent_room.object_counter += 1
                 object.name = name
-                obj_pbar.set_description(
-                    f"object name: {object.name}, {object.object_id}"
-                )
+                obj_pbar.set_description(f"object name: {object.name}, {object.object_id}")
                 object.pcd = self.mask_pcds[mask_idx]
-                object.vertices = np.array(
-                    self.mask_pcds[mask_idx].points)[:, [0, 2]]
+                object.vertices = np.array(self.mask_pcds[mask_idx].points)[:, [0, 2]]
                 object.embedding = self.mask_feats[mask_idx]
                 floor.rooms[closest_room_idx].add_object(object)
                 self.objects.append(object)
@@ -1595,8 +1453,7 @@ class Graph:
             results
         """
         for i, pcd in enumerate(self.mask_pcds):
-            self.mask_pcds[i] = pcd_denoise_dbscan(
-                pcd, eps=0.05, min_points=10)
+            self.mask_pcds[i] = pcd_denoise_dbscan(pcd, eps=0.05, min_points=10)
         text_feats, classes = get_label_feats(
             self.clip_model,
             self.clip_feat_dim,
@@ -1606,10 +1463,7 @@ class Graph:
         # print("self.clip_feat_dim: ", self.clip_feat_dim)
         # print("text_feats.shape: ", text_feats.shape)
 
-        pbar = tqdm(
-            enumerate(
-                self.floors), total=len(
-                self.floors), desc="Floor: ")
+        pbar = tqdm(enumerate(self.floors), total=len(self.floors), desc="Floor: ")
         margin = 0.2
         for f_idx, floor in pbar:
             pbar.set_description(f"Floor: {f_idx}")
@@ -1627,9 +1481,7 @@ class Graph:
                 ):
                     objects_inside_floor.append(i)
 
-            print(
-                "number of objects inside floor {}: {}".format(
-                    f_idx, len(objects_inside_floor)))
+            print("number of objects inside floor {}: {}".format(f_idx, len(objects_inside_floor)))
 
             # show the second layer of pbar with tqdm
             obj_pbar = tqdm(
@@ -1683,21 +1535,18 @@ class Graph:
                         )
                         ax.set_aspect("equal")
 
-                        debug_objects_dir = os.path.join(
-                            self.graph_tmp_folder, "objects"
-                        )
+                        debug_objects_dir = os.path.join(self.graph_tmp_folder, "objects")
                         os.makedirs(debug_objects_dir, exist_ok=True)
                         plt.savefig(
                             os.path.join(
                                 debug_objects_dir,
                                 f"{floor.rooms[np.argmax(room_assoc)].room_id}_{floor.rooms[np.argmax(room_assoc)].object_counter}.png",
-                            ))
+                            )
+                        )
 
                 closest_room_idx = np.argmax(room_assoc)
 
-                name = self.identify_object(
-                    self.mask_feats[mask_idx], text_feats, classes
-                )
+                name = self.identify_object(self.mask_feats[mask_idx], text_feats, classes)
                 # if [i for i in ["wall", "floor", "ceiling", "window", "door", "roof", "railing"] if i in name]:
                 #     continue
                 parent_room = floor.rooms[closest_room_idx]
@@ -1707,12 +1556,9 @@ class Graph:
                 )
                 parent_room.object_counter += 1
                 object.name = name
-                obj_pbar.set_description(
-                    f"object name: {object.name}, {object.object_id}"
-                )
+                obj_pbar.set_description(f"object name: {object.name}, {object.object_id}")
                 object.pcd = self.mask_pcds[mask_idx]
-                object.vertices = np.array(
-                    self.mask_pcds[mask_idx].points)[:, [0, 2]]
+                object.vertices = np.array(self.mask_pcds[mask_idx].points)[:, [0, 2]]
                 object.embedding = self.mask_feats[mask_idx]
                 # floor.rooms[closest_room_idx].add_object(object)
                 # self.objects.append(object)
@@ -1729,7 +1575,7 @@ class Graph:
                         camera_matrix,
                         np.linalg.inv(pose),
                         np.array(self.mask_pcds[mask_idx].points),
-                        return_depth=True   # Modified check_object_in_view to support returning depth
+                        return_depth=True,  # Modified check_object_in_view to support returning depth
                     )
                     if obj_in_view:
                         object.view_ids.append(view.view_id)
@@ -1753,8 +1599,7 @@ class Graph:
                 self.graph.add_node(room, name="room", type="room")
                 self.graph.add_edge(floor, room)
                 for object in room.objects:
-                    self.graph.add_node(
-                        object, name=object.name, type="object")
+                    self.graph.add_node(object, name=object.name, type="object")
                     self.graph.add_edge(room, object)
 
     def create_graph_new(self):
@@ -1767,8 +1612,7 @@ class Graph:
                 self.graph.add_node(room, name="room", type="room")
                 self.graph.add_edge(floor, room)
                 for object in room.objects:
-                    self.graph.add_node(
-                        object, name=object.name, type="object")
+                    self.graph.add_node(object, name=object.name, type="object")
                     self.graph.add_edge(room, object)
 
         for view in self.views:
@@ -1819,7 +1663,7 @@ class Graph:
         if not os.path.exists(os.path.join(path, "objects")):
             os.makedirs(os.path.join(path, "objects"))
         if not os.path.exists(os.path.join(path, "views")):
-            os.makedirs(os.path.join(path, "views"))        # save the graph
+            os.makedirs(os.path.join(path, "views"))  # save the graph
         for i, node in enumerate(self.graph.nodes(data=True)):
             topo_obj, node_dict = node
             if isinstance(topo_obj, Floor):
@@ -1842,11 +1686,7 @@ class Graph:
             floor = Floor(str(floor_file), name="floor_" + str(floor_file))
             floor.load(os.path.join(path, "floors"))
             self.floors.append(floor)
-            self.graph.add_node(
-                floor,
-                name="floor_" +
-                str(floor_file),
-                type="floor")
+            self.graph.add_node(floor, name="floor_" + str(floor_file), type="floor")
             self.graph.add_edge(0, floor)
         print("# pred floors: ", len(self.floors))
         # load rooms
@@ -1857,13 +1697,8 @@ class Graph:
             room = Room(str(room_file), room_file.split("_")[0])
             room.load(os.path.join(path, "rooms"))
             self.rooms.append(room)
-            self.graph.add_node(
-                room,
-                name="room_" +
-                str(room_file),
-                type="room")
-            self.graph.add_edge(
-                self.floors[int(room_file.split("_")[0])], room)
+            self.graph.add_node(room, name="room_" + str(room_file), type="room")
+            self.graph.add_edge(self.floors[int(room_file.split("_")[0])], room)
             if isinstance(self.floors[int(room.floor_id)].rooms[0], str):
                 self.floors[int(room.floor_id)].rooms = []
             self.floors[int(room.floor_id)].rooms.append(room)
@@ -1879,18 +1714,12 @@ class Graph:
                 if room.room_id == room_id:
                     parent_room = room
                     break
-            assert (
-                parent_room is not None
-            ), f"Couldn't find the room with room id {room_id}"
-            objectt = Object(
-                str(object_file), room_id, name="object_" + str(object_file)
-            )
+            assert parent_room is not None, f"Couldn't find the room with room id {room_id}"
+            objectt = Object(str(object_file), room_id, name="object_" + str(object_file))
             objectt.load(os.path.join(path, "objects"))
             objectt.room_id = room_id  # object_file.split("_")[1]
             self.objects.append(objectt)
-            self.graph.add_node(
-                objectt, name="object_" + str(object_file), type="object"
-            )
+            self.graph.add_node(objectt, name="object_" + str(object_file), type="object")
             self.graph.add_edge(parent_room, objectt)
             # add object to the room
             parent_room.add_object(objectt)
@@ -1909,11 +1738,7 @@ class Graph:
             floor = Floor(str(floor_file), name="floor_" + str(floor_file))
             floor.load(os.path.join(path, "floors"))
             self.floors.append(floor)
-            self.graph.add_node(
-                floor,
-                name="floor_" +
-                str(floor_file),
-                type="floor")
+            self.graph.add_node(floor, name="floor_" + str(floor_file), type="floor")
             self.graph.add_edge(0, floor)
         print("# pred floors: ", len(self.floors))
         # load rooms
@@ -1924,13 +1749,8 @@ class Graph:
             room = Room(str(room_file), room_file.split("_")[0])
             room.load_new(os.path.join(path, "rooms"))
             self.rooms.append(room)
-            self.graph.add_node(
-                room,
-                name="room_" +
-                str(room_file),
-                type="room")
-            self.graph.add_edge(
-                self.floors[int(room_file.split("_")[0])], room)
+            self.graph.add_node(room, name="room_" + str(room_file), type="room")
+            self.graph.add_edge(self.floors[int(room_file.split("_")[0])], room)
             if isinstance(self.floors[int(room.floor_id)].rooms[0], str):
                 self.floors[int(room.floor_id)].rooms = []
             self.floors[int(room.floor_id)].rooms.append(room)
@@ -1946,18 +1766,12 @@ class Graph:
                 if room.room_id == room_id:
                     parent_room = room
                     break
-            assert (
-                parent_room is not None
-            ), f"Couldn't find the room with room id {room_id}"
-            objectt = Object(
-                str(object_file), room_id, name="object_" + str(object_file)
-            )
+            assert parent_room is not None, f"Couldn't find the room with room id {room_id}"
+            objectt = Object(str(object_file), room_id, name="object_" + str(object_file))
             objectt.load_new(os.path.join(path, "objects"))
             objectt.room_id = room_id  # object_file.split("_")[1]
             self.objects.append(objectt)
-            self.graph.add_node(
-                objectt, name="object_" + str(object_file), type="object"
-            )
+            self.graph.add_node(objectt, name="object_" + str(object_file), type="object")
             self.graph.add_edge(parent_room, objectt)
             # add object to the room
             parent_room.add_object(objectt)
@@ -1973,23 +1787,12 @@ class Graph:
                 if room.room_id == room_id:
                     parent_room = room
                     break
-            assert (
-                parent_room is not None
-            ), f"Couldn't find the room with room id {room_id}"
-            vieww = View(
-                str(view_file),
-                room_id,
-                img_id=None,
-                name="view_" +
-                str(view_file))
+            assert parent_room is not None, f"Couldn't find the room with room id {room_id}"
+            vieww = View(str(view_file), room_id, img_id=None, name="view_" + str(view_file))
             vieww.load(os.path.join(path, "views"))
             vieww.room_id = room_id
             self.views.append(vieww)
-            self.graph.add_node(
-                vieww,
-                name="view_" +
-                str(view_file),
-                type="view")
+            self.graph.add_node(vieww, name="view_" + str(view_file), type="view")
             self.graph.add_edge(parent_room, vieww)
 
         print("-------------------")
@@ -2105,34 +1908,30 @@ class Graph:
             if floor_id + 1 < len(self.floors):
                 upperbound = self.floors[floor_id + 1].floor_zero_level
             # import pdb; pdb.set_trace()
-            floor_poses_list = nav_graph.get_floor_poses(
-                floor, poses_list, upperbound)
+            floor_poses_list = nav_graph.get_floor_poses(floor, poses_list, upperbound)
             # import pdb; pdb.set_trace()
             sparse_stairs_voronoi = nav_graph.get_stairs_graph_with_poses_v2(
                 floor, floor_id, poses_list, nav_dir
             )
-            sparse_floor_voronoi = nav_graph.get_floor_graph(
-                floor, floor_poses_list, nav_dir
-            )
+            sparse_floor_voronoi = nav_graph.get_floor_graph(floor, floor_poses_list, nav_dir)
             if sparse_stairs_voronoi is not None:
                 print(f"connecting stairs and floor {floor_id}")
                 sparse_floor_voronoi = nav_graph.connect_stairs_and_floor_graphs(
-                    sparse_stairs_voronoi, sparse_floor_voronoi, nav_dir)
-            NavigationGraph.save_voronoi_graph(
-                sparse_floor_voronoi, nav_dir, "sparse_voronoi"
-            )
+                    sparse_stairs_voronoi, sparse_floor_voronoi, nav_dir
+                )
+            NavigationGraph.save_voronoi_graph(sparse_floor_voronoi, nav_dir, "sparse_voronoi")
 
             if last_nav_graph is not None and last_nav_graph.has_stairs:
                 print(f"connecting two floors {floor_id}")
                 global_voronoi = nav_graph.connect_voronoi_graphs(
-                    last_nav_graph.sparse_floor_voronoi, nav_graph.sparse_floor_voronoi)
+                    last_nav_graph.sparse_floor_voronoi, nav_graph.sparse_floor_voronoi
+                )
             last_nav_graph = nav_graph
 
         if global_voronoi is None:
             global_voronoi = last_nav_graph.sparse_floor_voronoi
 
-        NavigationGraph.save_voronoi_graph(
-            global_voronoi, nav_dir, "global_nav_graph")
+        NavigationGraph.save_voronoi_graph(global_voronoi, nav_dir, "global_nav_graph")
 
     def set_room_names(self, room_names: List[str]):
         """
@@ -2201,8 +2000,7 @@ class Graph:
         )
         # compute similarity between the text query and the objects embeddings
         # in the graph
-        similarity = np.dot(text_feats, np.array(
-            [o.embedding for o in self.objects]).T)
+        similarity = np.dot(text_feats, np.array([o.embedding for o in self.objects]).T)
         # similarity = compute_similarity(text_feats, np.array([o.embedding for o in self.objects]))
         # find top 5 similar objects
         top_index = np.argsort(similarity[0])[::-1][:5]
@@ -2248,8 +2046,7 @@ class Graph:
                 text_feats = get_text_feats_multiple_templates(
                     [query], self.clip_model, self.clip_feat_dim
                 )
-                floor_names = ["floor " + str(i)
-                               for i in range(len(self.floors))]
+                floor_names = ["floor " + str(i) for i in range(len(self.floors))]
                 floor_embs = get_text_feats_multiple_templates(
                     floor_names, self.clip_model, self.clip_feat_dim
                 )
@@ -2293,9 +2090,7 @@ class Graph:
                     )
                 else:
                     print(f"{oss_url} already exists in Aliyun OSS, skipping.")
-        print(
-            f"Uploaded {len(self.downsampeld_img_list)} images to Aliyun OSS."
-        )
+        print(f"Uploaded {len(self.downsampeld_img_list)} images to Aliyun OSS.")
 
     def vlm_choose(self, video_image_local_paths: list, instruction: str):
         system_prompt = """
@@ -2308,9 +2103,7 @@ class Graph:
         video_prompt = []
         for i, img_url in enumerate(self.oss_img_list):
             video_prompt.append({"type": "text", "text": f"Frame:{i}"})
-            video_prompt.append(
-                {"type": "image_url", "image_url": {"url": img_url}}
-            )
+            video_prompt.append({"type": "image_url", "image_url": {"url": img_url}})
         instruction_prompt = f"User says: {instruction}. Can you find the closet frame in the provided locations to navigate to?"
         rules_prompt = """
         Rules to follow:
@@ -2356,10 +2149,8 @@ class Graph:
         return response
 
     def detect_and_select_best_gpt(
-            self,
-            imglist: List[str],
-            query: str,
-            score_threshold: float = 0.5):
+        self, imglist: List[str], query: str, score_threshold: float = 0.5
+    ):
         """
         Use GPT Vision to detect whether an object appears in each image and return the best matching image.
         Args:
@@ -2376,9 +2167,14 @@ class Graph:
 
         for img in self.oss_img_list:
             # Step 1: yes/no detection
-            prompt_yesno = f"Does this image contain a '{query}'? Answer strictly with 'yes' or 'no'."
+            prompt_yesno = (
+                f"Does this image contain a '{query}'? Answer strictly with 'yes' or 'no'."
+            )
             messages_yesno = [
-                {"role": "system", "content": "You are an object detector. Answer only 'yes' or 'no', no explanation."},
+                {
+                    "role": "system",
+                    "content": "You are an object detector. Answer only 'yes' or 'no', no explanation.",
+                },
                 {
                     "role": "user",
                     "content": [
@@ -2392,7 +2188,7 @@ class Graph:
                 messages=messages_yesno,
             )
             ans_raw = resp_yesno.choices[0].message.content.strip().lower()
-            has_object = (ans_raw == "yes")  # Strict match
+            has_object = ans_raw == "yes"  # Strict match
 
             score = 0.0
             if has_object:
@@ -2406,7 +2202,10 @@ class Graph:
                 # f"Respond only with a single number (e.g., 0.85)."
                 # )
                 messages_score = [
-                    {"role": "system", "content": "You are an object detector. Answer only with a single number between 0 and 1, no text."},
+                    {
+                        "role": "system",
+                        "content": "You are an object detector. Answer only with a single number between 0 and 1, no text.",
+                    },
                     {
                         "role": "user",
                         "content": [
@@ -2434,7 +2233,8 @@ class Graph:
             results.append(has_object)
             scores.append(score)
             print(
-                f"[GPT] Image: {img} → raw_yesno='{ans_raw}', score={score:.3f}, has_object={has_object}, query={query}")
+                f"[GPT] Image: {img} → raw_yesno='{ans_raw}', score={score:.3f}, has_object={has_object}, query={query}"
+            )
 
         # Step 3: Select best (return None if none found)
         if any(results):
@@ -2446,10 +2246,8 @@ class Graph:
         return results, best_image
 
     def detect_object_in_image(
-            self,
-            img_path: str,
-            query: str,
-            score_threshold: float = 0.3) -> bool:
+        self, img_path: str, query: str, score_threshold: float = 0.3
+    ) -> bool:
 
         # Upload image to OSS
         self.upload2oss([img_path])
@@ -2461,7 +2259,10 @@ class Graph:
             "Respond only with a single number between 0 and 1."
         )
         messages = [
-            {"role": "system", "content": "You are an object detector. Answer only with a single number, no text."},
+            {
+                "role": "system",
+                "content": "You are an object detector. Answer only with a single number, no text.",
+            },
             {
                 "role": "user",
                 "content": [
@@ -2485,17 +2286,17 @@ class Graph:
             score = 0.0
 
         has_object = score >= score_threshold
-        print(
-            f"[GPT] Image: {img_url} → score={score:.3f}, has_object={has_object}")
+        print(f"[GPT] Image: {img_url} → score={score:.3f}, has_object={has_object}")
         return has_object
 
     def visualize_goal_images(
-            self,
-            mean_depth,
-            goal_image_path_online,
-            goal_image_path_by_clip,
-            goal_image_path_by_gpt,
-            save_name="goal_compare.png"):
+        self,
+        mean_depth,
+        goal_image_path_online,
+        goal_image_path_by_clip,
+        goal_image_path_by_gpt,
+        save_name="goal_compare.png",
+    ):
         # Read the images
         img_online = cv2.imread(goal_image_path_online)
         img_gpt_best = cv2.imread(goal_image_path_by_clip)
@@ -2515,22 +2316,23 @@ class Graph:
         thickness = 2
         color = (0, 255, 0)  # Green
 
-        cv2.putText(img_gpt_best, "BEST", (10, 30), font,
-                    font_scale, color, thickness, cv2.LINE_AA)
-        cv2.putText(img_gpt, "GPT", (10, 30), font,
-                    font_scale, color, thickness, cv2.LINE_AA)
-        cv2.putText(img_online, "ObjBestView", (10, 30), font,
-                    font_scale, color, thickness, cv2.LINE_AA)
+        cv2.putText(
+            img_gpt_best, "BEST", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA
+        )
+        cv2.putText(img_gpt, "GPT", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA)
+        cv2.putText(
+            img_online, "ObjBestView", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA
+        )
         cv2.putText(
             img_online,
             f"{mean_depth:.2f}",
-            (10,
-             300),
+            (10, 300),
             font,
             font_scale,
             color,
             thickness,
-            cv2.LINE_AA)
+            cv2.LINE_AA,
+        )
         # Horizontal concatenation
         combined = np.hstack((img_online, img_gpt_best, img_gpt))
         # Save result
@@ -2584,15 +2386,16 @@ class Graph:
         return None
 
     def query_room_obj_slow_reasoning(
-            self,
-            instruction,
-            room_query,
-            object_query,
-            negative_prompt,
-            floor_id: int = -1,
-            room_query_method="label",
-            object_query_method="clip",
-            update_flag=True):
+        self,
+        instruction,
+        room_query,
+        object_query,
+        negative_prompt,
+        floor_id: int = -1,
+        room_query_method="label",
+        object_query_method="clip",
+        update_flag=True,
+    ):
         """Query the graph with text input for room and object."""
         print("process object query use gpt....")
         offline_start_time = time.time()
@@ -2608,15 +2411,10 @@ class Graph:
         if object_query is None or object_query == "":
             is_dectect_obj = False
 
-        print(
-            "is_dectect_room: ",
-            is_dectect_room,
-            "is_dectect_obj: ",
-            is_dectect_obj)
+        print("is_dectect_room: ", is_dectect_room, "is_dectect_obj: ", is_dectect_obj)
 
         # query room
-        rooms_list = self.rooms if floor_id == - \
-            1 else self.floors[floor_id].rooms
+        rooms_list = self.rooms if floor_id == -1 else self.floors[floor_id].rooms
         start_time = time.time()
         if room_query_method == "label" and is_dectect_room:
             print("query room use label")
@@ -2634,11 +2432,7 @@ class Graph:
             similarity = np.dot(query_room_text_feats, room_embs.T)
             top_index = np.argsort(similarity[0])[::-1]
             for i in top_index[:3]:
-                print(
-                    "room: ",
-                    rooms_list[i].room_id,
-                    rooms_list[i].name,
-                    similarity[0][i])
+                print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
             same_sim_indices = []
             tar_sim = similarity[0, top_index[0]]
             same_sim_indices.append(top_index[0])
@@ -2647,25 +2441,23 @@ class Graph:
                     same_sim_indices.append(i)
 
             target_rooms = [rooms_list[i] for i in same_sim_indices]
-            target_room_ids = [
-                target_room.room_id for target_room in target_rooms]
-            target_ids = [i for i, x in enumerate(
-                rooms_list) if x.room_id in target_room_ids]
+            target_room_ids = [target_room.room_id for target_room in target_rooms]
+            target_ids = [i for i, x in enumerate(rooms_list) if x.room_id in target_room_ids]
 
         else:
             query_room_text_feats = get_text_feats_multiple_templates(
                 [room_query], self.clip_model, self.clip_feat_dim
             )
             room2query_sim = dict()
-            room2query_feat = dict()   # Store the corresponding feature vectors
-            room2query_id = dict()     # Store the corresponding embedding indices
+            room2query_feat = dict()  # Store the corresponding feature vectors
+            room2query_id = dict()  # Store the corresponding embedding indices
             for room in rooms_list:
-                embeddings = np.stack(room.embeddings)   # [view_num, 768]
+                embeddings = np.stack(room.embeddings)  # [view_num, 768]
                 # [1, view_num], similarity between query and each view
                 sims = np.dot(query_room_text_feats, embeddings.T)
-                max_idx = np.argmax(sims)                # Find the position of maximum similarity
-                max_sim = sims[0, max_idx]               # Maximum similarity value
-                max_feat = embeddings[max_idx]           # Corresponding feature vector (768,)
+                max_idx = np.argmax(sims)  # Find the position of maximum similarity
+                max_sim = sims[0, max_idx]  # Maximum similarity value
+                max_feat = embeddings[max_idx]  # Corresponding feature vector (768,)
 
                 room2query_sim[room.room_id] = max_sim
                 room2query_feat[room.room_id] = max_feat
@@ -2673,12 +2465,10 @@ class Graph:
 
             room2query_sim_sorted = {
                 int(k.split("_")[-1]): v
-                for k, v in sorted(
-                    room2query_sim.items(), key=lambda item: item[1], reverse=True
-                )
+                for k, v in sorted(room2query_sim.items(), key=lambda item: item[1], reverse=True)
             }
             target_ids = list(room2query_sim_sorted.keys())[
-                0: min(len(room2query_sim_sorted), 10)
+                0 : min(len(room2query_sim_sorted), 10)
             ]
         room_retrival_time = time.time() - start_time
 
@@ -2727,10 +2517,7 @@ class Graph:
             top_index = np.argsort(sim_mat[query_id])[::-1][:10]  # top-10
             # import pdb; pdb.set_trace()
             for i in top_index:
-                print(
-                    "object name, score: ",
-                    objects_list[i].name,
-                    sim_mat[0][i])
+                print("object name, score: ", objects_list[i].name, sim_mat[0][i])
                 print("object id: ", objects_list[i].object_id)
 
             top_k = 5
@@ -2755,14 +2542,11 @@ class Graph:
             target_room_id = [room_ids_list[i] for i in top_index]
             target_id = []
             for ti in target_object_id:
-                target_id.append([i for i, x in enumerate(
-                    self.objects) if x.object_id == ti][0])
+                target_id.append([i for i, x in enumerate(self.objects) if x.object_id == ti][0])
             FastMatching_time = time.time() - start_time
             query_time_consumer["FastMatching_time"] = FastMatching_time
 
-        save_json_path = os.path.join(
-            self.curr_query_save_dir,
-            "query_time_consumer.json")
+        save_json_path = os.path.join(self.curr_query_save_dir, "query_time_consumer.json")
         # elif object_query_method == "gpt":
         best_object = self.objects[target_id[0]]
         best_object_best_view_id = best_object.best_view_id
@@ -2850,9 +2634,12 @@ class Graph:
         # query_time_consumer["top5_image_path_online_object_best_view"] = top5_best_view_image_path
         start_time = time.time()
         Object_in_goal_view_check = self.detect_object_in_image(
-            best_view_image_path, object_query[query_id])
+            best_view_image_path, object_query[query_id]
+        )
         Object_in_goal_view_check_time = time.time() - start_time
-        query_time_consumer["Object_in_goal_view_check_time"] = f"{Object_in_goal_view_check_time:.4f} seconds"
+        query_time_consumer["Object_in_goal_view_check_time"] = (
+            f"{Object_in_goal_view_check_time:.4f} seconds"
+        )
         query_time_consumer["Object_in_goal_view_check_res"] = Object_in_goal_view_check
         if Object_in_goal_view_check:
             total_online_query_time = FastMatching_time + Object_in_goal_view_check_time
@@ -2875,8 +2662,9 @@ class Graph:
                 img_ids = room.sample_images  # list of images
                 embs = room.clip_embeddings  # shape [view, 768]
                 # Ensure lengths are aligned
-                assert len(img_ids) == len(embs), \
-                    f"Number of images ({len(img_ids)}) != embeddings ({len(embs)})"
+                assert len(img_ids) == len(
+                    embs
+                ), f"Number of images ({len(img_ids)}) != embeddings ({len(embs)})"
                 all_image_incides.extend(img_ids)
                 all_image_embedding.extend(embs)  # Each embedding corresponds to one image
             print("all_image_incides: ", len(all_image_incides))
@@ -2893,11 +2681,10 @@ class Graph:
                 # room_image_local_feature = rooms_list[room_id].clip_embeddings
                 # room_embeddings = np.stack(room_image_local_feature)   #
                 # [view_num, 768]
-                gloal_embedding = np.stack(
-                    all_image_embedding)  # [total_view_num, 768]
+                gloal_embedding = np.stack(all_image_embedding)  # [total_view_num, 768]
                 sims = np.dot(
-                    query_object_text_feats[0],
-                    gloal_embedding.T)  # [1, view_num], similarity between query and each view
+                    query_object_text_feats[0], gloal_embedding.T
+                )  # [1, view_num], similarity between query and each view
                 clip_max_idx = np.argmax(sims)  # Find the position of maximum similarity
 
                 # Compute top_k, ensuring it does not exceed the length of sims
@@ -2905,24 +2692,26 @@ class Graph:
                 top_idx = np.argsort(sims)[-top_k:][::-1]  # indices of top_k in descending order
 
                 # find goal image by clip
-                goal_image_path_by_clip = self.dataset.frameId2imgPath[all_image_incides[clip_max_idx]]
+                goal_image_path_by_clip = self.dataset.frameId2imgPath[
+                    all_image_incides[clip_max_idx]
+                ]
                 print(f"goal_image_path_by_clip: {goal_image_path_by_clip}")
                 end_time = time.time()
-                query_time_consumer[f"goal_image_reterival_by_clip_{room_id}"] = end_time - start_time
-                print(
-                    f"find goal image by clip elapsed time: {end_time - start_time:.4f} seconds")
+                query_time_consumer[f"goal_image_reterival_by_clip_{room_id}"] = (
+                    end_time - start_time
+                )
+                print(f"find goal image by clip elapsed time: {end_time - start_time:.4f} seconds")
                 query_time_consumer["goal_image_path_by_clip"] = goal_image_path_by_clip
                 start_time = time.time()
 
                 # find goal image by gpt
                 room_clip_refined_topk_image_local_paths = [
-                    self.dataset.frameId2imgPath[all_image_incides[idx]] for idx in top_idx]
+                    self.dataset.frameId2imgPath[all_image_incides[idx]] for idx in top_idx
+                ]
                 room_image_local_paths = room_clip_refined_topk_image_local_paths
                 print("room_image_local_paths: ", room_image_local_paths)
 
-                response = self.vlm_choose(
-                    room_image_local_paths, instruction
-                )
+                response = self.vlm_choose(room_image_local_paths, instruction)
                 print(response)
                 match = re.findall(r"\d+", response)
                 if match:
@@ -2933,10 +2722,11 @@ class Graph:
                     goal_img_path = None
                 goal_image_path_by_gpt = goal_img_path
                 end_time = time.time()
-                query_time_consumer[f"goal_image_reterival_by_gpt_{room_id}"] = end_time - start_time
+                query_time_consumer[f"goal_image_reterival_by_gpt_{room_id}"] = (
+                    end_time - start_time
+                )
                 query_time_consumer["goal_image_path_by_gpt"] = goal_image_path_by_gpt
-                print(
-                    f"find goal image by gpt elapsed time: {end_time - start_time:.4f} seconds")
+                print(f"find goal image by gpt elapsed time: {end_time - start_time:.4f} seconds")
                 print("goal_image_path_by_gpt: ", goal_image_path_by_gpt)
 
                 # judge whether object in goal image
@@ -2949,16 +2739,18 @@ class Graph:
                 select_imgs = [
                     goal_image_path_online,
                     goal_image_path_by_clip,
-                    goal_image_path_by_gpt]
+                    goal_image_path_by_gpt,
+                ]
 
                 gpt_check_start_time = time.time()
                 gpt_check_result, best_image_path = self.detect_and_select_best_gpt(
-                    select_imgs, object_query[query_id])
+                    select_imgs, object_query[query_id]
+                )
                 gpt_check_time = time.time() - gpt_check_start_time
                 query_time_consumer["gpt_check_time"] = gpt_check_time
                 # print("goal_sim_mat:" , goal_sim_mat)
                 # if goal_sim_mat[0, query_id] > 0.3:
-                print("Detection results:", gpt_check_result)      # [True, False]
+                print("Detection results:", gpt_check_result)  # [True, False]
                 print("Best image:", best_image_path)
                 query_time_consumer["detection_results"] = gpt_check_result
                 query_time_consumer["best_image"] = best_image_path
@@ -2967,31 +2759,35 @@ class Graph:
                 print("update_flatg ", update_flag)
                 avg_distance_in_gptview = -1.0
                 gpt_refine_time_start = time.time()
-                if gpt_check_result[0] is False and update_flag and best_image_path != goal_image_path_online and best_image_path is not None:
+                if (
+                    gpt_check_result[0] is False
+                    and update_flag
+                    and best_image_path != goal_image_path_online
+                    and best_image_path is not None
+                ):
                     print("performing gpt refineing..............................")
                     objs_embedding_in_view = []
                     gpt_refine_best_view, gpt_refine_best_view_img_id = self.find_view_by_imgpath(
-                        best_image_path)
+                        best_image_path
+                    )
                     assert gpt_refine_best_view is not None
                     object_ids_in_view = gpt_refine_best_view.object_ids
                     for object_id in object_ids_in_view:
-                        object_target = self.find_object_by_object_id(
-                            object_id)
+                        object_target = self.find_object_by_object_id(object_id)
                         assert object_target is not None
                         objs_embedding_in_view.append(object_target.embedding)
                     if len(objs_embedding_in_view) > 0:
-                        objs_embedding_in_view = np.stack(
-                            objs_embedding_in_view)
+                        objs_embedding_in_view = np.stack(objs_embedding_in_view)
                         obj_sims = np.dot(
-                            query_object_text_feats[0],
-                            objs_embedding_in_view.T)  # [1, obj_num], similarity between query and each object under this view
+                            query_object_text_feats[0], objs_embedding_in_view.T
+                        )  # [1, obj_num], similarity between query and each object under this view
                         max_obj_idx = np.argmax(
-                            obj_sims)                # Find the position of maximum similarity
-                        max_obj_sim = obj_sims[max_obj_idx]           # Maximum similarity value
+                            obj_sims
+                        )  # Find the position of maximum similarity
+                        max_obj_sim = obj_sims[max_obj_idx]  # Maximum similarity value
                         print(f"max_obj_sim: {max_obj_sim}")
                         max_sim_object_id = object_ids_in_view[max_obj_idx]
-                        final_object = self.find_object_by_object_id(
-                            max_sim_object_id)
+                        final_object = self.find_object_by_object_id(max_sim_object_id)
                         final_obj_pcd = final_object.pcd
                         camera_matrix = self.dataset.get_camera_intrinsics()
                         img, _, pose, _, _ = self.dataset[gpt_refine_best_view_img_id]
@@ -3000,18 +2796,21 @@ class Graph:
                             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                             # save_path = os.path.join(self.curr_query_save_dir, save_name)
                         avg_distance_in_gptview = visualize_pcd_on_image(
-                            final_obj_pcd, img, camera_matrix, np.linalg.inv(pose), save_path=os.path.join(
-                                self.curr_query_save_dir, f"gpt_refine_object_id_{final_object.object_id}.png"))
+                            final_obj_pcd,
+                            img,
+                            camera_matrix,
+                            np.linalg.inv(pose),
+                            save_path=os.path.join(
+                                self.curr_query_save_dir,
+                                f"gpt_refine_object_id_{final_object.object_id}.png",
+                            ),
+                        )
                         # replace and save obect feature embedding?
                         # final_object.embedding = final_object.embedding * 0.2 + query_object_text_feats[0] * 0.8
-                        new_objects_path = os.path.join(
-                            self.graph_path, "objects_update")
+                        new_objects_path = os.path.join(self.graph_path, "objects_update")
                         if not os.path.exists(new_objects_path):
                             os.makedirs(new_objects_path)
-                        final_object.save(
-                            os.path.join(
-                                self.graph_path,
-                                "objects_update"))
+                        final_object.save(os.path.join(self.graph_path, "objects_update"))
                 gpt_refine_time = time.time() - gpt_refine_time_start
                 query_time_consumer["gpt_refine_time"] = gpt_refine_time
 
@@ -3026,7 +2825,7 @@ class Graph:
                     camera_matrix,
                     np.linalg.inv(pose),
                     np.array(obj_pcd.points),
-                    return_depth=True   # Modified check_object_in_view to support returning depth
+                    return_depth=True,  # Modified check_object_in_view to support returning depth
                 )
                 # gpt_index = all_image_incides.index()
                 if best_image_path is not None:
@@ -3035,7 +2834,8 @@ class Graph:
                         goal_image_path_online,
                         goal_image_path_by_clip,
                         goal_image_path_by_gpt,
-                        save_name=f"goal_compare_room_{room_id}.png")
+                        save_name=f"goal_compare_room_{room_id}.png",
+                    )
                 else:
                     best_image_path = goal_image_path_by_gpt
                     self.visualize_goal_images(
@@ -3043,11 +2843,11 @@ class Graph:
                         goal_image_path_online,
                         goal_image_path_by_clip,
                         goal_image_path_by_gpt,
-                        save_name=f"goal_compare_room_{room_id}.png")
+                        save_name=f"goal_compare_room_{room_id}.png",
+                    )
 
                 # Save as JSON file
-            total_query_time_offline = total_online_query_time + \
-                gpt_check_time + gpt_refine_time
+            total_query_time_offline = total_online_query_time + gpt_check_time + gpt_refine_time
             query_time_consumer["total_query_time"] = f"{total_query_time_offline:.4f} seconds"
             query_time_consumer["online_object_distance_in_online_view"] = mean_depth_online
             query_time_consumer["gptref_object_distance_in_ofline_view"] = avg_distance_in_gptview
@@ -3123,8 +2923,7 @@ class Graph:
             for i in room_ids:
                 if floor_id != -1:
                     objects_list.extend(self.floors[floor_id].rooms[i].objects)
-                    room_ids_list.extend(
-                        [i] * len(self.floors[floor_id].rooms[i].objects))
+                    room_ids_list.extend([i] * len(self.floors[floor_id].rooms[i].objects))
                 else:
                     objects_list.extend(self.rooms[i].objects)
                     room_ids_list.extend([i] * len(self.rooms[i].objects))
@@ -3163,14 +2962,14 @@ class Graph:
             target_room_id = [room_ids_list[i] for i in top_index]
             target_id = []
             for ti in target_object_id:
-                target_id.append([i for i, x in enumerate(
-                    self.objects) if x.object_id == ti][0])
+                target_id.append([i for i, x in enumerate(self.objects) if x.object_id == ti][0])
 
             return target_id, target_room_id, target_object_score
         return NotImplementedError
 
-    def query_hmsg_room(self, query: str, floor_id: int = -
-                        1, query_method: str = "view_embedding") -> List[int]:
+    def query_hmsg_room(
+        self, query: str, floor_id: int = -1, query_method: str = "view_embedding"
+    ) -> List[int]:
         """
         Search a room node with a text query.
 
@@ -3214,11 +3013,7 @@ class Graph:
             top_index = np.argsort(similarity[0])[::-1]
             # print the top 3 matching rooms
             for i in top_index[:3]:
-                print(
-                    "room: ",
-                    rooms_list[i].room_id,
-                    rooms_list[i].name,
-                    similarity[0][i])
+                print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
                 # print("room: ", rooms_list[i].room_id)
 
             same_sim_indices = []
@@ -3229,12 +3024,13 @@ class Graph:
                     same_sim_indices.append(i)
 
             target_rooms = [rooms_list[i] for i in same_sim_indices]
-            target_room_ids = [
-                target_room.room_id for target_room in target_rooms]
+            target_room_ids = [target_room.room_id for target_room in target_rooms]
             target_ids = [
                 # i for i, x in enumerate(self.rooms) if x.room_id in
                 # target_room_ids
-                i for i, x in enumerate(rooms_list) if x.room_id in target_room_ids
+                i
+                for i, x in enumerate(rooms_list)
+                if x.room_id in target_room_ids
             ]
 
             return target_ids
@@ -3249,16 +3045,16 @@ class Graph:
             #     # room_query_sim_median = np.max(compute_similarity(query_text_feats, np.stack(room.embeddings)))
             #     room2query_sim[room.room_id] = room_query_sim_median
             room2query_sim = dict()
-            room2query_feat = dict()   # Store the corresponding feature vectors
-            room2query_id = dict()     # Store the corresponding embedding indices
+            room2query_feat = dict()  # Store the corresponding feature vectors
+            room2query_id = dict()  # Store the corresponding embedding indices
 
             for room in rooms_list:
-                embeddings = np.stack(room.embeddings)   # [view_num, 768]
+                embeddings = np.stack(room.embeddings)  # [view_num, 768]
                 # [1, view_num], similarity between query and each view
                 sims = np.dot(query_text_feats, embeddings.T)
-                max_idx = np.argmax(sims)                # Find the position of maximum similarity
-                max_sim = sims[0, max_idx]               # Maximum similarity value
-                max_feat = embeddings[max_idx]           # Corresponding feature vector (768,)
+                max_idx = np.argmax(sims)  # Find the position of maximum similarity
+                max_sim = sims[0, max_idx]  # Maximum similarity value
+                max_feat = embeddings[max_idx]  # Corresponding feature vector (768,)
 
                 room2query_sim[room.room_id] = max_sim
                 room2query_feat[room.room_id] = max_feat
@@ -3266,24 +3062,23 @@ class Graph:
 
             room2query_sim_sorted = {
                 int(k.split("_")[-1]): v
-                for k, v in sorted(
-                    room2query_sim.items(), key=lambda item: item[1], reverse=True
-                )
+                for k, v in sorted(room2query_sim.items(), key=lambda item: item[1], reverse=True)
             }
             if is_room_text_valid:
                 return list(room2query_sim_sorted.keys())[
-                    0: min(len(room2query_sim_sorted), 5)
+                    0 : min(len(room2query_sim_sorted), 5)
                 ]  # return three highest-ranking rooms
             else:
                 return list(room2query_sim_sorted.keys())[
-                    0: min(len(room2query_sim_sorted), 10)
+                    0 : min(len(room2query_sim_sorted), 10)
                 ]  # return three highest-ranking rooms
 
         # elif query_method == "children_embedding":
         #     return NotImplementedError
 
-    def query_room(self, query: str, floor_id: int = -
-                   1, query_method: str = "view_embedding") -> List[int]:
+    def query_room(
+        self, query: str, floor_id: int = -1, query_method: str = "view_embedding"
+    ) -> List[int]:
         """
         Search a room node with a text query.
 
@@ -3327,11 +3122,7 @@ class Graph:
             top_index = np.argsort(similarity[0])[::-1]
             # print the top 3 matching rooms
             for i in top_index[:3]:
-                print(
-                    "room: ",
-                    rooms_list[i].room_id,
-                    rooms_list[i].name,
-                    similarity[0][i])
+                print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
                 # print("room: ", rooms_list[i].room_id)
 
             same_sim_indices = []
@@ -3342,10 +3133,8 @@ class Graph:
                     same_sim_indices.append(i)
 
             target_rooms = [rooms_list[i] for i in same_sim_indices]
-            target_room_ids = [
-                target_room.room_id for target_room in target_rooms]
-            target_ids = [i for i, x in enumerate(
-                rooms_list) if x.room_id in target_room_ids]
+            target_room_ids = [target_room.room_id for target_room in target_rooms]
+            target_ids = [i for i, x in enumerate(rooms_list) if x.room_id in target_room_ids]
             return target_ids
         else:
             print("query room use view embedding")
@@ -3358,12 +3147,10 @@ class Graph:
                 room2query_sim[room.room_id] = room_query_sim_median
             room2query_sim_sorted = {
                 int(k.split("_")[-1]): v
-                for k, v in sorted(
-                    room2query_sim.items(), key=lambda item: item[1], reverse=True
-                )
+                for k, v in sorted(room2query_sim.items(), key=lambda item: item[1], reverse=True)
             }
             return list(room2query_sim_sorted.keys())[
-                0: min(len(room2query_sim_sorted), 3)
+                0 : min(len(room2query_sim_sorted), 3)
             ]  # return three highest-ranking rooms
         # elif query_method == "children_embedding":
         #     return NotImplementedError
@@ -3437,8 +3224,7 @@ class Graph:
             for i in room_ids:
                 if floor_id != -1:
                     objects_list.extend(self.floors[floor_id].rooms[i].objects)
-                    room_ids_list.extend(
-                        [i] * len(self.floors[floor_id].rooms[i].objects))
+                    room_ids_list.extend([i] * len(self.floors[floor_id].rooms[i].objects))
                 else:
                     objects_list.extend(self.rooms[i].objects)
                     room_ids_list.extend([i] * len(self.rooms[i].objects))
@@ -3452,10 +3238,7 @@ class Graph:
             top_index = np.argsort(sim_mat[query_id])[::-1][:10]
             # top_index = np.argsort(sim_mat[query_id])[::1][:10]
             for i in top_index:
-                print(
-                    "object name, score: ",
-                    objects_list[i].name,
-                    sim_mat[0][i])
+                print("object name, score: ", objects_list[i].name, sim_mat[0][i])
                 print("object id: ", objects_list[i].object_id)
 
             # plt.hist(sim_mat.flatten(), bins=100)
@@ -3482,8 +3265,7 @@ class Graph:
             target_room_id = [room_ids_list[i] for i in top_index]
             target_id = []
             for ti in target_object_id:
-                target_id.append([i for i, x in enumerate(
-                    self.objects) if x.object_id == ti][0])
+                target_id.append([i for i, x in enumerate(self.objects) if x.object_id == ti][0])
 
             return target_id, target_room_id
         return NotImplementedError
@@ -3506,7 +3288,8 @@ class Graph:
         # negative_labels = ["wall"]
         start_time = time.time()
         floor_query, room_query, object_query = parse_hier_query_use_prompt_insentence_parse_icra(
-            self.cfg, query_instruction)
+            self.cfg, query_instruction
+        )
         llm_parse_time = time.time() - start_time
         print("llm_parse_time: ", llm_parse_time)
         # log these in a txt file
@@ -3517,8 +3300,7 @@ class Graph:
         if "Exhibition" in room_query:
             negative_labels = ["wall"]
 
-        floor_id = self.query_floor(
-            floor_query) if floor_query is not None else -1
+        floor_id = self.query_floor(floor_query) if floor_query is not None else -1
         print(f"floor id: {floor_id}")
 
         is_dectect_room = "unknown" not in room_query.lower()
@@ -3529,32 +3311,37 @@ class Graph:
         if object_query is None or object_query == "":
             is_dectect_obj = False
 
-        print(
-            "is_dectect_room: ",
-            is_dectect_room,
-            "is_dectect_obj: ",
-            is_dectect_obj)
+        print("is_dectect_room: ", is_dectect_room, "is_dectect_obj: ", is_dectect_obj)
 
         # ## offline use gpt to check and update object-reterival
         if use_gpt:
             res_dict, object_ids, room_ids = self.query_room_obj_slow_reasoning(
-                query_instruction, room_query, object_query, negative_prompt=negative_labels, floor_id=floor_id, room_query_method="label", object_query_method="clip", update_flag=True)
+                query_instruction,
+                room_query,
+                object_query,
+                negative_prompt=negative_labels,
+                floor_id=floor_id,
+                room_query_method="label",
+                object_query_method="clip",
+                update_flag=True,
+            )
             res_dict["LLM_Parse_Time"] = llm_parse_time
             res_dict["room_query"] = room_query
             res_dict["object_query"] = object_query
             res_dict["negative_labels"] = negative_labels
             return (
                 self.floors[floor_id] if floor_id != -1 else None,
-                [self.floors[floor_id].rooms[k] for k in room_ids] if floor_id != -1 else [self.rooms[k] for k in room_ids],
+                (
+                    [self.floors[floor_id].rooms[k] for k in room_ids]
+                    if floor_id != -1
+                    else [self.rooms[k] for k in room_ids]
+                ),
                 [self.objects[i] for i in object_ids],
                 res_dict,
             )
         room_ids = (
             # self.query_room_new(room_query, floor_id=floor_id, query_method="label")
-            self.query_hmsg_room(
-                room_query,
-                floor_id=floor_id,
-                query_method="label")
+            self.query_hmsg_room(room_query, floor_id=floor_id, query_method="label")
             # self.query_room(room_query, floor_id=floor_id)
             if room_query is not None
             else []
@@ -3588,12 +3375,14 @@ class Graph:
         res_dict["Re_Matching"] = 0.0
         res_dict["Total_Time"] = 0.0
 
-        print(
-            "query_hierarchy_protected_icra fun cost: ",
-            time.time() - start_time)
+        print("query_hierarchy_protected_icra fun cost: ", time.time() - start_time)
         return (
             self.floors[floor_id] if floor_id != -1 else None,
-            [self.floors[floor_id].rooms[k] for k in room_ids] if floor_id != -1 else [self.rooms[k] for k in room_ids],
+            (
+                [self.floors[floor_id].rooms[k] for k in room_ids]
+                if floor_id != -1
+                else [self.rooms[k] for k in room_ids]
+            ),
             [self.objects[i] for i in object_ids],
             res_dict,
         )
@@ -3630,19 +3419,19 @@ class Graph:
             "sliding door",
             "carpet",
             "ceiling",
-            "curtain"]  # picture on the wall
+            "curtain",
+        ]  # picture on the wall
         negative_labels = background_labels + ["monitor", "wall", "speaker"]
         # negative_labels = ["background", "wall"]
         start_time = time.time()
         floor_query, room_query, object_query = parse_hier_query_use_prompt_insentence_parse(
-            self.cfg, query_instruction)
+            self.cfg, query_instruction
+        )
         llm_parse_time = time.time() - start_time
         # log these in a txt file
         with open("room_obj_query_log.txt", "a") as f:
-            f.write(
-                f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n")
-        print(
-            (f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n"))
+            f.write(f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n")
+        print((f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n"))
         # if "exhibition hall" in room_query:
         #     negative_labels = ["wall"]
 
@@ -3653,8 +3442,7 @@ class Graph:
 
         # import pdb; pdb.set_trace()
 
-        floor_id = self.query_floor(
-            floor_query) if floor_query is not None else -1
+        floor_id = self.query_floor(floor_query) if floor_query is not None else -1
         print(f"floor id: {floor_id}")
 
         is_dectect_room = "unknown" not in room_query.lower()
@@ -3665,32 +3453,37 @@ class Graph:
         if object_query is None or object_query == "":
             is_dectect_obj = False
 
-        print(
-            "is_dectect_room: ",
-            is_dectect_room,
-            "is_dectect_obj: ",
-            is_dectect_obj)
+        print("is_dectect_room: ", is_dectect_room, "is_dectect_obj: ", is_dectect_obj)
 
         if use_gpt:
             res_dict, object_ids, room_ids = self.query_room_obj_slow_reasoning(
-                query_instruction, room_query, object_query, negative_prompt=negative_labels, floor_id=floor_id, room_query_method="label", object_query_method="clip", update_flag=True)
+                query_instruction,
+                room_query,
+                object_query,
+                negative_prompt=negative_labels,
+                floor_id=floor_id,
+                room_query_method="label",
+                object_query_method="clip",
+                update_flag=True,
+            )
             res_dict["LLM_Parse_Time"] = llm_parse_time
             res_dict["object_query"] = object_query
             res_dict["room_query"] = room_query
             res_dict["negative_labels"] = negative_labels
             return (
                 self.floors[floor_id] if floor_id != -1 else None,
-                [self.floors[floor_id].rooms[k] for k in room_ids] if floor_id != -1 else [self.rooms[k] for k in room_ids],
+                (
+                    [self.floors[floor_id].rooms[k] for k in room_ids]
+                    if floor_id != -1
+                    else [self.rooms[k] for k in room_ids]
+                ),
                 [self.objects[i] for i in object_ids],
                 res_dict,
             )
 
         # import pdb; pdb.set_trace()
         room_ids = (
-            self.query_hmsg_room(
-                room_query,
-                floor_id=floor_id,
-                query_method="label")
+            self.query_hmsg_room(room_query, floor_id=floor_id, query_method="label")
             # self.query_hmsg_room(room_query, floor_id=floor_id, query_method="view_embedding")
             if room_query is not None
             else []
@@ -3718,14 +3511,16 @@ class Graph:
         # print(f"object ids: {object_ids}")
         return (
             self.floors[floor_id] if floor_id != -1 else None,
-            [self.floors[floor_id].rooms[k] for k in room_ids] if floor_id != -1 else [self.rooms[k] for k in room_ids],
+            (
+                [self.floors[floor_id].rooms[k] for k in room_ids]
+                if floor_id != -1
+                else [self.rooms[k] for k in room_ids]
+            ),
             [self.objects[i] for i in object_ids],
             res_dict,
         )
 
-    def query_hierarchy(
-        self, query: str, top_k: int = 1
-    ) -> Tuple[Floor, Room, List[Object]]:
+    def query_hierarchy(self, query: str, top_k: int = 1) -> Tuple[Floor, Room, List[Object]]:
         """
         Return the target floor, room, and the list of top k objects.
 
@@ -3739,17 +3534,13 @@ class Graph:
 
         negative_labels = ["background"]
 
-        floor_query, room_query, object_query = parse_hier_query(
-            self.cfg, query)
+        floor_query, room_query, object_query = parse_hier_query(self.cfg, query)
         # log these in a txt file
         with open("room_obj_query_log.txt", "a") as f:
-            f.write(
-                f"query: {query} -- {floor_query}, {room_query}, {object_query}\n")
+            f.write(f"query: {query} -- {floor_query}, {room_query}, {object_query}\n")
 
-        print(
-            (f"query: {query} -- {floor_query}, {room_query}, {object_query}\n"))
-        floor_id = self.query_floor(
-            floor_query) if floor_query is not None else -1
+        print((f"query: {query} -- {floor_query}, {room_query}, {object_query}\n"))
+        floor_id = self.query_floor(floor_query) if floor_query is not None else -1
         print(f"floor id: {floor_id}")
         room_ids = (
             # self.query_room(room_query, floor_id=floor_id, query_method="label")
@@ -3770,20 +3561,22 @@ class Graph:
         )
         # print(f"object ids: {object_ids}")
         # import pdb; pdb.set_trace()
-        return (self.floors[floor_id] if floor_id != -
-                1 else None, [self.floors[floor_id].rooms[k] for k in room_ids] if floor_id != -
-                1 else [self.rooms[k] for k in room_ids], [self.objects[i] for i in object_ids], )
+        return (
+            self.floors[floor_id] if floor_id != -1 else None,
+            (
+                [self.floors[floor_id].rooms[k] for k in room_ids]
+                if floor_id != -1
+                else [self.rooms[k] for k in room_ids]
+            ),
+            [self.objects[i] for i in object_ids],
+        )
 
     def save_full_pcd(self, path):
         """Save the full pcd to disk :param path: str, The path to save the
         full pcd."""
         if not os.path.exists(path):
             os.makedirs(path)
-        o3d.io.write_point_cloud(
-            os.path.join(
-                path,
-                "full_pcd.ply"),
-            self.full_pcd)
+        o3d.io.write_point_cloud(os.path.join(path, "full_pcd.ply"), self.full_pcd)
         print("full pcd saved to disk in {}".format(path))
         return None
 
@@ -3793,8 +3586,7 @@ class Graph:
         if not os.path.exists(path):
             print("full pcd not found in {}".format(path))
             return None
-        self.full_pcd = o3d.io.read_point_cloud(
-            os.path.join(path, "full_pcd.ply"))
+        self.full_pcd = o3d.io.read_point_cloud(os.path.join(path, "full_pcd.ply"))
         print(
             "full pcd loaded from disk with shape {}".format(
                 np.asarray(self.full_pcd.points).shape
@@ -3825,10 +3617,7 @@ class Graph:
         # check if the full pcd feats is empty list
         if len(self.mask_feats) != 0:
             self.mask_feats = np.array(self.mask_feats)
-            torch.save(
-                torch.from_numpy(
-                    self.mask_feats), os.path.join(
-                    path, "mask_feats.pt"))
+            torch.save(torch.from_numpy(self.mask_feats), os.path.join(path, "mask_feats.pt"))
         if len(self.full_feats_array) != 0:
             torch.save(
                 torch.from_numpy(self.full_feats_array),
@@ -3846,36 +3635,26 @@ class Graph:
             print("full pcd feats not found in {}".format(path))
             return None
         if full_feats:
-            self.full_feats_array = torch.load(
-                os.path.join(path, "full_feats.pt")
-            ).float()
+            self.full_feats_array = torch.load(os.path.join(path, "full_feats.pt")).float()
             if normalize:
-                self.full_feats_array = (torch.nn.functional.normalize(
-                    self.full_feats_array, p=2, dim=-1) .cpu() .numpy())
+                self.full_feats_array = (
+                    torch.nn.functional.normalize(self.full_feats_array, p=2, dim=-1).cpu().numpy()
+                )
             else:
                 self.full_feats_array = self.full_feats_array.cpu().numpy()
             print(
-                "full pcd feats loaded from disk with shape {}".format(
-                    self.full_feats_array.shape
-                )
+                "full pcd feats loaded from disk with shape {}".format(self.full_feats_array.shape)
             )
             return self.full_feats_array
         else:
-            self.mask_feats = torch.load(
-                os.path.join(path, "mask_feats.pt")).float()
+            self.mask_feats = torch.load(os.path.join(path, "mask_feats.pt")).float()
             if normalize:
                 self.mask_feats = (
-                    torch.nn.functional.normalize(self.mask_feats, p=2, dim=-1)
-                    .cpu()
-                    .numpy()
+                    torch.nn.functional.normalize(self.mask_feats, p=2, dim=-1).cpu().numpy()
                 )
             else:
                 self.mask_feats = self.mask_feats.cpu().numpy()
-            print(
-                "full pcd feats loaded from disk with shape {}".format(
-                    self.mask_feats.shape
-                )
-            )
+            print("full pcd feats loaded from disk with shape {}".format(self.mask_feats.shape))
             return self.mask_feats
 
     def print_details(self):
@@ -3911,28 +3690,20 @@ class Graph:
             print("number of masked pcds: ", len(self.mask_pcds))
             print("number of mask_feats: ", len(self.mask_feats))
             for i, pcd in enumerate(self.mask_pcds):
-                o3d.io.write_point_cloud(
-                    os.path.join(objects_path, "pcd_{}.ply".format(i)), pcd
-                )
+                o3d.io.write_point_cloud(os.path.join(objects_path, "pcd_{}.ply".format(i)), pcd)
 
             masked_pcd = o3d.geometry.PointCloud()
             for pcd in self.mask_pcds:
                 pcd.paint_uniform_color(np.random.rand(3))
                 masked_pcd += pcd
-            o3d.io.write_point_cloud(
-                os.path.join(
-                    path,
-                    "masked_pcd.ply"),
-                masked_pcd)
+            o3d.io.write_point_cloud(os.path.join(path, "masked_pcd.ply"), masked_pcd)
             print("masked pcds saved to disk in {}".format(path))
 
         elif state == "objects":
             if not os.path.exists(path):
                 os.makedirs(path)
             for i, pcd in enumerate(self.mask_pcds):
-                o3d.io.write_point_cloud(
-                    os.path.join(objects_path, "pcd_{}.ply".format(i)), pcd
-                )
+                o3d.io.write_point_cloud(os.path.join(objects_path, "pcd_{}.ply".format(i)), pcd)
             print("masked pcds saved to disk in {}".format(path))
 
         elif state == "full":
@@ -3942,11 +3713,7 @@ class Graph:
             for pcd in self.mask_pcds:
                 pcd.paint_uniform_color(np.random.rand(3))
                 masked_pcd += pcd
-            o3d.io.write_point_cloud(
-                os.path.join(
-                    path,
-                    "masked_pcd.ply"),
-                masked_pcd)
+            o3d.io.write_point_cloud(os.path.join(path, "masked_pcd.ply"), masked_pcd)
             print("masked pcds saved to disk in {}".format(path))
 
     def load_masked_pcds_new(self, path):
@@ -3960,15 +3727,12 @@ class Graph:
             number_of_pcds = len(os.listdir(os.path.join(path, "objects")))
             not_found = []
             for i in range(number_of_pcds):
-                if os.path.exists(
-                    os.path.join(path, "objects", "pcd_{}.ply".format(i))
-                ):
+                if os.path.exists(os.path.join(path, "objects", "pcd_{}.ply".format(i))):
                     self.mask_pcds.append(
                         o3d.io.read_point_cloud(
-                            os.path.join(
-                                path,
-                                "objects",
-                                "pcd_{}.ply".format(i))))
+                            os.path.join(path, "objects", "pcd_{}.ply".format(i))
+                        )
+                    )
                 else:
                     print("masked pcd {} not found in {}".format(i, path))
                     not_found.append(i)
@@ -3976,13 +3740,11 @@ class Graph:
             # for i, pcd in reversed(list(enumerate(self.mask_pcds))):
             #     if len(pcd.points) < 100:
             #         self.mask_pcds.pop(i)
-            print("number of masked pcds loaded from disk {}".format(
-                len(self.mask_pcds)))
+            print("number of masked pcds loaded from disk {}".format(len(self.mask_pcds)))
             # remove masks_feats that are not found
             not_found = [i for i in not_found if i < len(self.mask_feats)]
             self.mask_feats = np.delete(self.mask_feats, not_found, axis=0)
-            print("number of mask_feats loaded from disk {}".format(
-                len(self.mask_feats)))
+            print("number of mask_feats loaded from disk {}".format(len(self.mask_feats)))
             # import pdb; pdb.set_trace()
 
             # # # new
@@ -4007,24 +3769,19 @@ class Graph:
             number_of_pcds = len(os.listdir(os.path.join(path, "objects")))
             not_found = []
             for i in range(number_of_pcds):
-                if os.path.exists(
-                    os.path.join(path, "objects", "pcd_{}.ply".format(i))
-                ):
+                if os.path.exists(os.path.join(path, "objects", "pcd_{}.ply".format(i))):
                     self.mask_pcds.append(
                         o3d.io.read_point_cloud(
-                            os.path.join(
-                                path,
-                                "objects",
-                                "pcd_{}.ply".format(i))))
+                            os.path.join(path, "objects", "pcd_{}.ply".format(i))
+                        )
+                    )
                 else:
                     print("masked pcd {} not found in {}".format(i, path))
                     not_found.append(i)
-            print("number of masked pcds loaded from disk {}".format(
-                len(self.mask_pcds)))
+            print("number of masked pcds loaded from disk {}".format(len(self.mask_pcds)))
             # remove masks_feats that are not found
             self.mask_feats = np.delete(self.mask_feats, not_found, axis=0)
-            print("number of mask_feats loaded from disk {}".format(
-                len(self.mask_feats)))
+            print("number of mask_feats loaded from disk {}".format(len(self.mask_feats)))
             # # # new
             # for i, pcd in enumerate(self.mask_pcds):
             #     if len(pcd.points) < 10:
