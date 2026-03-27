@@ -26,12 +26,16 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
 # pylint: disable=missing-docstring
 import time
+
+import matplotlib.pyplot as plt
+import numpy as np
+
 # Load point cloud
 import open3d as o3d
-import numpy as np
-import matplotlib.pyplot as plt
+
 # For creating the GUI and rendering the scene
 import open3d.visualization.gui as gui  # type: ignore
 import open3d.visualization.rendering as rendering  # type: ignore
@@ -40,6 +44,7 @@ import open3d.visualization.rendering as rendering  # type: ignore
 def exit_after_delay():
     time.sleep(5)  # Wait 5 seconds
     gui.Application.instance.quit()  # Quit the application
+
 
 # Function: display point cloud with category labels
 
@@ -61,8 +66,7 @@ def show_point_cloud_with_labels(pcd, point_labels, cluster_labels):
     app.initialize()
 
     # Create window and scene
-    window = app.create_window(
-        "mapvln raw existing object instances", 1024, 768)
+    window = app.create_window("mapvln raw existing object instances", 1024, 768)
     # Create a SceneWidget and add it to the window
     scene = gui.SceneWidget()
     scene.scene = rendering.Open3DScene(window.renderer)
@@ -74,7 +78,9 @@ def show_point_cloud_with_labels(pcd, point_labels, cluster_labels):
 
     # Iterate over each cluster label and add the corresponding text label to the point cloud
     for i in range(max(point_labels) + 1):
-        cluster_idx = np.where(point_labels == i)[0]  # Find indices belonging to the current cluster
+        cluster_idx = np.where(point_labels == i)[
+            0
+        ]  # Find indices belonging to the current cluster
         if len(cluster_idx) == 0:
             continue
         cluster_points = np.asarray(pcd.points)[cluster_idx]
@@ -97,16 +103,20 @@ def show_point_cloud_with_labels(pcd, point_labels, cluster_labels):
 
 # Load point cloud and run clustering
 pcd = o3d.io.read_point_cloud(
-    "/mnt/disk2/hovsg/HOV-SG/data/scannet/scene_graph/scannet/scene0378_00/full_pcd.ply")
-labels = np.array(pcd.cluster_dbscan(eps=0.05,  # Clustering radius
-                                     min_points=50,  # Minimum number of points
-                                     print_progress=True))  # Show progress
+    "/mnt/disk2/hovsg/HOV-SG/data/scannet/scene_graph/scannet/scene0378_00/full_pcd.ply"
+)
+labels = np.array(
+    pcd.cluster_dbscan(
+        eps=0.05,  # Clustering radius
+        min_points=50,  # Minimum number of points
+        print_progress=True,
+    )
+)  # Show progress
 
 # Colors
 max_label = labels.max()
 print("max_label: ", max_label)
-colors = plt.get_cmap("tab20")(
-    labels / (max_label + 1 if max_label > 0 else 1))
+colors = plt.get_cmap("tab20")(labels / (max_label + 1 if max_label > 0 else 1))
 print(colors)
 colors[labels < 0] = 0
 pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
@@ -117,4 +127,6 @@ cluster_names = {0: "chair", 1: "table", 2: "sofa"}  # Extend as needed based on
 # Display
 # Start a thread to quit the application after 5 seconds
 # threading.Thread(target=exit_after_delay).start()
-show_point_cloud_with_labels(pcd, labels, cluster_names)  # Keep variable names consistent when calling
+show_point_cloud_with_labels(
+    pcd, labels, cluster_names
+)  # Keep variable names consistent when calling

@@ -6,6 +6,7 @@ main:
     dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/HoloAgent
     # Depth threshold in meters — pixels/points beyond this distance are discarded; lower = only close objects reconstructed
     depth_cut: 1.0
+    depth_cut: 1.0
     save_path: outputs/built_graphs
 models:
     clip:
@@ -28,9 +29,7 @@ models:
 pipeline:
     # 3D spatial resolution in meters — smaller = finer detail but more memory/time
     voxel_size: 0.05
-    # Processes every Nth frame — higher = faster but may miss objects, must match skip+1 in rosbag_2_dataset.py
-    skip_frames: 4
-    # Starting IoU threshold for merging candidate objects across frames — higher = stricter merging
+    skip_frames: 8
     init_overlap_thresh: 0.75
     # Scales init_overlap_thresh adaptively — controls how the threshold evolves
     overlap_thresh_factor: 0.025

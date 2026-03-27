@@ -26,17 +26,15 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
 import os
 import sys
 
 import hydra
 from omegaconf import DictConfig
+
 # Add project root directory to Python path
-sys.path.insert(
-    0, os.path.dirname(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from memory.hmsg.graph.graph import Graph
 
 # pylint: disable=all
@@ -63,8 +61,9 @@ skip_frames_dict["00877-4ok3usBNeis"] = 15
 skip_frames_dict["00890-6s7QHgap2fW"] = 15
 
 
-@hydra.main(version_base=None, config_path="../../config",
-            config_name="semantic_scene_reconstruction_hm3d")
+@hydra.main(
+    version_base=None, config_path="../../config", config_name="semantic_scene_reconstruction_hm3d"
+)
 def main(params: DictConfig):
 
     for scene_id in scene_ids:
@@ -73,13 +72,13 @@ def main(params: DictConfig):
         # Create save directory
         dataset_path = params.main.dataset_path
         params.main.dataset_path = os.path.join(
-            params.main.dataset_path, scene_id)  # params.main.scene_id
+            params.main.dataset_path, scene_id
+        )  # params.main.scene_id
         params.pipeline.skip_frames = skip_frames_dict[scene_id]
         save_path = params.main.save_path
         save_dir = os.path.join(
-            params.main.save_path,
-            params.main.dataset,
-            scene_id)  # params.main.scene_id
+            params.main.save_path, params.main.dataset, scene_id
+        )  # params.main.scene_id
         params.main.save_path = save_dir
         if not os.path.exists(save_dir):
             os.makedirs(save_dir, exist_ok=True)

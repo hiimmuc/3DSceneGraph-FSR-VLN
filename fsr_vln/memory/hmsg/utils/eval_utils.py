@@ -1,18 +1,13 @@
 import json
 import os
-import sys
 
-import hydra
 import numpy as np
-from omegaconf import DictConfig, OmegaConf
 import open3d as o3d
-import open_clip
 import plyfile
-from scipy.spatial import cKDTree
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
-from sklearn.metrics import confusion_matrix
-from sklearn.neighbors import BallTree
 import torch
+from scipy.spatial import cKDTree
+from sklearn.neighbors import BallTree
+
 from hmsg.utils.clip_utils import get_text_feats, get_text_feats_multiple_templates
 
 

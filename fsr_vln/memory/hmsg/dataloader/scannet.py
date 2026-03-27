@@ -1,10 +1,9 @@
 import os
-import numpy as np
-from PIL import Image
-import torchvision
-import open3d as o3d
 
+import numpy as np
+import open3d as o3d
 from memory.hmsg.dataloader.generic import RGBDDataset
+from PIL import Image
 
 
 class ScannetDataset(RGBDDataset):

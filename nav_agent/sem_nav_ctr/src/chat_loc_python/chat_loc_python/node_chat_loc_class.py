@@ -26,15 +26,13 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
 import asyncio
-import time
-from loguru import logger
-import numpy as np
-from queue import Queue
 import threading
-import json
+import time
 
 import rclpy
+from loguru import logger
 from rclpy.node import Node
 from std_msgs.msg import String
 
@@ -43,11 +41,12 @@ from .drobotc_g1 import DRobotC
 
 class DRobotCNode(Node):
     def __init__(
-            self,
-            name: str = "drobotc",
-            host: str = "180.76.187.170",
-            port: int = 10071,
-            device_name: str = "ReSpeaker"):
+        self,
+        name: str = "drobotc",
+        host: str = "180.76.187.170",
+        port: int = 10071,
+        device_name: str = "ReSpeaker",
+    ):
         super().__init__(name)
 
         # 初始化
@@ -64,7 +63,8 @@ class DRobotCNode(Node):
 
         # 订阅消息
         self.signal_sub = self.create_subscription(
-            String, "waypoint_reached", self.waypoint_callback, 100)
+            String, "waypoint_reached", self.waypoint_callback, 100
+        )
 
         # 创建websocket连接线程
         self.ws_thread = threading.Thread(target=self._run_websocket)

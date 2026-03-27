@@ -1,11 +1,9 @@
-import os
 from abc import ABC, abstractmethod
+
+import cv2
 import numpy as np
 import open3d as o3d
-from scipy.spatial import cKDTree
-import cv2
-
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 
 class RGBDDataset(Dataset, ABC):

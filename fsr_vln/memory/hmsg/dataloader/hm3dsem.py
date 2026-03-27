@@ -1,14 +1,12 @@
 """Habitat Matterport 3D Semantics dataset loader."""
 
-import sys
-import os
 import math
-import numpy as np
-from PIL import Image
-import torchvision
-import open3d as o3d
+import os
 
+import numpy as np
+import open3d as o3d
 from memory.hmsg.dataloader.generic import RGBDDataset
+from PIL import Image
 
 # pylint: disable=all
 

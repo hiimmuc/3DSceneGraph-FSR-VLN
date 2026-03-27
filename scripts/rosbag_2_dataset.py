@@ -419,7 +419,7 @@ def convert(
     print("  Then run:")
     print("    cd fsr_vln/")
     print(
-        "    python application/semantic_scene_reconstrucion_offline/"
+        "    python application/semantic_scene_reconstruction_offline/"
         "semantic_scene_reconstruction.py "
         "--config-name=semantic_scene_reconstruction_custom"
     )

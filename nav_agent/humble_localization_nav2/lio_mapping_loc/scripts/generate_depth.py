@@ -1,15 +1,14 @@
 import concurrent.futures
-import numpy as np
-import cv2
-import argparse
 import logging
 import os
+
+import cv2
+import numpy as np
 import open3d as o3d
 from scipy.spatial import KDTree
+
 # 设置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 def read_pcd_poses(file_path):
@@ -24,7 +23,7 @@ def read_pcd_poses(file_path):
     """
     poses = []
     timestamps = []
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         for idx, line in enumerate(f):
             parts = line.strip().split()
             if len(parts) == 7:  # 确保每行有 8 个字段
@@ -47,7 +46,7 @@ def load_scan_poses(file_path):
         dict: 键为索引，值为 4x4 齐次变换矩阵的字典。
     """
     poses = {}
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         for idx, line in enumerate(f):
             values = list(map(float, line.strip().split()))
             if len(values) != 7:
@@ -94,8 +93,7 @@ def whether_occluded_deocc(uvs, img_input, image_scale, dilate_view_path=""):
     # 计算反深度图并膨胀
     inv_depth = np.where(depth < np.inf, fb / depth, 0)
     kernel_size = max(1, 2 // image_scale)
-    element = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (kernel_size, kernel_size))
+    element = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
     inv_dilate_depth = cv2.dilate(inv_depth, element, iterations=4)
 
     # 保存膨胀结果（可选）
@@ -103,8 +101,7 @@ def whether_occluded_deocc(uvs, img_input, image_scale, dilate_view_path=""):
         inv_depth_u8 = (inv_depth * 8).astype(np.uint8)
         inv_dilate_depth_u8 = (inv_dilate_depth * 8).astype(np.uint8)
         disp_vis = cv2.applyColorMap(inv_depth_u8, cv2.COLORMAP_JET)
-        disp_dilate_vis = cv2.applyColorMap(
-            inv_dilate_depth_u8, cv2.COLORMAP_JET)
+        disp_dilate_vis = cv2.applyColorMap(inv_dilate_depth_u8, cv2.COLORMAP_JET)
         result = np.hstack((disp_vis, disp_dilate_vis))
         cv2.imwrite(dilate_view_path, result)
 
@@ -122,11 +119,7 @@ def whether_occluded_deocc(uvs, img_input, image_scale, dilate_view_path=""):
     return occlusion_flag.tolist()
 
 
-def whether_occluded_deoccfast(
-        uvs,
-        img_input,
-        image_scale,
-        dilate_view_path=""):
+def whether_occluded_deoccfast(uvs, img_input, image_scale, dilate_view_path=""):
     """
     判断点是否被遮挡的函数。
 
@@ -164,8 +157,7 @@ def whether_occluded_deoccfast(
 
     # 膨胀操作
     kernel_size = max(1, 4 // image_scale)
-    element = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (kernel_size, kernel_size))
+    element = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
     inv_dilate_depth = cv2.dilate(inv_depth, element, iterations=4)
     inv_dilate_depth_s16 = np.int16(inv_dilate_depth)
     # inv_dilate_depth_s16 = np.uint8(np.clip(inv_dilate_depth_s16, 0, 255))
@@ -204,34 +196,32 @@ def whether_occluded_deoccfast(
             occlusion_flag[k] = True
 
     return occlusion_flag
+
+
 # 读取相机内参
 
 
 def read_camera_intrinsics(camera_file):
     try:
-        with open(camera_file, 'r') as f:
+        with open(camera_file, "r") as f:
             for line in f:
                 if line.startswith("#") or line.strip() == "":
                     continue  # 跳过注释行和空行
                 parts = line.strip().split()
                 if len(parts) < 8:
-                    logging.warning(
-                        f"Invalid line format: {line.strip()}")  # 警告日志
+                    logging.warning(f"Invalid line format: {line.strip()}")  # 警告日志
                     continue  # 跳过无效行
                 # 解析相机参数
                 camera_id, model = parts[0], parts[1]
                 width, height = int(parts[2]), int(parts[3])
                 fx, fy, cx, cy = map(float, parts[4:8])
-                intrinsics = np.array([
-                    [fx, 0, cx],
-                    [0, fy, cy],
-                    [0, 0, 1]
-                ])
+                intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
                 return intrinsics, width, height
         raise ValueError(f"Invalid camera file format in file: {camera_file}")
     except Exception as e:
         logging.error(f"Error reading camera intrinsics: {e}")
         raise
+
 
 # 读取点云文件
 
@@ -239,7 +229,7 @@ def read_camera_intrinsics(camera_file):
 def read_point_cloud(point_cloud_file):
     try:
         points = []
-        with open(point_cloud_file, 'r') as f:
+        with open(point_cloud_file, "r") as f:
             for line in f:
                 if line.startswith("#"):
                     continue  # 跳过注释行
@@ -253,6 +243,7 @@ def read_point_cloud(point_cloud_file):
         logging.error(f"Error reading point cloud: {e}")
         raise
 
+
 # 读取图像轨迹文件
 
 
@@ -260,7 +251,7 @@ def read_image_trajectories(images_file):
     try:
         trajectories = []
         # trajectories2 = []
-        with open(images_file, 'r') as f:
+        with open(images_file, "r") as f:
             lines = f.readlines()
             for i in range(0, len(lines), 1):  # 每两行处理一次
                 if lines[i].startswith("#") or lines[i].strip() == "":
@@ -295,7 +286,7 @@ def read_image_trajectories(images_file):
 
 def read_image_tum_trajectories(images_file):
     poses = {}
-    with open(images_file, 'r') as f:
+    with open(images_file, "r") as f:
         for idx, line in enumerate(f):
             values = list(map(float, line.strip().split()))
             if len(values) != 8:
@@ -311,70 +302,25 @@ def read_image_tum_trajectories(images_file):
             pose[:3, 3] = translation
             poses[timestamp] = pose
     return poses
+
+
 # 四元数转旋转矩阵
 
 
 def quaternion_to_rotation_matrix(qw, qx, qy, qz):
-    return np.array([[1 -
-                      2 *
-                      qy *
-                      qy -
-                      2 *
-                      qz *
-                      qz, 2 *
-                      qx *
-                      qy -
-                      2 *
-                      qz *
-                      qw, 2 *
-                      qx *
-                      qz +
-                      2 *
-                      qy *
-                      qw], [2 *
-                            qx *
-                            qy +
-                            2 *
-                            qz *
-                            qw, 1 -
-                            2 *
-                            qx *
-                            qx -
-                            2 *
-                            qz *
-                            qz, 2 *
-                            qy *
-                            qz -
-                            2 *
-                            qx *
-                            qw], [2 *
-                                  qx *
-                                  qz -
-                                  2 *
-                                  qy *
-                                  qw, 2 *
-                                  qy *
-                                  qz +
-                                  2 *
-                                  qx *
-                                  qw, 1 -
-                                  2 *
-                                  qx *
-                                  qx -
-                                  2 *
-                                  qy *
-                                  qy]])
+    return np.array(
+        [
+            [1 - 2 * qy * qy - 2 * qz * qz, 2 * qx * qy - 2 * qz * qw, 2 * qx * qz + 2 * qy * qw],
+            [2 * qx * qy + 2 * qz * qw, 1 - 2 * qx * qx - 2 * qz * qz, 2 * qy * qz - 2 * qx * qw],
+            [2 * qx * qz - 2 * qy * qw, 2 * qy * qz + 2 * qx * qw, 1 - 2 * qx * qx - 2 * qy * qy],
+        ]
+    )
+
 
 # 投影点云
 
 
-def project_points(
-        points,
-        rotation,
-        translation,
-        intrinsics,
-        img_width,
-        img_height):
+def project_points(points, rotation, translation, intrinsics, img_width, img_height):
     # 将点云转换到相机坐标系
     points_camera = np.dot(rotation, points.T) + translation.reshape(3, 1)
 
@@ -395,32 +341,29 @@ def project_points(
 
 
 def generate_occ_depth(
-        points_image,
-        points_camera,
-        img_width,
-        img_height,
-        dilate_view_path,
-        depth_output_path,
-        visualization_output_path,
-        depth_factor,
-        img_input,
-        image_scale):
+    points_image,
+    points_camera,
+    img_width,
+    img_height,
+    dilate_view_path,
+    depth_output_path,
+    visualization_output_path,
+    depth_factor,
+    img_input,
+    image_scale,
+):
     """生成深度图，并对点云进行去遮挡处理。 :param points_image: 投影到图像上的点云坐标 (numpy array) :param
     points_camera: 相机坐标系下的点云坐标 (numpy array) :param img_width: 图像宽度 :param
     img_height: 图像高度 :param depth_factor: 深度缩放因子 :param img_input: 输入图像，用于遮挡判断
     :param image_scale: 图像缩放比例."""
     # 将点云转换为 (x, y, z) 格式
-    uvs = np.vstack(
-        (points_image[0, :], points_image[1, :], points_camera[2, :])).T
+    uvs = np.vstack((points_image[0, :], points_image[1, :], points_camera[2, :])).T
     # print(f"uvs size: {uvs.shape}")
 
     # 调用 whether_occluded_deoccfast 进行去遮挡
     occlusion_flags = np.array(
-        whether_occluded_deoccfast(
-            uvs,
-            img_input,
-            image_scale,
-            dilate_view_path))
+        whether_occluded_deoccfast(uvs, img_input, image_scale, dilate_view_path)
+    )
 
     # 筛选未被遮挡的点
     valid_mask = (uvs[:, 2] > 0) & ~occlusion_flags
@@ -475,11 +418,7 @@ def generate_occ_depth(
         if i % 4 == 0:
             continue
         color = colors[0][i]
-        cv2.circle(
-            img_input, (col, row), 1, (int(
-                color[0]), int(
-                color[1]), int(
-                color[2])), -1)
+        cv2.circle(img_input, (col, row), 1, (int(color[0]), int(color[1]), int(color[2])), -1)
     # 保存结果
     cv2.imwrite(visualization_output_path, img_input)
     cv2.imwrite(depth_output_path, depth_map.astype(np.uint16))
@@ -549,6 +488,8 @@ def load_keyframe_clouds(keyframe_dir, nearest_timestamps, kf_cloud_poses):
         local_map = np.empty((0, 3))  # 如果没有点云，返回空数组
 
     return local_map
+
+
 # 主函数
 # def main():
 
@@ -632,7 +573,20 @@ def load_keyframe_clouds(keyframe_dir, nearest_timestamps, kf_cloud_poses):
 
 
 def process_frame(args):
-    image_timestamp, pose, kf_tree, kf_cloud_poses, timestamps, keyframe_dir, intrinsics, img_width, img_height, output_dir, vis_output_dir, rgb_image_path = args
+    (
+        image_timestamp,
+        pose,
+        kf_tree,
+        kf_cloud_poses,
+        timestamps,
+        keyframe_dir,
+        intrinsics,
+        img_width,
+        img_height,
+        output_dir,
+        vis_output_dir,
+        rgb_image_path,
+    ) = args
 
     rotation = pose[:3, :3]
     translation = pose[:3, 3]
@@ -643,31 +597,28 @@ def process_frame(args):
     indices = kf_tree.query_ball_point(cam2world_trans, r=radius)
     nearest_timestamps = [timestamps[idx] for idx in indices]
 
-    local_map = load_keyframe_clouds(
-        keyframe_dir, nearest_timestamps, kf_cloud_poses)
+    local_map = load_keyframe_clouds(keyframe_dir, nearest_timestamps, kf_cloud_poses)
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(local_map)
     pcd = pcd.voxel_down_sample(voxel_size=0.02)
     local_map = np.asarray(pcd.points)
 
     if local_map.size == 0:
-        logging.warning(
-            f"No valid point clouds found for frame {image_timestamp}. Skipping.")
+        logging.warning(f"No valid point clouds found for frame {image_timestamp}. Skipping.")
         return
 
     points_image, points_camera = project_points(
-        local_map, rotation, translation, intrinsics, img_width, img_height)
+        local_map, rotation, translation, intrinsics, img_width, img_height
+    )
     rgb_image_path = os.path.join(rgb_image_path, f"{image_timestamp}.png")
     img_input = cv2.imread(rgb_image_path)
     if img_input is None:
         logging.error(f"Failed to read RGB image: {rgb_image_path}")
         return
 
-    dilate_view_path = os.path.join(
-        output_dir, f"{image_timestamp}_dilate.png")
+    dilate_view_path = os.path.join(output_dir, f"{image_timestamp}_dilate.png")
     depth_output_path = os.path.join(output_dir, f"{image_timestamp}.png")
-    visualization_output_path = os.path.join(
-        vis_output_dir, f"{image_timestamp}_overlay.png")
+    visualization_output_path = os.path.join(vis_output_dir, f"{image_timestamp}_overlay.png")
     generate_occ_depth(
         points_image,
         points_camera,
@@ -678,13 +629,14 @@ def process_frame(args):
         visualization_output_path,
         depth_factor=1000,
         img_input=img_input,
-        image_scale=1)
+        image_scale=1,
+    )
 
 
 def main():
     input_dir = "/home/users/tingyang.xiao/VLN/dataset/1014_demo//Colmap/sparse/0"
     output_dir = "/home/users/tingyang.xiao/VLN/dataset/1014_demo/Colmap/depth_dense"
-    rgb_image_path = '/home/users/tingyang.xiao/VLN/dataset/1014_demo/Colmap/images'
+    rgb_image_path = "/home/users/tingyang.xiao/VLN/dataset/1014_demo/Colmap/images"
     vis_output_dir = "/home/users/tingyang.xiao/VLN/dataset/1014_demo/Colmap/vis_depth_dense"
     images_file = os.path.join(input_dir, "poses.txt")
     camera_file = os.path.join(input_dir, "cameras.txt")
@@ -702,19 +654,22 @@ def main():
 
     # 并行处理每一帧
     args_list = [
-        (image_timestamp,
-         pose,
-         kf_tree,
-         kf_cloud_poses,
-         timestamps,
-         keyframe_dir,
-         intrinsics,
-         img_width,
-         img_height,
-         output_dir,
-         vis_output_dir,
-         rgb_image_path) for image_timestamp,
-        pose in trajectories.items()]
+        (
+            image_timestamp,
+            pose,
+            kf_tree,
+            kf_cloud_poses,
+            timestamps,
+            keyframe_dir,
+            intrinsics,
+            img_width,
+            img_height,
+            output_dir,
+            vis_output_dir,
+            rgb_image_path,
+        )
+        for image_timestamp, pose in trajectories.items()
+    ]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         list(executor.map(process_frame, args_list))

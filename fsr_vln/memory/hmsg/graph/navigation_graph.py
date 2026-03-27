@@ -1,33 +1,25 @@
-from collections import defaultdict
 import copy
-import glob
 import json
-from multiprocessing import current_process, Process, Queue
 import os
-import random
-import sys
 import time
-from typing import Dict, List, Tuple, Union, Any
+from typing import Any, Dict, List
 
 import cv2
 import matplotlib.pyplot as plt
 import networkx as nx
-from networkx.readwrite import json_graph
 import numpy as np
 import open3d as o3d
-import pyvista as pv
-from scipy.ndimage import binary_closing, binary_dilation, binary_erosion, median_filter
-from scipy.signal import find_peaks
-from scipy.spatial import Delaunay, Voronoi, voronoi_plot_2d
-from scipy.spatial.distance import cdist
 import skfmm
-from sklearn.cluster import DBSCAN
-from tqdm import tqdm
-
 from memory.hmsg.graph.floor import Floor
 from memory.hmsg.graph.object import Object
-from memory.hmsg.utils.constants import MATTERPORT_LABELS_40
 from memory.hmsg.utils.clip_utils import get_text_feats_62_templates
+from memory.hmsg.utils.constants import MATTERPORT_LABELS_40
+from scipy.ndimage import binary_closing, binary_erosion, median_filter
+from scipy.signal import find_peaks
+from scipy.spatial import Voronoi
+from scipy.spatial.distance import cdist
+from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
 # change matplotlib backend to a gui one
 # plt.switch_backend("TkAgg")
@@ -347,7 +339,7 @@ class NavigationGraph:
         for pose in poses_list:
             cv2.circle(poses_map, tuple(pose), int(radius / self.cell_size), 1, -1)
         if save:
-            cv2.imwrite(os.path.join(floor_dir, f"poses_region_map.png"), poses_map * 255)
+            cv2.imwrite(os.path.join(floor_dir, "poses_region_map.png"), poses_map * 255)
         return poses_map
 
     def get_main_free_map(

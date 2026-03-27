@@ -1,23 +1,25 @@
-import os
-import sys
 import json
-import torch
+import os
+from collections import defaultdict
 
+import networkx as nx
 import numpy as np
 import open3d as o3d
-import networkx as nx
-
-from collections import defaultdict
+import torch
 from PIL import ImageColor
 from scipy.optimize import linear_sum_assignment
 from torchmetrics.functional import pairwise_cosine_similarity
 
-from hmsg.data.hm3dsem.create_hm3dsem_walks_gt import PanopticLevel, PanopticRegion, PanopticObject
-from hmsg.utils.eval_utils import find_box_center_and_dims, get_3d_iou
-from hmsg.utils.graph_utils import find_overlapping_ratio_faiss, find_intersection_share
+from hmsg.data.hm3dsem.create_hm3dsem_walks_gt import (
+    PanopticLevel,
+    PanopticObject,
+    PanopticRegion,
+)
 from hmsg.graph.floor import Floor
-from hmsg.graph.room import Room
 from hmsg.graph.object import Object
+from hmsg.graph.room import Room
+from hmsg.utils.eval_utils import find_box_center_and_dims, get_3d_iou
+from hmsg.utils.graph_utils import find_intersection_share, find_overlapping_ratio_faiss
 
 
 class PanopticBuildingEval:

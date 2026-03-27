@@ -1,17 +1,11 @@
-from collections import defaultdict
 import json
-import os
 from pathlib import Path
-import sys
 from typing import Dict, List, Tuple, Union
 
 import hydra
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from omegaconf import DictConfig, OmegaConf
 import open3d as o3d
-
 
 from hmsg.eval.hm3dsem_evaluator import HM3DSemanticEvaluator
 

@@ -1,5 +1,4 @@
 import random
-from random import randint
 
 import cv2
 import matplotlib.pyplot as plt

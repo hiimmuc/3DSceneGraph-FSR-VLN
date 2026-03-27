@@ -1,11 +1,11 @@
-from functools import lru_cache
 import os
 import re
 import time
-from typing import Dict, List, Tuple, Union
+from functools import lru_cache
+from typing import List, Tuple
+
 import openai
 from openai import AzureOpenAI, OpenAI
-
 
 # ---------------------------------------------------------------------------
 # LLM provider factory
@@ -112,7 +112,7 @@ def infer_room_type_from_object_list_chat(
     # print(f"Objects list: {objects}")
     print(f"Room types: {room_types}")
 
-    question = f"""
+    question = """
     """
     print(question)
     response = client.chat.completions.create(
@@ -124,19 +124,19 @@ def infer_room_type_from_object_list_chat(
             },
             {
                 "role": "user",
-                "content": f"The list of objects contained in this room are: bed, wardrobe, chair, sofa. What is the room type? Please just answer the room name.",
+                "content": "The list of objects contained in this room are: bed, wardrobe, chair, sofa. What is the room type? Please just answer the room name.",
             },
             {
                 "role": "assistant",
-                "content": f"bedroom",
+                "content": "bedroom",
             },
             {
                 "role": "user",
-                "content": f"The list of objects contained in this room are: tv, table, chair, sofa. Please pick the most matching room type from the following list: living room, bedroom, bathroom, kitchen. What is the room type? Please just answer the room name.",
+                "content": "The list of objects contained in this room are: tv, table, chair, sofa. Please pick the most matching room type from the following list: living room, bedroom, bathroom, kitchen. What is the room type? Please just answer the room name.",
             },
             {
                 "role": "assistant",
-                "content": f"living room",
+                "content": "living room",
             },
             {
                 "role": "user",

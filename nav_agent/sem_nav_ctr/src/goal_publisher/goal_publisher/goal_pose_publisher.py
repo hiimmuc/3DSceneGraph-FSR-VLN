@@ -26,25 +26,22 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
 #!/usr/bin/env python3
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, Point, Quaternion
-import math
-from ament_index_python.packages import get_package_share_directory
-from copy import deepcopy
-import sys
-from std_msgs.msg import String
-
-from hmsg.graph.graph import Graph
-import hydra
-import open3d as o3d
-from omegaconf import DictConfig
 import time
-import numpy as np
+from copy import deepcopy
 
-from rclpy.action import ActionClient
+import hydra
+import numpy as np
+import rclpy
+from ament_index_python.packages import get_package_share_directory
+from geometry_msgs.msg import PoseStamped
+from hmsg.graph.graph import Graph
 from nav2_msgs.action import FollowWaypoints
+from omegaconf import DictConfig
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from std_msgs.msg import String
 
 # pylint: disable=all
 
@@ -52,29 +49,25 @@ from nav2_msgs.action import FollowWaypoints
 class GoalPosePublisher(Node):
 
     def __init__(self, cfg: DictConfig):
-        super().__init__('goal_pose_publisher')
+        super().__init__("goal_pose_publisher")
 
         # 创建发布者，消息类型为PoseStamped，话题名为/goal_pose，队列大小为10
-        self.publisher_ = self.create_publisher(
-            PoseStamped, '/object_pose', 10)
-        self.waypoint_found_pub = self.create_publisher(
-            String, 'waypoint_reached', 10)
+        self.publisher_ = self.create_publisher(PoseStamped, "/object_pose", 10)
+        self.waypoint_found_pub = self.create_publisher(String, "waypoint_reached", 10)
         # 订阅String话题
         self.subscription = self.create_subscription(
-            String,
-            '/chat_loc_pub',
-            self.hmsggetgoal_callback,
-            10)
-        self._action_client = ActionClient(
-            self, FollowWaypoints, '/follow_waypoints')
+            String, "/chat_loc_pub", self.hmsggetgoal_callback, 10
+        )
+        self._action_client = ActionClient(self, FollowWaypoints, "/follow_waypoints")
         # 设置定时器，每1秒发布一次目标位姿
         # timer_period = 1.0  # 秒
         # self.timer = self.create_timer(timer_period, self.timer_callback)
         self.count = 0
         self.params = cfg
         self.graph = Graph(cfg)
-        self.T_switch_axis = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [
-                                      0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64)  # g1_navi
+        self.T_switch_axis = np.array(
+            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64
+        )  # g1_navi
         self.T_tomap = np.linalg.inv(self.T_switch_axis)
         self.hmsgcreate()
         self.use_gpt = 0
@@ -82,7 +75,7 @@ class GoalPosePublisher(Node):
 
         # 初始化计数器
 
-        self.get_logger().info('GoalPosePublisher 节点已启动，正在发布 /object_pose 话题...')
+        self.get_logger().info("GoalPosePublisher 节点已启动，正在发布 /object_pose 话题...")
         # print(f"This node is running with Python at: {sys.executable}")
 
     def pubpose(self, x, y, z):
@@ -91,7 +84,7 @@ class GoalPosePublisher(Node):
 
         # 设置消息头
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'map'  # 假设目标位姿在map坐标系中
+        msg.header.frame_id = "map"  # 假设目标位姿在map坐标系中
 
         msg.pose.position.x = x
         msg.pose.position.y = y
@@ -109,7 +102,8 @@ class GoalPosePublisher(Node):
 
         # 记录日志
         self.get_logger().info(
-            f'发布第 {self.count} 个目标位姿: x={msg.pose.position.x:.2f}, y={msg.pose.position.y:.2f}, z={msg.pose.position.z:.2f}')
+            f"发布第 {self.count} 个目标位姿: x={msg.pose.position.x:.2f}, y={msg.pose.position.y:.2f}, z={msg.pose.position.z:.2f}"
+        )
 
         # 增加计数器
         self.count += 1
@@ -146,7 +140,7 @@ class GoalPosePublisher(Node):
                 "Lift",
                 "Office",
                 "Cafeteria",
-            ]
+            ],
         )
         # 人为设定房间类型和名字
         designated_room_names_digua = [
@@ -156,7 +150,8 @@ class GoalPosePublisher(Node):
             "none",
             "转角走廊",
             "走廊",
-            "地瓜电梯间接待区",]
+            "地瓜电梯间接待区",
+        ]
         designated_room_names_ic7f_demo = [
             "none",
             "none",
@@ -176,9 +171,11 @@ class GoalPosePublisher(Node):
             "长走廊",
             "接待区",
             "none",
-            "地瓜办公区电梯间",]
+            "地瓜办公区电梯间",
+        ]
         designated_room_names_0918demo = [
-            "接待区",]
+            "接待区",
+        ]
 
         designated_room_names_1028demo = [
             "none",
@@ -186,10 +183,12 @@ class GoalPosePublisher(Node):
             "实验室",
             "none",
             "none",
-            "活动区",]
+            "活动区",
+        ]
 
         designated_room_names_0918demo = [
-            "接待区",]
+            "接待区",
+        ]
 
         designated_room_names_1030demo = [
             "会议室",
@@ -200,7 +199,8 @@ class GoalPosePublisher(Node):
             "操作区",
             "会议室",
             "实验室",
-            "活动区",]
+            "活动区",
+        ]
         designated_room_names_1127demo = [
             "none",
             "会议室",
@@ -208,17 +208,19 @@ class GoalPosePublisher(Node):
             "活动区",
             "none",
             "活动区",
-            "none",]
+            "none",
+        ]
         hmsg.set_room_names(room_names=designated_room_names_1127demo)
 
     def hmsggetgoal_callback(self, msg):
         hmsg = self.graph
-        query_instruction = '来自语音查找'
+        query_instruction = "来自语音查找"
         ans = msg.data
         print(ans)
         start_time = time.time()
         floor, room, obj, res_dict = hmsg.query_hierarchy_protected(
-            query_instruction, ans, top_k=1, use_gpt=self.use_gpt)
+            query_instruction, ans, top_k=1, use_gpt=self.use_gpt
+        )
         end_time = time.time()
         print("obj: ", res_dict)
         print("score: ", res_dict["object_scores"][0])
@@ -237,23 +239,26 @@ class GoalPosePublisher(Node):
         #    "objects_scores": res_dict["object_scores"]
         # }
         # print(query_result)
-        if res_dict["object_query"] != 'unknown' and res_dict["object_scores"][0] < 0.15:
+        if res_dict["object_query"] != "unknown" and res_dict["object_scores"][0] < 0.15:
             msg = String()
             msg.data = "not_found"
             self.waypoint_found_pub.publish(msg)
-            print('not found')
+            print("not found")
             return
-        elif res_dict["room_query"] == 'unknown' and res_dict["object_query"] == 'unknown' and res_dict["object_scores"][0] < 0.18:
+        elif (
+            res_dict["room_query"] == "unknown"
+            and res_dict["object_query"] == "unknown"
+            and res_dict["object_scores"][0] < 0.18
+        ):
             return
         else:
             msg = String()
             msg.data = "found"
             self.waypoint_found_pub.publish(msg)
-            print('found')
+            print("found")
 
         # visualize the query
-        print(floor.floor_id, [(r.room_id, r.name)
-              for r in room], [o.object_id for o in obj])
+        print(floor.floor_id, [(r.room_id, r.name) for r in room], [o.object_id for o in obj])
         # use open3d to visualize room.pcd and color the points where obj.pcd
         # is
         print("len(obj): ", len(obj))
@@ -265,15 +270,14 @@ class GoalPosePublisher(Node):
             obj_center_h = np.hstack((obj_center, 1.0))  # 齐次坐标 (4,)
             obj_center_in_map = (self.T_tomap @ obj_center_h)[:3]
             print("obj_center in lidarmap: ", obj_center_in_map)
-            self.pubpose(
-                obj_center_in_map[0],
-                obj_center_in_map[1],
-                obj_center_in_map[2])
+            self.pubpose(obj_center_in_map[0], obj_center_in_map[1], obj_center_in_map[2])
 
 
-@hydra.main(version_base=None,
-            config_path=get_package_share_directory('goal_publisher') + "/config",
-            config_name="visualize_query_graph_demo")
+@hydra.main(
+    version_base=None,
+    config_path=get_package_share_directory("goal_publisher") + "/config",
+    config_name="visualize_query_graph_demo",
+)
 def main(params: DictConfig, args=None):
 
     # 初始化ROS2 Python客户端库
@@ -295,5 +299,5 @@ def main(params: DictConfig, args=None):
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

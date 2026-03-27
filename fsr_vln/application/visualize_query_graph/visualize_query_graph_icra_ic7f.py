@@ -26,21 +26,20 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
+import json
+import os
+import sys
+import time
 from copy import deepcopy
+
 import hydra
+import numpy as np
 import open3d as o3d
 from omegaconf import DictConfig
-import time
-import numpy as np
-import os
-import json
-import sys
+
 # Add project root directory to Python path
-sys.path.insert(
-    0, os.path.dirname(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from memory.hmsg.graph.graph import Graph
 
 
@@ -63,10 +62,11 @@ def visualize_and_save(room_pcd, obj_pcd, end_sphere, save_path="scene.png"):
 
     # Set camera parameters
     ctr = vis.get_view_control()
-    ctr.set_lookat(obj_center)                     # Look at the object center
-    ctr.set_front((cam_pos - obj_center) /
-                  np.linalg.norm(cam_pos - obj_center))  # Camera direction
-    ctr.set_up([0, 1, 0])                          # Assuming z as the horizontal reference; up direction is set to z
+    ctr.set_lookat(obj_center)  # Look at the object center
+    ctr.set_front(
+        (cam_pos - obj_center) / np.linalg.norm(cam_pos - obj_center)
+    )  # Camera direction
+    ctr.set_up([0, 1, 0])  # Assuming z as the horizontal reference; up direction is set to z
 
     ctr.set_zoom(0.7)  # Zoom adjustment
 
@@ -85,8 +85,6 @@ instruction_templelate_ic7f_obj = [
     "green chairs with a simple design",
     "poster with Sign SPACE",
     "poster with Sign FUTURE",
-
-
     # #0 west pantry
     "sink",
     "trash can",
@@ -95,15 +93,12 @@ instruction_templelate_ic7f_obj = [
     "sink",
     "coffee machine",
     "trash can",
-
     # 8 east mixed-use space
     "water dispenser",
     "black chair",
     "white table",
-
     # hallway[1,2,7]
     "fire extinguisher",
-
     # 3/5 cafeteria
     "table",
     "chair",
@@ -117,7 +112,6 @@ instruction_templelate_ic7f_obj = [
     "paper towel",
     "bottle",
     "packaged food",
-
 ]
 
 instruction_templelate_ic7f = [  # 27
@@ -126,7 +120,6 @@ instruction_templelate_ic7f = [  # 27
     "Find me a green chairs with a simple design in the west mixed-use space",
     "Find me a poster with Sign SPACE in the west mixed-use space",
     "Find me a poster with Sign FUTURE in the west mixed-use space",
-
     # #0 west pantry
     "Find me a sink in the west pantry",
     "Find me a trash can in the west pantry",
@@ -135,15 +128,12 @@ instruction_templelate_ic7f = [  # 27
     "Find me a sink in east pantry",
     "Find me a coffee machine in east pantry",
     "Find me a trash can in east pantry",
-
     # 8 east mixed-use space
     "Take me to water dispenser in the east mixed-use space",
     "Take me to black chair in east mixed-use space",
     "Take me to white table in east mixed-use space",
-
     # hallway[1,2,7]
     "fire extinguisher in the hallway",
-
     # 3/5 cafeteria
     "table in the cafeteria",
     "chair in the cafeteria",
@@ -157,7 +147,6 @@ instruction_templelate_ic7f = [  # 27
     "paper towel in the cafeteria",
     "bottle in the cafeteria",
     "packaged food in the cafeteria",
-
 ]
 
 instruction_templelate_ic7f_autoregion = [  # 27
@@ -166,22 +155,17 @@ instruction_templelate_ic7f_autoregion = [  # 27
     "green chairs with a simple design in the hallway",
     "poster with Sign SPACE in the hallway",
     "poster with Sign FUTURE in the hallway",
-
     # #0 west pantry
     "sink in the pantry",
     "trash can in the  pantry",
     "coffee machine in the pantry",
     "potted plant in pantry",
-
-
     # 8 east mixed-use space
     "water dispenser in the office",
     "black chair in the office",
     "white table in the office",
-
     # hallway[1,2,7]
     "fire extinguisher in the hallway",
-
     # 3/5 cafeteria
     "bottle in the cafeteria",
     "table in the cafeteria",
@@ -198,8 +182,9 @@ instruction_templelate_ic7f_autoregion = [  # 27
 ]
 
 
-@hydra.main(version_base=None, config_path="../../config",
-            config_name="visualize_query_graph_icra_ic7f")
+@hydra.main(
+    version_base=None, config_path="../../config", config_name="visualize_query_graph_icra_ic7f"
+)
 def main(params: DictConfig):
     # Load graph
     scene_id = params.main.scene_id
@@ -211,12 +196,11 @@ def main(params: DictConfig):
         use_gpt = False
     # Create save directory
     params.main.dataset_path = os.path.join(
-        params.main.dataset_path,
-        scene_id)  # params.main.scene_id
+        params.main.dataset_path, scene_id
+    )  # params.main.scene_id
     save_dir = os.path.join(
-        params.main.save_path,
-        params.main.dataset,
-        scene_id)  # params.main.scene_id
+        params.main.save_path, params.main.dataset, scene_id
+    )  # params.main.scene_id
     params.main.save_path = save_dir
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
@@ -225,7 +209,8 @@ def main(params: DictConfig):
     hmsg = Graph(params)
     hmsg.load_hmsg_graph(params.main.graph_path)
     hmsg.vln_result_dir = os.path.join(
-        save_dir, f"fsrvln_result_online_{spatial_reasoning_method}_{fast_slow_method}")
+        save_dir, f"fsrvln_result_online_{spatial_reasoning_method}_{fast_slow_method}"
+    )
     # Automatically determine room type and name
     hmsg.generate_room_names(
         # generate_method="view_embedding",
@@ -236,7 +221,7 @@ def main(params: DictConfig):
             "Pantry",
             "Office",
             "Cafeteria",
-        ]
+        ],
     )
     # Manually assign room type and name
     if spatial_reasoning_method == "human_assign":
@@ -258,8 +243,9 @@ def main(params: DictConfig):
     else:
         final_instruction_telepalte = instruction_templelate_ic7f_obj
 
-    T_switch_axis = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [
-                             0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64)  # map to dsg
+    T_switch_axis = np.array(
+        [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float64
+    )  # map to dsg
     T_tomap = np.linalg.inv(T_switch_axis)  # dsg to map
     # print("T_tomap: ", T_tomap)
     # loop forever and ask for query, until user click 'q'
@@ -280,28 +266,27 @@ def main(params: DictConfig):
         #     break
         # query_instruction = "Find me a plants in the Horizon Exhibition Hall"
         print(query_instruction)
-        hmsg.curr_query_save_dir = os.path.join(
-            hmsg.vln_result_dir, query_instruction)
+        hmsg.curr_query_save_dir = os.path.join(hmsg.vln_result_dir, query_instruction)
         if not os.path.exists(hmsg.curr_query_save_dir):
             os.makedirs(hmsg.curr_query_save_dir)
 
         start_time = time.time()
 
         floor, room, obj, res_dict = hmsg.query_hierarchy_protected_icra(
-            query_instruction, top_k=5, use_gpt=use_gpt)
+            query_instruction, top_k=5, use_gpt=use_gpt
+        )
         end_time = time.time()
         query_time = end_time - start_time
         print(f"Elapsed time: {query_time:.4f} seconds")
         # visualize the query
-        print(floor.floor_id, [(r.room_id, r.name)
-              for r in room], [o.object_id for o in obj])
+        print(floor.floor_id, [(r.room_id, r.name) for r in room], [o.object_id for o in obj])
         # Build the data to write to JSON
         query_result = {
             "query": query_instruction,
             "time_seconds": query_time,
             "floor_id": floor.floor_id,
             "rooms": [{"room_id": r.room_id, "name": r.name} for r in room],
-            "objects": [{"object_id": o.object_id} for o in obj]
+            "objects": [{"object_id": o.object_id} for o in obj],
         }
         # use open3d to visualize room.pcd and color the points where obj.pcd
         # is
@@ -325,16 +310,10 @@ def main(params: DictConfig):
             mesh_pcd = end_sphere.sample_points_uniformly(number_of_points=500)
             combined_pcd = room_pcd + obj_pcd + mesh_pcd
             # Save as a single file
-            pcd_save_path = os.path.join(
-                hmsg.curr_query_save_dir, f"scene_{i}.ply")
-            pcd_render_save_path = os.path.join(
-                hmsg.curr_query_save_dir, f"scene_{i}.png")
+            pcd_save_path = os.path.join(hmsg.curr_query_save_dir, f"scene_{i}.ply")
+            pcd_render_save_path = os.path.join(hmsg.curr_query_save_dir, f"scene_{i}.png")
             o3d.io.write_point_cloud(pcd_save_path, combined_pcd)
-            visualize_and_save(
-                room_pcd,
-                obj_pcd,
-                end_sphere,
-                save_path=pcd_render_save_path)
+            visualize_and_save(room_pcd, obj_pcd, end_sphere, save_path=pcd_render_save_path)
             print(f"Saved {pcd_save_path}")
         all_results.append(query_result)
 
@@ -346,31 +325,24 @@ def main(params: DictConfig):
         sum_LLM_parse = sum_LLM_parse + res_dict["LLM_Parse_Time"]
         sum_Total_Time = sum_Total_Time + res_dict["Total_Time"]
         sum_FastMatching = sum_FastMatching + res_dict["FastMatching"]
-        sum_ObjectInImageCheck = sum_ObjectInImageCheck + \
-            res_dict["ObjectInImageCheck"]
+        sum_ObjectInImageCheck = sum_ObjectInImageCheck + res_dict["ObjectInImageCheck"]
         sum_VLM_Rethinking = sum_VLM_Rethinking + res_dict["VLM_Rethinking"]
         sum_Re_Matching = sum_Re_Matching + res_dict["Re_Matching"]
 
-    average_fastmatching_time = sum_FastMatching / \
-        len(final_instruction_telepalte)
-    average_objectinimagecheck_time = sum_ObjectInImageCheck / \
-        len(final_instruction_telepalte)
-    average_vlm_rethinking_time = sum_VLM_Rethinking / \
-        len(final_instruction_telepalte)
-    average_re_matching_time = sum_Re_Matching / \
-        len(final_instruction_telepalte)
+    average_fastmatching_time = sum_FastMatching / len(final_instruction_telepalte)
+    average_objectinimagecheck_time = sum_ObjectInImageCheck / len(final_instruction_telepalte)
+    average_vlm_rethinking_time = sum_VLM_Rethinking / len(final_instruction_telepalte)
+    average_re_matching_time = sum_Re_Matching / len(final_instruction_telepalte)
     average_total_time = sum_Total_Time / len(final_instruction_telepalte)
     average_llm_parse_time = sum_LLM_parse / len(final_instruction_telepalte)
 
     print(f"fsrvln average_total_time : {average_total_time:.4f} seconds")
     print(
-        f"fsrvln average_objectinimagecheck_time : {average_objectinimagecheck_time:.4f} seconds")
-    print(
-        f"fsrvln average_vlm_rethinking_time : {average_vlm_rethinking_time:.4f} seconds")
-    print(
-        f"fsrvln average_re_matching_time : {average_re_matching_time:.4f} seconds")
-    print(
-        f"fsrvln average_fastmatching_time : {average_fastmatching_time:.4f} seconds")
+        f"fsrvln average_objectinimagecheck_time : {average_objectinimagecheck_time:.4f} seconds"
+    )
+    print(f"fsrvln average_vlm_rethinking_time : {average_vlm_rethinking_time:.4f} seconds")
+    print(f"fsrvln average_re_matching_time : {average_re_matching_time:.4f} seconds")
+    print(f"fsrvln average_fastmatching_time : {average_fastmatching_time:.4f} seconds")
     print(f"fsrvln average_llm_parse_time : {average_llm_parse_time:.4f} seconds")
     # Write the average times to JSON as well
     final_json = {
@@ -380,7 +352,7 @@ def main(params: DictConfig):
         "average_re_matching_time": average_re_matching_time,
         "average_fastmatching_time": average_fastmatching_time,
         "average_llm_parse_time": average_llm_parse_time,
-        "results": all_results
+        "results": all_results,
     }
     with open(json_save_path, "w", encoding="utf-8") as f:
         json.dump(final_json, f, ensure_ascii=False, indent=2)

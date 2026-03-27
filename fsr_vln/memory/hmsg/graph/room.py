@@ -7,9 +7,11 @@ from typing import Any, List
 
 import numpy as np
 import open3d as o3d
-
-from memory.hmsg.utils.clip_utils import get_img_feats, get_text_feats_multiple_templates
-from memory.hmsg.utils.graph_utils import find_overlapping_ratio_faiss, feats_denoise_dbscan
+from memory.hmsg.utils.clip_utils import get_text_feats_multiple_templates
+from memory.hmsg.utils.graph_utils import (
+    feats_denoise_dbscan,
+    find_overlapping_ratio_faiss,
+)
 
 
 class Room:
@@ -52,9 +54,9 @@ class Room:
     def set_txt_embeddings(self, text, clip_model, clip_feat_dim):
         self.embeddings.append(
             get_text_feats_multiple_templates(
-                text,
-                clip_model=clip_model,
-                clip_feat_dim=clip_feat_dim))
+                text, clip_model=clip_model, clip_feat_dim=clip_feat_dim
+            )
+        )
 
     # def frameId2imgPath(self):
     #     pass
@@ -72,8 +74,7 @@ class Room:
                 if i >= j:
                     continue
                 if obj1.name == obj2.name:
-                    overlap = find_overlapping_ratio_faiss(
-                        obj1.pcd, obj2.pcd, radius)
+                    overlap = find_overlapping_ratio_faiss(obj1.pcd, obj2.pcd, radius)
                     if overlap > overlap_threshold:
                         overlap_scores[i, j] = overlap
                         overlap_scores[j, i] = overlap
@@ -83,9 +84,7 @@ class Room:
         i_idcs, j_idcs = np.where(overlap_scores > 0)
         for i, j in zip(i_idcs, j_idcs):
             merging_idcs.extend([i, j])
-            if i not in list(
-                    new_room_objects.keys()) and j not in list(
-                    new_room_objects.keys()):
+            if i not in list(new_room_objects.keys()) and j not in list(new_room_objects.keys()):
                 new_room_objects[i].append(j)
             else:
                 if i in list(new_room_objects.keys()):
@@ -155,13 +154,14 @@ class Room:
             print("empty embeddings")
             return "unknown room type"
         text_feats = get_text_feats_multiple_templates(
-            default_room_types, clip_model, clip_feat_dim)
+            default_room_types, clip_model, clip_feat_dim
+        )
         embeddings = np.array(self.embeddings)
         sim_mat = np.dot(embeddings, text_feats.T)
         # sim_mat = compute_similarity(embeddings, text_feats)
         # print(sim_mat)
         col_ids = np.argmax(sim_mat, axis=1)
-        votes = [default_room_types[i] for i in col_ids]
+        # votes = [default_room_types[i] for i in col_ids]  # unused variable removed
         # print(f"the votes are: {votes}")
         unique, counts = np.unique(col_ids, return_counts=True)
         unique_id = np.argmax(counts)
@@ -203,7 +203,6 @@ class Room:
         if infer_method == "llm":
             objects_list = []
             for obj_i, obj in enumerate(self.objects):
-                obj: Object
                 if not any(
                     substring in obj.name.lower()
                     for substring in [
@@ -219,17 +218,22 @@ class Room:
                 ):
                     objects_list.append(obj.name)
             room_type = infer_room_type_from_object_list_chat(
-                objects_list, default_room_type=default_room_types)
+                objects_list, default_room_type=default_room_types
+            )
             self.name = room_type
 
         # use similarity of object feature embedding and room text feature
         if infer_method == "name":
-            assert default_room_types, "default_room_types can not be None if infer_method is 'embedding'"
+            assert (
+                default_room_types
+            ), "default_room_types can not be None if infer_method is 'embedding'"
             represent_feat = get_text_feats_multiple_templates(
-                self.name, clip_model, clip_feat_dim)
+                self.name, clip_model, clip_feat_dim
+            )
             text_feats = get_text_feats_multiple_templates(
-                default_room_types, clip_model, clip_feat_dim)
-            sim_mat = compute_similarity(represent_feat, text_feats)
+                default_room_types, clip_model, clip_feat_dim
+            )
+            sim_mat = np.dot(represent_feat, text_feats.T)
             col_id = np.argmax(sim_mat)
             self.name = default_room_types[col_id]
         print("room_id, name: ", self.room_id, self.name)
@@ -270,7 +274,6 @@ class Room:
         if infer_method == "label":
             objects_list = []
             for obj_i, obj in enumerate(self.objects):
-                obj: Object
                 if not any(
                     substring in obj.name.lower()
                     for substring in [
@@ -286,22 +289,24 @@ class Room:
                 ):
                     objects_list.append(obj.name)
             room_type = infer_room_type_from_object_list_chat(
-                objects_list, default_room_type=default_room_types)
+                objects_list, default_room_type=default_room_types
+            )
             self.name = room_type
 
         # use similarity of object feature embedding and room text feature
         if infer_method == "obj_embedding":
-            assert default_room_types, "default_room_types can not be None if infer_method is 'embedding'"
+            assert (
+                default_room_types
+            ), "default_room_types can not be None if infer_method is 'embedding'"
             object_embs = []
             for obj_i, obj in enumerate(self.objects):
-                obj: Object
                 object_embs.append(obj.embedding)
 
             represent_feat = feats_denoise_dbscan(object_embs).reshape((1, -1))
             text_feats = get_text_feats_multiple_templates(
-                default_room_types, clip_model, clip_feat_dim)
+                default_room_types, clip_model, clip_feat_dim
+            )
             sim_mat = np.dot(represent_feat, text_feats.T)
-            # sim_mat = compute_similarity(represent_feat, text_feats)
             col_id = np.argmax(sim_mat)
             self.name = default_room_types[col_id]
         print("room_id, name: ", self.room_id, self.name)
@@ -310,10 +315,7 @@ class Room:
         """Save the room in folder as ply for the point cloud and json for the
         metadata."""
         # save the point cloud
-        o3d.io.write_point_cloud(
-            os.path.join(
-                path, str(
-                    self.room_id) + ".ply"), self.pcd)
+        o3d.io.write_point_cloud(os.path.join(path, str(self.room_id) + ".ply"), self.pcd)
         # save the metadata
         metadata = {
             "room_id": self.room_id,
@@ -336,8 +338,7 @@ class Room:
         """Load the room from folder as ply for the point cloud and json for
         the metadata."""
         # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            os.path.join(path, str(self.room_id) + ".ply"))
+        self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.room_id) + ".ply"))
         # load the metadata
         with open(path + "/" + str(self.room_id) + ".json") as json_file:
             metadata = json.load(json_file)
@@ -347,17 +348,15 @@ class Room:
             self.room_height = metadata["room_height"]
             self.room_zero_level = metadata["room_zero_level"]
             self.embeddings = [np.asarray(i) for i in metadata["embeddings"]]
-            self.represent_images = metadata["represent_images"],
+            self.represent_images = (metadata["represent_images"],)
             self.sample_images = metadata["sample_images"]
-            self.clip_embeddings = [
-                np.asarray(i) for i in metadata["clip_embeddings"]]
+            self.clip_embeddings = [np.asarray(i) for i in metadata["clip_embeddings"]]
 
     def load_new(self, path):
         """Load the room from folder as ply for the point cloud and json for
         the metadata."""
         # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            os.path.join(path, str(self.room_id) + ".ply"))
+        self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.room_id) + ".ply"))
         # load the metadata
         with open(path + "/" + str(self.room_id) + ".json") as json_file:
             metadata = json.load(json_file)
@@ -367,10 +366,9 @@ class Room:
             self.room_height = metadata["room_height"]
             self.room_zero_level = metadata["room_zero_level"]
             self.embeddings = [np.asarray(i) for i in metadata["embeddings"]]
-            self.represent_images = metadata["represent_images"],
+            self.represent_images = (metadata["represent_images"],)
             self.sample_images = metadata["sample_images"]
-            self.clip_embeddings = [
-                np.asarray(i) for i in metadata["clip_embeddings"]]
+            self.clip_embeddings = [np.asarray(i) for i in metadata["clip_embeddings"]]
             self.views = metadata["views"]
 
     def __str__(self):
