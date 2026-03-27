@@ -1,17 +1,17 @@
 main:
-  device: cuda
-  use_gpt: false
-  spatial_reasoning_method: auto_region # auto_region, human_assign, none
-  fast_slow_method: fast_match # slow_reasoning # fast_match
-  depth_cut: 10.0
-  dataset: horizon 
-  scene_id: dataset_converted # rosbag2_2025_04_08-21_33_17_new # 
-  dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/
-  graph_path: outputs/built_graphs/horizon/dataset_converted/graph_20260326153413 # input here
-  save_path:  outputs/built_graphs/horizon/dataset_converted/viz
-  long_query:
-    spec: [obj, room, floor] # [obj, room], [obj, floor], [obj].
+    device: cuda
+    use_gpt: false
+    spatial_reasoning_method: auto_region # auto_region, human_assign, none
+    fast_slow_method: fast_match # slow_reasoning # fast_match
+    depth_cut: 1.0
+    dataset: horizon
+    scene_id: rosbag2_2026_03_26-14_12_50 # rosbag2_2025_04_08-21_33_17_new #
+    dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/HoloAgent/
+    graph_path: outputs/built_graphs/horizon/rosbag2_2026_03_26-14_12_50/graph_20260327101233 # input here
+    save_path: outputs/built_graphs/horizon/rosbag2_2026_03_26-14_12_50/viz
+    long_query:
+        spec: [obj, room, floor] # [obj, room], [obj, floor], [obj].
 models:
-  clip:
-    type: ViT-L/14 #ViT-B-32 #ViT-H-14
-    checkpoint: checkpoints/open_clip_pytorch_model.bin 
+    clip:
+        type: ViT-L/14 #ViT-B-32 #ViT-H-14
+        checkpoint: checkpoints/open_clip_pytorch_model.bin

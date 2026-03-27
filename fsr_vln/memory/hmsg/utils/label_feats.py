@@ -1,17 +1,15 @@
 import os
-import sys
 
 import numpy as np
 import pandas as pd
-
+from memory.hmsg.utils.clip_utils import get_text_feats_multiple_templates
 from memory.hmsg.utils.constants import (
     COCO_STUFF_CLASSES,
-    MATTERPORT_LABELS_160,
-    MATTERPORT_LABELS_40,
     MATTERPORT_GT_LABELS,
+    MATTERPORT_LABELS_40,
+    MATTERPORT_LABELS_160,
     OPENVOCAB_MATTERPORT_LABELS,
 )
-from memory.hmsg.utils.clip_utils import get_text_feats_multiple_templates
 
 
 def compute_label_feats(
@@ -21,7 +19,9 @@ def compute_label_feats(
     # check if the text features are pre-computed
     if os.path.exists(os.path.join(label_feat_path, pre_computed_feats_path)):
         if ".npy" in pre_computed_feats_path:
-            text_feats = np.load(os.path.join(label_feat_path, pre_computed_feats_path))
+            text_feats = np.load(
+                os.path.join(label_feat_path, pre_computed_feats_path), allow_pickle=True
+            )
     else:
         # if not, compute, store and return them based on the provided classes
         # and a clip model
