@@ -1,4 +1,5 @@
 """This file contains the class definition for the Object in HMSG."""
+
 import json
 import os
 
@@ -38,15 +39,11 @@ class Object:
         """Save the object in folder as ply for the point cloud and json for
         the metadata."""
         # save the point cloud
-        o3d.io.write_point_cloud(
-            os.path.join(
-                path, str(
-                    self.object_id) + ".ply"), self.pcd)
+        o3d.io.write_point_cloud(os.path.join(path, str(self.object_id) + ".ply"), self.pcd)
         # save the metadata
         metadata = {
             "object_id": self.object_id,
-            "vertices": np.array(
-                self.vertices).tolist(),
+            "vertices": np.array(self.vertices).tolist(),
             "room_id": self.room_id,
             "name": self.name,
             "embedding": self.embedding.tolist() if self.embedding is not None else "",
@@ -60,16 +57,16 @@ class Object:
         """Load the object from folder as ply for the point cloud and json for
         the metadata."""
         # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            os.path.join(path, str(self.object_id) + ".ply"))
+        self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.object_id) + ".ply"))
         # load the metadata
         with open(path + "/" + str(self.object_id) + ".json") as json_file:
             metadata = json.load(json_file)
             self.vertices = np.asarray(metadata["vertices"])
             self.room_id = metadata["room_id"]
             self.name = metadata["name"]
-            self.embedding = np.asarray(
-                metadata["embedding"]) if metadata["embedding"] != "" else None
+            self.embedding = (
+                np.asarray(metadata["embedding"]) if metadata["embedding"] != "" else None
+            )
             # self.view_ids = metadata["view_ids"]
             # self.best_view_id = metadata["best_view_id"]
 
@@ -77,16 +74,16 @@ class Object:
         """Load the object from folder as ply for the point cloud and json for
         the metadata."""
         # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            os.path.join(path, str(self.object_id) + ".ply"))
+        self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.object_id) + ".ply"))
         # load the metadata
         with open(path + "/" + str(self.object_id) + ".json") as json_file:
             metadata = json.load(json_file)
             self.vertices = np.asarray(metadata["vertices"])
             self.room_id = metadata["room_id"]
             self.name = metadata["name"]
-            self.embedding = np.asarray(
-                metadata["embedding"]) if metadata["embedding"] != "" else None
+            self.embedding = (
+                np.asarray(metadata["embedding"]) if metadata["embedding"] != "" else None
+            )
             self.view_ids = metadata["view_ids"]
             self.best_view_id = metadata["best_view_id"]
 

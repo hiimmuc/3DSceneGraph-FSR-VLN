@@ -1,79 +1,72 @@
 """Class to represent the HMSG graph."""
 
 try:
-    from oss2.credentials import EnvironmentVariableCredentialsProvider
     import oss2
+    from oss2.credentials import EnvironmentVariableCredentialsProvider
 except ImportError:
     oss2 = None
     EnvironmentVariableCredentialsProvider = None
-from openai import AzureOpenAI, OpenAI
-import openai
-from typing import Dict, List, Tuple, Union
-import time
+import json
+import os
 import re
-from functools import lru_cache
+import time
+from copy import deepcopy
+from datetime import datetime
+from typing import List, Tuple
+
+import cv2
+import matplotlib
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import open3d as o3d
+import open3d.utility as utility
+import open_clip
+import torch
+from memory.hmsg.dataloader.hm3dsem import HM3DSemDataset
+from memory.hmsg.dataloader.horizon import HorizonDataset
+from memory.hmsg.dataloader.iphone import IPhoneDataset
+from memory.hmsg.dataloader.replica import ReplicaDataset
+from memory.hmsg.dataloader.scannet import ScannetDataset
+from memory.hmsg.graph.floor import Floor
+from memory.hmsg.graph.navigation_graph import NavigationGraph
+from memory.hmsg.graph.object import Object
+from memory.hmsg.graph.room import Room
+from memory.hmsg.graph.view import View
+from memory.hmsg.utils.clip_utils import (
+    get_img_feats,
+    get_text_feats_multiple_templates,
+)
+from memory.hmsg.utils.constants import CLIP_DIM
+from memory.hmsg.utils.graph_utils import (
+    check_object_in_view,
+    compute_room_embeddings,
+    distance_transform,
+    feats_denoise_dbscan,
+    find_intersection_share,
+    hierarchical_merge,
+    map_grid_to_point_cloud,
+    pcd_denoise_dbscan,
+    seq_merge,
+    visualize_pcd_on_image,
+)
+from memory.hmsg.utils.label_feats import get_label_feats
 from memory.hmsg.utils.llm_utils import (
-    parse_floor_room_object_gpt35,
+    infer_floor_id_from_query,
     parse_hier_query,
     parse_hier_query_use_prompt_insentence_parse,
     parse_hier_query_use_prompt_insentence_parse_icra,
-    infer_floor_id_from_query,
 )
-from memory.hmsg.utils.constants import MATTERPORT_GT_LABELS, CLIP_DIM
-from memory.hmsg.utils.label_feats import get_label_feats
-from memory.hmsg.graph.navigation_graph import NavigationGraph
-from memory.hmsg.utils.graph_utils import (
-    seq_merge,
-    pcd_denoise_dbscan,
-    pcd_denoise_statistical,
-    pcd_denoise_dbscan_vis,
-    feats_denoise_dbscan,
-    distance_transform,
-    map_grid_to_point_cloud,
-    compute_room_embeddings,
-    find_intersection_share,
-    hierarchical_merge,
-    check_object_in_view,
-    visualize_pcd_on_image,
-)
+from omegaconf import DictConfig
+from openai import AzureOpenAI
 from perception.models.sam_clip_feats_extractor import extract_feats_per_pixel
-from memory.hmsg.utils.clip_utils import get_img_feats, get_text_feats_multiple_templates
-from memory.hmsg.dataloader.replica import ReplicaDataset
-from memory.hmsg.dataloader.iphone import IPhoneDataset
-from memory.hmsg.dataloader.horizon import HorizonDataset
-from memory.hmsg.dataloader.scannet import ScannetDataset
-from memory.hmsg.dataloader.hm3dsem import HM3DSemDataset
-from memory.hmsg.graph.floor import Floor
-from memory.hmsg.graph.view import View
-from memory.hmsg.graph.room import Room
-from memory.hmsg.graph.object import Object
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
-import open_clip
-import torch
-import json
-import networkx as nx
-from tqdm import tqdm
-from sklearn.cluster import DBSCAN
-from scipy.spatial import Delaunay, Voronoi, voronoi_plot_2d
-from scipy.ndimage import binary_erosion, median_filter
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import find_peaks
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
-from scipy.signal import find_peaks
-from scipy.ndimage import gaussian_filter1d
-import matplotlib.pyplot as plt
-from copy import deepcopy
-from datetime import datetime
-import os
-import copy
-from typing import Any, Dict, List, Set, Tuple, Union
-from pathlib import Path
-
-import cv2
-from omegaconf import DictConfig
-import numpy as np
-import open3d as o3d
-import matplotlib
-import open3d.utility as utility
+from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
 utility.set_verbosity_level(utility.VerbosityLevel.Error)
 

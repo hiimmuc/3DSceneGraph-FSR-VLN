@@ -1,16 +1,9 @@
-from argparse import ArgumentParser
-import os
-
-import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 
 # import clip
 import open_clip
-from PIL import Image
-from sklearn.manifold import TSNE
 import torch
-from tqdm import tqdm
+from PIL import Image
 
 
 # Compute the coordinates of the image on the plot

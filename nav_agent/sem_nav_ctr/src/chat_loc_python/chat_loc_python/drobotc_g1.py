@@ -26,18 +26,19 @@ license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
 use.
 """
+
 import asyncio
-import websockets
-import time
-import json
-import pyaudio
-import os
 import base64
-from loguru import logger
-import numpy as np
-from queue import Queue
+import json
 import threading
+import time
 import traceback
+from queue import Queue
+
+import numpy as np
+import pyaudio
+import websockets
+from loguru import logger
 
 
 class DRobotC:
@@ -48,73 +49,67 @@ class DRobotC:
         device_name: str = "ReSpeaker",  # 使用支持全双工的音频设备
         token: str = "",
     ):
-        logger.add("drobotc.log", level="INFO")             # 设置logger
+        logger.add("drobotc.log", level="INFO")  # 设置logger
 
-        logger.info(f"Init DRobotC ......")
+        logger.info("Init DRobotC ......")
         self.host = host
         self.port = port
         self.device_name = device_name
         self.token = token
 
         # websocket设置, 连接
-        self.audio_url = f"ws://{self.host}:{self.port}"    # 设置ws地址
-        self.audio_ws: websockets.ClientConnection          # 设置ws连接
+        self.audio_url = f"ws://{self.host}:{self.port}"  # 设置ws地址
+        self.audio_ws: websockets.ClientConnection  # 设置ws连接
         logger.info(f"Websocket url: {self.audio_url}")
-        self.heartbeat_interval = 10                        # 设置心跳间隔, 单位ms
+        self.heartbeat_interval = 10  # 设置心跳间隔, 单位ms
 
         # 获取录音和播放设备
         self.p = pyaudio.PyAudio()
-        self.audio_device_id = self._get_device_by_name(
-            self.device_name, self.p)   # 获取设备id
+        self.audio_device_id = self._get_device_by_name(self.device_name, self.p)  # 获取设备id
         assert self.audio_device_id != -1, f"未找到设备: {self.device_name}"
-        self.audio_device_rate = int(self.p.get_device_info_by_index(
-            self.audio_device_id)['defaultSampleRate'])   # 获取设备采样率
-        logger.info(
-            f"Audio device info: {self.p.get_device_info_by_index(self.audio_device_id)}")
+        self.audio_device_rate = int(
+            self.p.get_device_info_by_index(self.audio_device_id)["defaultSampleRate"]
+        )  # 获取设备采样率
+        logger.info(f"Audio device info: {self.p.get_device_info_by_index(self.audio_device_id)}")
 
         # 录音设置, 发送
-        self.send_queue = Queue(maxsize=100000)   # 发送队列
-        self.channels = 1           # 声道数
-        self.record_rate = 16000    # 采样率, 录音时目标采样率
-        self.record_chunk = 512     # 缓冲区大小
+        self.send_queue = Queue(maxsize=100000)  # 发送队列
+        self.channels = 1  # 声道数
+        self.record_rate = 16000  # 采样率, 录音时目标采样率
+        self.record_chunk = 512  # 缓冲区大小
         self.record_device_chunk = int(
-            self.record_chunk *
-            self.audio_device_rate /
-            self.record_rate)
-        logger.info(
-            f"Record thread record chunk size:{self.record_device_chunk}")
+            self.record_chunk * self.audio_device_rate / self.record_rate
+        )
+        logger.info(f"Record thread record chunk size:{self.record_device_chunk}")
         # 设置发送音频间隔, 单位秒, 一个chunk默认是512, 16000采样率, 所以一个chunk是0.032秒,
         # 所以发送音频间隔是0.032秒
         self.send_audio_interval = 0.025
 
         # 播放设置, 接收
-        self.recv_queue = Queue(maxsize=100000)   # 接收队列
-        self.recv_rate = 24000      # 采样率, 播放时目标采样率
-        self.recv_chunk = 1024      # 缓冲区大小
-        self.recv_device_chunk = int(
-            self.recv_chunk *
-            self.audio_device_rate /
-            self.recv_rate)
+        self.recv_queue = Queue(maxsize=100000)  # 接收队列
+        self.recv_rate = 24000  # 采样率, 播放时目标采样率
+        self.recv_chunk = 1024  # 缓冲区大小
+        self.recv_device_chunk = int(self.recv_chunk * self.audio_device_rate / self.recv_rate)
         logger.info(f"Play thread recv chunk size:{self.recv_device_chunk}")
         self.play_chat_id = 0
 
         # 位置接收, QA接收, 信号接收
-        self.text_queue = Queue(maxsize=100000)   # 位置接收队列
+        self.text_queue = Queue(maxsize=100000)  # 位置接收队列
         # 接收文本信号, 例如ROS发过来的信号
         self.control_queue = Queue(maxsize=10000)
-        self.is_introduce = False   # 用于判断是否在介绍展厅
+        self.is_introduce = False  # 用于判断是否在介绍展厅
 
         # 定义和启动线程
-        self.record_stream = None   # 录音流, 线程中会用, 先定义下
+        self.record_stream = None  # 录音流, 线程中会用, 先定义下
         self.send_thread = threading.Thread(target=self._record_audio)
         self.send_thread.start()
-        logger.info(f"Record thread started")
-        self.play_stream = None     # 播放流, 线程中会用, 先定义下
+        logger.info("Record thread started")
+        self.play_stream = None  # 播放流, 线程中会用, 先定义下
         self.play_thread = threading.Thread(target=self._play_audio)
         self.play_thread.start()
-        logger.info(f"Play thread started")
+        logger.info("Play thread started")
 
-        logger.info(f"Init DRobotC done")
+        logger.info("Init DRobotC done")
 
     def get_text_queue(self):
         return self.text_queue
@@ -135,11 +130,12 @@ class DRobotC:
         """
         for i in range(p.get_device_count()):
             dev_info = p.get_device_info_by_index(i)
-            if name in dev_info['name']:
+            if name in dev_info["name"]:
                 logger.info(
-                    f"Find Device, Input:{dev_info['maxInputChannels']}, Output:{dev_info['maxOutputChannels']}")
+                    f"Find Device, Input:{dev_info['maxInputChannels']}, Output:{dev_info['maxOutputChannels']}"
+                )
                 # 检查设备是否同时支持输入和输出
-                if dev_info['maxInputChannels'] > 0 and dev_info['maxOutputChannels'] > 0:
+                if dev_info["maxInputChannels"] > 0 and dev_info["maxOutputChannels"] > 0:
                     return i
         return -1
 
@@ -179,20 +175,17 @@ class DRobotC:
                 rate=self.audio_device_rate,
                 input=True,
                 frames_per_buffer=self.record_device_chunk,
-                input_device_index=self.audio_device_id
+                input_device_index=self.audio_device_id,
             )
             while True:
                 audio_data = self.record_stream.read(self.record_device_chunk)
                 # 重采样
                 audio_array = np.frombuffer(audio_data, dtype=np.int16)
                 resampled = np.interp(
-                    np.linspace(
-                        0,
-                        len(audio_array),
-                        self.record_chunk),
+                    np.linspace(0, len(audio_array), self.record_chunk),
                     # time new
-                    np.arange(len(audio_array)),                    # time old
-                    audio_array                                     # samples
+                    np.arange(len(audio_array)),  # time old
+                    audio_array,  # samples
                 ).astype(np.int16)
                 audio_data = resampled.tobytes()
                 self.send_queue.put(audio_data)
@@ -214,7 +207,7 @@ class DRobotC:
                 rate=self.audio_device_rate,
                 output=True,
                 frames_per_buffer=1024,
-                output_device_index=self.audio_device_id
+                output_device_index=self.audio_device_id,
             )
 
             while True:
@@ -222,10 +215,10 @@ class DRobotC:
                     audio_data, chat_id = self.recv_queue.get_nowait()
                     if chat_id in [-100, -101, -102]:
                         self.is_introduce = True
-                    if chat_id != self.play_chat_id and chat_id not in [
-                            -100, -101, -102]:
+                    if chat_id != self.play_chat_id and chat_id not in [-100, -101, -102]:
                         logger.warning(
-                            f"drop audio, play chat id: {self.play_chat_id} -> {chat_id}")
+                            f"drop audio, play chat id: {self.play_chat_id} -> {chat_id}"
+                        )
                         continue
                     if self.is_introduce and chat_id not in [-100, -101, -102]:
                         self.is_introduce = False
@@ -256,7 +249,7 @@ class DRobotC:
                         rate=self.audio_device_rate,
                         output=True,
                         frames_per_buffer=1024,
-                        output_device_index=self.audio_device_id
+                        output_device_index=self.audio_device_id,
                     )
                     time.sleep(0.01)
         except Exception as e:
@@ -280,7 +273,7 @@ class DRobotC:
                         self.send_audio_loop(),
                         self.receive_audio_loop(),
                         self.heartbeat_loop(),
-                        self.send_control_loop()
+                        self.send_control_loop(),
                     )
             except Exception as e:
                 logger.error(f"Connect error: {e}")
@@ -292,12 +285,16 @@ class DRobotC:
         try:
             while True:
                 if self.audio_ws:
-                    await self.audio_ws.send(json.dumps({
-                        "token": self.token,
-                        "type": "heartbeat",
-                        "data": "ping",
-                        "timestamp": time.time()
-                    }))
+                    await self.audio_ws.send(
+                        json.dumps(
+                            {
+                                "token": self.token,
+                                "type": "heartbeat",
+                                "data": "ping",
+                                "timestamp": time.time(),
+                            }
+                        )
+                    )
                 await asyncio.sleep(self.heartbeat_interval)
         except Exception as e:
             logger.error(f"heartbeat error: {e}")
@@ -310,8 +307,8 @@ class DRobotC:
                     audio_message = {
                         "token": self.token,
                         "type": "audio",
-                        "data": base64.b64encode(audio_data).decode('ascii'),
-                        "timestamp": time.time()
+                        "data": base64.b64encode(audio_data).decode("ascii"),
+                        "timestamp": time.time(),
                     }
                     await self.audio_ws.send(json.dumps(audio_message))
                 await asyncio.sleep(self.send_audio_interval)
@@ -332,15 +329,15 @@ class DRobotC:
 
                 if msg_type == "heartbeat":
                     logger.debug(
-                        f"Recv server heatbeat message, time cost {time.time() - msg_timestamp} seconds")
+                        f"Recv server heatbeat message, time cost {time.time() - msg_timestamp} seconds"
+                    )
                 elif msg_type == "audio":
                     assert isinstance(msg_chat_id, int), "chat_id is not int"
                     self.play_chat_id = msg_chat_id  # 更新播放的chat_id
                     # 处理音频数据
                     audio_data = base64.b64decode(msg_data)
                     audio_array = np.frombuffer(audio_data, dtype=np.float32)
-                    audio_array = self._resample_audio(
-                        audio_array, 24000, self.audio_device_rate)
+                    audio_array = self._resample_audio(audio_array, 24000, self.audio_device_rate)
                     # 放入队列
                     self.recv_queue.put((audio_array.tobytes(), msg_chat_id))
                 elif msg_type == "loc":
@@ -348,9 +345,9 @@ class DRobotC:
                     loc_data = base64.b64decode(msg_data).decode()
                     # 处理loc数据
                     loc_data = dict(json.loads(loc_data))
-                    floor = "unknown" if loc_data['floor'] == "" else loc_data['floor']
-                    room = "unknown" if loc_data['room'] == "" else loc_data['room']
-                    object2find = "unknown" if loc_data['object'] == "" else loc_data['object']
+                    floor = "unknown" if loc_data["floor"] == "" else loc_data["floor"]
+                    room = "unknown" if loc_data["room"] == "" else loc_data["room"]
+                    object2find = "unknown" if loc_data["object"] == "" else loc_data["object"]
                     loc_data_str = f"loc::{floor},{room},{object2find}::{msg_chat_id}"
                     # 放入队列
                     self.text_queue.put(loc_data_str)
@@ -368,8 +365,8 @@ class DRobotC:
                     qa_data = base64.b64decode(msg_data).decode()
                     # 处理qa数据
                     qa_data = dict(json.loads(qa_data))
-                    qa_text = qa_data['text']
-                    qa_type = qa_data['type']
+                    qa_text = qa_data["text"]
+                    qa_type = qa_data["type"]
                     if qa_type == "user":
                         qa_data_str = f"qa::User:{qa_text}::{msg_chat_id}"
                     elif qa_type == "assistant":
@@ -383,7 +380,7 @@ class DRobotC:
                     raise ValueError(f"recv wrong message: {msg_type}")
 
                 await asyncio.sleep(0.01)
-            except Exception as e:
+            except Exception:
                 logger.error(f"msg:{message}")
                 logger.error(traceback.format_exc())
                 # self.play_thread.join()
@@ -394,7 +391,14 @@ class DRobotC:
         while True:
             if not self.control_queue.empty():
                 control_data = self.control_queue.get()
-                await self.audio_ws.send(json.dumps({"type": "control", "data": base64.b64encode(control_data.encode()).decode('ascii')}))
+                await self.audio_ws.send(
+                    json.dumps(
+                        {
+                            "type": "control",
+                            "data": base64.b64encode(control_data.encode()).decode("ascii"),
+                        }
+                    )
+                )
                 await asyncio.sleep(0.01)
             else:
                 await asyncio.sleep(0.05)

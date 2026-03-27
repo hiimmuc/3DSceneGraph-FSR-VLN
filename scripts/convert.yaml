@@ -35,7 +35,7 @@ extrinsics:
     - [0.0, 0.0, 0.0, 1.0]
 
 # Save every (skip+1)-th RGB frame; 0 = save all frames
-skip: 3
+skip: 7
 # Clip depth values above this threshold (millimetres)
 max_depth_mm: 10000.0 # e.g. 5000 = 5 metres
 

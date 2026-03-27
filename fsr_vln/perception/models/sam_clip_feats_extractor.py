@@ -1,18 +1,8 @@
-import argparse
-import ast
-from pathlib import Path
-import time
-
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
-import open_clip
-from PIL import Image
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 import torch
-
 from memory.hmsg.utils.clip_utils import get_img_feats, get_img_feats_batch
-from memory.hmsg.utils.sam_utils import crop_all_bounding_boxs, filter_masks
+from memory.hmsg.utils.sam_utils import crop_all_bounding_boxs
 
 
 def extract_feats_raw(

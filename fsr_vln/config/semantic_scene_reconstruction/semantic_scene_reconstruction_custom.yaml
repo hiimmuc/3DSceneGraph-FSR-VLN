@@ -4,7 +4,7 @@ main:
     dataset: horizon #scannet # hm3dsem #replica #iphone
     scene_id: rosbag2_2026_03_26-14_12_50
     dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/HoloAgent
-    depth_cut: 6.0
+    depth_cut: 1.0
     save_path: outputs/built_graphs
 models:
     clip:
@@ -21,7 +21,7 @@ models:
         min_mask_region_area: 100
 pipeline:
     voxel_size: 0.05
-    skip_frames: 15
+    skip_frames: 8
     init_overlap_thresh: 0.75
     overlap_thresh_factor: 0.025
     iou_thresh: 0.05
