@@ -1,24 +1,20 @@
-from collections import Counter
-import open3d as o3d
-from tqdm import tqdm
-from torchmetrics.functional import pairwise_cosine_similarity
-import torch.nn.functional as F
-import torch
-from sklearn.cluster import DBSCAN, KMeans
-from scipy.spatial import cKDTree, distance
-from scipy.sparse.csgraph import connected_components
-import numpy as np
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-from collections import Counter, defaultdict
 import os
+from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Union
+from typing import List, Tuple, Union
 
 import cv2
-
 import faiss
 import matplotlib
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import numpy as np
+import open3d as o3d
+import torch
+from scipy.sparse.csgraph import connected_components
+from scipy.spatial import cKDTree, distance
+from sklearn.cluster import DBSCAN, KMeans
+from tqdm import tqdm
 
 matplotlib.use("Agg")  # Use non-GUI backend
 

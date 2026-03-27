@@ -6,7 +6,6 @@ main:
     dataset_path: /home/namdp15/Workspace/VMO/vmo_scene_graph/3DSG_gen/data/HoloAgent
     # Depth threshold in meters — pixels/points beyond this distance are discarded; lower = only close objects reconstructed
     depth_cut: 1.0
-    depth_cut: 1.0
     save_path: outputs/built_graphs
 models:
     clip:
