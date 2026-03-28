@@ -27,9 +27,10 @@ models:
         min_mask_region_area: 100
 pipeline:
     # 3D spatial resolution in meters — smaller = finer detail but more memory/time
-    voxel_size: 0.05
-    skip_frames: 8
-    init_overlap_thresh: 0.75
+    voxel_size: 0.1 # default 0.05
+    # Processes every Nth frame — higher = faster but may miss objects / should be match with skip + 1 in convert.yaml
+    skip_frames: 5
+    init_overlap_thresh: 0.85 # default 0.75
     # Scales init_overlap_thresh adaptively — controls how the threshold evolves
     overlap_thresh_factor: 0.025
     # Minimum 2D mask overlap to consider two detections as the same object
@@ -41,7 +42,7 @@ pipeline:
     # DBSCAN clustering radius in CLIP feature space — larger = more aggressive merging of similar objects
     feature_dbscan_eps: 0.01
     # Maximum 3D distance (meters) between masks to consider association — effectively a spatial cutoff
-    max_mask_distance: 10000 # 6.4239 in meters
+    max_mask_distance: 1000 # 6.4239 in meters
     # Minimum 3D points for an object to be kept in the graph — filters out spurious tiny reconstructions
     min_pcd_points: 100
     # When true, weights contributions by inverse depth (closer = more trusted)
@@ -50,6 +51,6 @@ pipeline:
     # sequential merges frame-by-frame; hierarchical does multi-level merging — hierarchical is more thorough but slower
     merge_type: sequential # hierarchical
     save_intermediate_results: true
-    obj_labels: SCANNET200 #FINALLABEL #SCANNET200 #COCO_STUFF_CLASSES #IMAGENET21K_LABELS #HM3DSEM_LABELS
+    obj_labels: IMAGENET21K_LABELS #FINALLABEL #SCANNET200 #COCO_STUFF_CLASSES #IMAGENET21K_LABELS #HM3DSEM_LABELS
     # When true, post-processes the graph to further merge duplicate object nodes
     merge_objects_graph: false
