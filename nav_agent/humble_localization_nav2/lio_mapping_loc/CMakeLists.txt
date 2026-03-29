@@ -1,12 +1,12 @@
 # cmake_minimum_required(VERSION 3.10)
-cmake_minimum_required(VERSION 3.12)  # 确保 CMake 版本支持 CMP0074
-cmake_policy(SET CMP0074 NEW)         # 启用 CMP0074 策略
+cmake_minimum_required(VERSION 3.12)  # Ensure CMake version supports CMP0074
+cmake_policy(SET CMP0074 NEW)         # Enable CMP0074 policy
 project(fast_livo)
 
 set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g -pthread")
 # set(CMAKE_BUILD_TYPE "Debug")
-# add_compile_options(-g -O0)            # 禁止过度优化
+# add_compile_options(-g -O0)            # Disable over-optimization
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -215,7 +215,7 @@ target_link_libraries(fastlivo_mapping
   ${Sophus_LIBRARIES}
   ${Boost_LIBRARIES}
   "${cpp_typesupport_target}"
-  # ${GTSAM_LIBRARIES}  # 添加 GTSAM 库
+  # ${GTSAM_LIBRARIES}  # Add GTSAM library
 )
 
 # Link mimalloc if found

@@ -441,40 +441,54 @@ class Graph:
                 self.mask_pcds.pop(i)
         # fuse point features in every 3d mask
         # self.mask_pcds, finally merged 3d instances
+        #
+        # Optimised: gather all mask point arrays first, then issue a single
+        # batched cKDTree query instead of one query per mask.  This lets
+        # scipy use its internal parallelism (workers=-1) over a much larger
+        # work unit and avoids per-mask Python loop overhead.
         masks_feats = []
-        for i, mask_3d in tqdm(enumerate(self.mask_pcds), desc="Fusing features"):
-            # find the points in the mask
-            # mask_3d = mask_3d.voxel_down_sample(self.cfg.pipeline.voxel_size * 2)
-            mask_3d = mask_3d.voxel_down_sample(self.cfg.pipeline.voxel_size)
-            points = np.asarray(mask_3d.points)
-            dist, idx = tree_pcd.query(points, k=1, workers=-1)
-            # Filter out points that are "too far" based on the distance threshold
-            valid_mask = dist <= 0.8
-            n_total = len(points)
+        voxel_size = self.cfg.pipeline.voxel_size
+        dist_threshold = 0.8
+
+        # --- Downsample and collect all points with mask-membership tags ---
+        downsampled_masks = [m.voxel_down_sample(voxel_size) for m in self.mask_pcds]
+        pts_per_mask = [np.asarray(m.points) for m in downsampled_masks]
+        mask_lengths = [len(p) for p in pts_per_mask]
+
+        if sum(mask_lengths) > 0:
+            all_points = np.vstack([p for p in pts_per_mask if len(p) > 0])
+            all_dist, all_idx = tree_pcd.query(all_points, k=1, workers=-1)
+
+        offset = 0
+        for i, pts in enumerate(pts_per_mask):
+            n = mask_lengths[i]
+            if n == 0:
+                masks_feats.append(
+                    np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
+                )
+                continue
+
+            dist = all_dist[offset : offset + n]
+            idx = all_idx[offset : offset + n]
+            offset += n
+
+            valid_mask = dist <= dist_threshold
+            n_total = n
             n_valid = int(valid_mask.sum())
             n_removed = n_total - n_valid
             if n_removed > 0:
                 tqdm.write(f"mask {i}: removed {n_removed}/{n_total} points with dist > {0.1}")
-            # if n_valid == 0:
-            #     # All points are too far; insert a zero vector as fallback
-            #     masks_feats.append(
-            #         np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
-            #     )
-            #     continue
-            # Keep only valid indices
+
             valid_idx = idx[valid_mask]
-            # shape = (n_valid, clip_feat_dim)
             feats = self.full_feats_array[valid_idx]
             feats = np.nan_to_num(feats)
-            # filter feats with dbscan
+
             if feats.shape[0] == 0:
                 masks_feats.append(
                     np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
                 )
                 continue
             feats = feats_denoise_dbscan(feats, eps=0.01, min_points=100)
-            # feats = feats_denoise_dbscan(feats, eps=1.0, min_points=50) # set
-            # one single feature-vector for each merged-3d-segment
             masks_feats.append(feats)
         self.mask_feats = masks_feats
         print("number of masks: ", len(self.mask_feats))

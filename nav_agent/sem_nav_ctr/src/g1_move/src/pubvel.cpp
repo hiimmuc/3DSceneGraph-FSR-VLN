@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
         else
         {
             // std::cout<<"no data"<<std::endl; // No data received
-            usleep(10000); // 短暂休眠
+            usleep(10000); // Short sleep
         }
     }
 

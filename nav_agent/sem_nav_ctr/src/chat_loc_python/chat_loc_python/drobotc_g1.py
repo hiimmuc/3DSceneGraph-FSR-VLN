@@ -46,10 +46,10 @@ class DRobotC:
         self,
         host: str = "180.76.187.170",
         port: int = 10071,
-        device_name: str = "ReSpeaker",  # 使用支持全双工的音频设备
+        device_name: str = "ReSpeaker",  # Use an audio device that supports full-duplex
         token: str = "",
     ):
-        logger.add("drobotc.log", level="INFO")  # 设置logger
+        logger.add("drobotc.log", level="INFO")  # Set logger
 
         logger.info("Init DRobotC ......")
         self.host = host
@@ -57,54 +57,54 @@ class DRobotC:
         self.device_name = device_name
         self.token = token
 
-        # websocket设置, 连接
-        self.audio_url = f"ws://{self.host}:{self.port}"  # 设置ws地址
-        self.audio_ws: websockets.ClientConnection  # 设置ws连接
+        # websocket settings, connection
+        self.audio_url = f"ws://{self.host}:{self.port}"  # Set ws address
+        self.audio_ws: websockets.ClientConnection  # Set ws connection
         logger.info(f"Websocket url: {self.audio_url}")
-        self.heartbeat_interval = 10  # 设置心跳间隔, 单位ms
+        self.heartbeat_interval = 10  # Set heartbeat interval, unit: ms
 
-        # 获取录音和播放设备
+        # Get recording and playback device
         self.p = pyaudio.PyAudio()
-        self.audio_device_id = self._get_device_by_name(self.device_name, self.p)  # 获取设备id
-        assert self.audio_device_id != -1, f"未找到设备: {self.device_name}"
+        self.audio_device_id = self._get_device_by_name(self.device_name, self.p)  # Get device id
+        assert self.audio_device_id != -1, f"Device not found: {self.device_name}"
         self.audio_device_rate = int(
             self.p.get_device_info_by_index(self.audio_device_id)["defaultSampleRate"]
-        )  # 获取设备采样率
+        )  # Get device sample rate
         logger.info(f"Audio device info: {self.p.get_device_info_by_index(self.audio_device_id)}")
 
-        # 录音设置, 发送
-        self.send_queue = Queue(maxsize=100000)  # 发送队列
-        self.channels = 1  # 声道数
-        self.record_rate = 16000  # 采样率, 录音时目标采样率
-        self.record_chunk = 512  # 缓冲区大小
+        # Recording settings, sending
+        self.send_queue = Queue(maxsize=100000)  # Sending queue
+        self.channels = 1  # Number of channels
+        self.record_rate = 16000  # Sample rate, target sample rate for recording
+        self.record_chunk = 512  # Buffer size
         self.record_device_chunk = int(
             self.record_chunk * self.audio_device_rate / self.record_rate
         )
         logger.info(f"Record thread record chunk size:{self.record_device_chunk}")
-        # 设置发送音频间隔, 单位秒, 一个chunk默认是512, 16000采样率, 所以一个chunk是0.032秒,
-        # 所以发送音频间隔是0.032秒
+        # Set audio sending interval, unit: seconds. One chunk is 512 by default, 16000 sample rate, so one chunk is 0.032 seconds,
+        # so the audio sending interval is 0.032 seconds
         self.send_audio_interval = 0.025
 
-        # 播放设置, 接收
-        self.recv_queue = Queue(maxsize=100000)  # 接收队列
-        self.recv_rate = 24000  # 采样率, 播放时目标采样率
-        self.recv_chunk = 1024  # 缓冲区大小
+        # Playback settings, receiving
+        self.recv_queue = Queue(maxsize=100000)  # Receiving queue
+        self.recv_rate = 24000  # Sample rate, target sample rate for playback
+        self.recv_chunk = 1024  # Buffer size
         self.recv_device_chunk = int(self.recv_chunk * self.audio_device_rate / self.recv_rate)
         logger.info(f"Play thread recv chunk size:{self.recv_device_chunk}")
         self.play_chat_id = 0
 
-        # 位置接收, QA接收, 信号接收
-        self.text_queue = Queue(maxsize=100000)  # 位置接收队列
-        # 接收文本信号, 例如ROS发过来的信号
+        # Position receiving, QA receiving, signal receiving
+        self.text_queue = Queue(maxsize=100000)  # Position receiving queue
+        # Receive text signals, e.g., signals sent from ROS
         self.control_queue = Queue(maxsize=10000)
-        self.is_introduce = False  # 用于判断是否在介绍展厅
+        self.is_introduce = False  # Used to determine if introducing the exhibition hall
 
-        # 定义和启动线程
-        self.record_stream = None  # 录音流, 线程中会用, 先定义下
+        # Define and start threads
+        self.record_stream = None  # Recording stream, will be used in thread, define first
         self.send_thread = threading.Thread(target=self._record_audio)
         self.send_thread.start()
         logger.info("Record thread started")
-        self.play_stream = None  # 播放流, 线程中会用, 先定义下
+        self.play_stream = None  # Playback stream, will be used in thread, define first
         self.play_thread = threading.Thread(target=self._play_audio)
         self.play_thread.start()
         logger.info("Play thread started")
@@ -119,14 +119,14 @@ class DRobotC:
 
     def _get_device_by_name(self, name: str = "MCP", p=None) -> int:
         """
-        查找全双工音频设备.
+        Find a full-duplex audio device.
 
         Args:
-            name: 设备名称
-            p: PyAudio实例
+            name: Device name
+            p: PyAudio instance
 
         Returns:
-            设备ID, 如果未找到返回-1
+            Device ID, returns -1 if not found
         """
         for i in range(p.get_device_count()):
             dev_info = p.get_device_info_by_index(i)
@@ -134,22 +134,22 @@ class DRobotC:
                 logger.info(
                     f"Find Device, Input:{dev_info['maxInputChannels']}, Output:{dev_info['maxOutputChannels']}"
                 )
-                # 检查设备是否同时支持输入和输出
+                # Check if the device supports both input and output
                 if dev_info["maxInputChannels"] > 0 and dev_info["maxOutputChannels"] > 0:
                     return i
         return -1
 
     def _resample_audio(self, audio_data, src_rate, dst_rate):
         """
-        重采样音频数据.
+        Resample audio data.
 
         Args:
-            audio_data: 原始音频数据（字节格式）
-            src_rate: 原始采样率
-            dst_rate: 目标采样率
+            audio_data: Original audio data (bytes)
+            src_rate: Source sample rate
+            dst_rate: Target sample rate
 
         Returns:
-            重采样后的音频数据（字节格式）
+            Resampled audio data (bytes)
         """
         # 将字节数据转换为numpy数组
         samples = np.frombuffer(audio_data, dtype=np.float32)
@@ -223,24 +223,24 @@ class DRobotC:
                     if self.is_introduce and chat_id not in [-100, -101, -102]:
                         self.is_introduce = False
 
-                        # 介绍完毕了
+                        # Introduction finished
                         text_data_str = f"signal::introduce_end::{self.is_introduce}"
-                        # 放入队列
+                        # Put into queue
                         self.text_queue.put(text_data_str)
                         logger.info(f"recv signal: `{text_data_str}`")
                     self.play_stream.write(audio_data)
-                    # 线程休息一下, chunk / rate = 1024 / 24000 = 0.04, sleep 10ms即可
+                    # Let the thread rest a bit, chunk / rate = 1024 / 24000 = 0.04, sleep 10ms is enough
                     time.sleep(0.01)
                 else:
                     if self.is_introduce:
                         self.is_introduce = False
 
-                        # 介绍完毕了
+                        # Introduction finished
                         text_data_str = f"signal::introduce_end::{self.is_introduce}"
-                        # 放入队列
+                        # Put into queue
                         self.text_queue.put(text_data_str)
                         logger.info(f"recv signal: `{text_data_str}`")
-                    # 不知道为什么? 每次队列为空再有数据时都要重启线程, 否则播放失败
+                    # Not sure why? Every time the queue is empty and then has data, the thread must be restarted, otherwise playback fails
                     self.play_stream.stop_stream()
                     self.play_stream.close()
                     self.play_stream = self.p.open(
@@ -333,37 +333,37 @@ class DRobotC:
                     )
                 elif msg_type == "audio":
                     assert isinstance(msg_chat_id, int), "chat_id is not int"
-                    self.play_chat_id = msg_chat_id  # 更新播放的chat_id
-                    # 处理音频数据
+                    self.play_chat_id = msg_chat_id  # Update the chat_id being played
+                    # Process audio data
                     audio_data = base64.b64decode(msg_data)
                     audio_array = np.frombuffer(audio_data, dtype=np.float32)
                     audio_array = self._resample_audio(audio_array, 24000, self.audio_device_rate)
-                    # 放入队列
+                    # Put into queue
                     self.recv_queue.put((audio_array.tobytes(), msg_chat_id))
                 elif msg_type == "loc":
-                    # 解码, loc_data是字符串, 是大模型输出的, 可以json.loads()
+                    # Decode, loc_data is a string, output from the large model, can use json.loads()
                     loc_data = base64.b64decode(msg_data).decode()
-                    # 处理loc数据
+                    # Process loc data
                     loc_data = dict(json.loads(loc_data))
                     floor = "unknown" if loc_data["floor"] == "" else loc_data["floor"]
                     room = "unknown" if loc_data["room"] == "" else loc_data["room"]
                     object2find = "unknown" if loc_data["object"] == "" else loc_data["object"]
                     loc_data_str = f"loc::{floor},{room},{object2find}::{msg_chat_id}"
-                    # 放入队列
+                    # Put into queue
                     self.text_queue.put(loc_data_str)
                     logger.debug(f"recv loc: `{loc_data_str}`")
                 elif msg_type == "signal":
-                    # 解码
+                    # Decode
                     text_data = base64.b64decode(msg_data).decode()
-                    # 处理信号数据
+                    # Process signal data
                     text_data_str = f"signal::{text_data}::{msg_chat_id}"
-                    # 放入队列
+                    # Put into queue
                     self.text_queue.put(text_data_str)
                     logger.debug(f"recv signal: `{text_data_str}`")
                 elif msg_type == "qa":
-                    # 解码
+                    # Decode
                     qa_data = base64.b64decode(msg_data).decode()
-                    # 处理qa数据
+                    # Process QA data
                     qa_data = dict(json.loads(qa_data))
                     qa_text = qa_data["text"]
                     qa_type = qa_data["type"]

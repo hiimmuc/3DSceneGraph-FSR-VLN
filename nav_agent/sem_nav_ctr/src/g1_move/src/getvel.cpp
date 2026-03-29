@@ -69,9 +69,9 @@ public:
           double angular_z = msg->angular.z;
 
           // Print velocity information
-          RCLCPP_INFO(this->get_logger(), "线速度: x=%.2f, y=%.2f, z=%.2f m/s",
+          RCLCPP_INFO(this->get_logger(), "Linear velocity: x=%.2f, y=%.2f, z=%.2f m/s",
                       linear_x, linear_y, linear_z);
-          RCLCPP_INFO(this->get_logger(), "角速度: x=%.2f, y=%.2f, z=%.2f rad/s",
+          RCLCPP_INFO(this->get_logger(), "Angular velocity: x=%.2f, y=%.2f, z=%.2f rad/s",
                       angular_x, angular_y, angular_z);
           Vel value(linear_x, linear_y, angular_z);
           velpipe.write(reinterpret_cast<char *>(&value), sizeof(Vel));

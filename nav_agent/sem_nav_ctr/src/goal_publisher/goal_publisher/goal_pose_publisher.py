@@ -51,16 +51,16 @@ class GoalPosePublisher(Node):
     def __init__(self, cfg: DictConfig):
         super().__init__("goal_pose_publisher")
 
-        # 创建发布者，消息类型为PoseStamped，话题名为/goal_pose，队列大小为10
+        # Create publisher, message type is PoseStamped, topic name is /goal_pose, queue size is 10
         self.publisher_ = self.create_publisher(PoseStamped, "/object_pose", 10)
         self.waypoint_found_pub = self.create_publisher(String, "waypoint_reached", 10)
-        # 订阅String话题
+        # Subscribe to String topic
         self.subscription = self.create_subscription(
             String, "/chat_loc_pub", self.hmsggetgoal_callback, 10
         )
         self._action_client = ActionClient(self, FollowWaypoints, "/follow_waypoints")
-        # 设置定时器，每1秒发布一次目标位姿
-        # timer_period = 1.0  # 秒
+        # Set timer, publish target pose every 1 second
+        # timer_period = 1.0  # seconds
         # self.timer = self.create_timer(timer_period, self.timer_callback)
         self.count = 0
         self.params = cfg
@@ -73,18 +73,18 @@ class GoalPosePublisher(Node):
         self.use_gpt = 0
         # self.hmsggetgoal()
 
-        # 初始化计数器
+        # Initialize counter
 
-        self.get_logger().info("GoalPosePublisher 节点已启动，正在发布 /object_pose 话题...")
+        self.get_logger().info("GoalPosePublisher node started, publishing /object_pose topic...")
         # print(f"This node is running with Python at: {sys.executable}")
 
     def pubpose(self, x, y, z):
-        # 创建PoseStamped消息
+        # Create PoseStamped message
         msg = PoseStamped()
 
-        # 设置消息头
+        # Set message header
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "map"  # 假设目标位姿在map坐标系中
+        msg.header.frame_id = "map"  # Assume target pose is in map coordinate frame
 
         msg.pose.position.x = x
         msg.pose.position.y = y
@@ -93,19 +93,19 @@ class GoalPosePublisher(Node):
         msg.pose.orientation.y = 0.0
         msg.pose.orientation.z = 0.0
         msg.pose.orientation.w = 1.0
-        # 设置目标朝向 - 这里使用简单的四元数表示
-        # 让机器人始终朝向圆心
+        # Set target orientation - here use a simple quaternion
+        # Make the robot always face the center
         # msg.pose.orientation = self.get_quaternion_from_euler(0, 0, angle + math.pi)
 
-        # 发布消息
+        # Publish message
         self.publisher_.publish(msg)
 
-        # 记录日志
+        # Log
         self.get_logger().info(
-            f"发布第 {self.count} 个目标位姿: x={msg.pose.position.x:.2f}, y={msg.pose.position.y:.2f}, z={msg.pose.position.z:.2f}"
+            f"Published target pose #{self.count}: x={msg.pose.position.x:.2f}, y={msg.pose.position.y:.2f}, z={msg.pose.position.z:.2f}"
         )
 
-        # 增加计数器
+        # Increment counter
         self.count += 1
 
     def hmsgcreate(self):
@@ -113,18 +113,18 @@ class GoalPosePublisher(Node):
         hmsg = self.graph
         hmsg.load_graph(self.params.main.graph_path)
         self.use_gpt = self.params.main.use_gpt
-        # 自主判断房间类型和名字
+        # Automatically determine room types and names
         # hmsg.generate_room_names(
         #    generate_method="view_embedding",
         #    # digua_demo room_types
         #    default_room_types=[
-        #        "地瓜实验室",
-        #        "地平线展厅",
-        #        "地平线小邮局",
-        #        "长走廊",
-        #        "转角走廊",
-        #        "电梯间",
-        #        "电梯",
+        #        "Digua Lab",
+        #        "Horizon Exhibition Hall",
+        #        "Horizon Mini Post Office",
+        #        "Long Corridor",
+        #        "Corner Corridor",
+        #        "Elevator Lobby",
+        #        "Elevator",
         #    ]
         # )
         hmsg.generate_room_names(
@@ -142,79 +142,79 @@ class GoalPosePublisher(Node):
                 "Cafeteria",
             ],
         )
-        # 人为设定房间类型和名字
+        # Manually set room types and names
         designated_room_names_digua = [
             "none",
             "none",
-            "展厅",
+            "Exhibition Hall",
             "none",
-            "转角走廊",
-            "走廊",
-            "地瓜电梯间接待区",
+            "Corner Corridor",
+            "Corridor",
+            "Digua Elevator Lobby Reception Area",
         ]
         designated_room_names_ic7f_demo = [
             "none",
             "none",
-            "办公区",
-            "餐厅",
-            "电梯间走廊",
-            "茶水间",
-            "办公休息区",
+            "Office Area",
+            "Cafeteria",
+            "Elevator Lobby Corridor",
+            "Pantry",
+            "Office Rest Area",
         ]
         designated_room_names_1014demo = [
-            "转角走廊",
+            "Corner Corridor",
             "none",
-            "长走廊",
-            "地平线展厅",
+            "Long Corridor",
+            "Horizon Exhibition Hall",
             "none",
             "none",
-            "长走廊",
-            "接待区",
+            "Long Corridor",
+            "Reception Area",
             "none",
-            "地瓜办公区电梯间",
+            "Digua Office Area Elevator Lobby",
         ]
         designated_room_names_0918demo = [
-            "接待区",
+            "Reception Area",
         ]
 
         designated_room_names_1028demo = [
             "none",
-            "会议室",
-            "实验室",
+            "Meeting Room",
+            "Laboratory",
             "none",
             "none",
-            "活动区",
+            "Activity Area",
         ]
 
         designated_room_names_0918demo = [
-            "接待区",
+            "Reception Area",
         ]
 
         designated_room_names_1030demo = [
-            "会议室",
-            "户外",
-            "活动区",
+            "Meeting Room",
+            "Outdoor",
+            "Activity Area",
             "none",
             "none",
-            "操作区",
-            "会议室",
-            "实验室",
-            "活动区",
+            "Operation Area",
+            "Meeting Room",
+            "Laboratory",
+            "Activity Area",
         ]
         designated_room_names_1127demo = [
             "none",
-            "会议室",
-            "电梯间",
-            "活动区",
+            "Meeting Room",
+            "Elevator Lobby",
+            "Activity Area",
             "none",
-            "活动区",
+            "Activity Area",
             "none",
         ]
         hmsg.set_room_names(room_names=designated_room_names_1127demo)
 
     def hmsggetgoal_callback(self, msg):
         hmsg = self.graph
-        query_instruction = "来自语音查找"
+        query_instruction = "From voice search"
         ans = msg.data
         print(ans)
         start_time = time.time()
@@ -225,7 +225,7 @@ class GoalPosePublisher(Node):
         print("obj: ", res_dict)
         print("score: ", res_dict["object_scores"][0])
         # print(type(res_dict))
-        print(f"运行时间: {end_time - start_time:.4f} 秒")
+        print(f"Run time: {end_time - start_time:.4f} seconds")
         # save log for debug
         # 构建要写入 JSON 的数据
         # query_result = {
@@ -280,22 +280,22 @@ class GoalPosePublisher(Node):
 )
 def main(params: DictConfig, args=None):
 
-    # 初始化ROS2 Python客户端库
+    # Initialize ROS2 Python client library
     rclpy.init(args=args)
 
-    # 创建节点
+    # Create node
     goal_pose_publisher = GoalPosePublisher(params)
 
     try:
-        # 运行节点
+        # Run node
         rclpy.spin(goal_pose_publisher)
     except KeyboardInterrupt:
-        # 处理Ctrl+C信号
+        # Handle Ctrl+C signal
         pass
     finally:
-        # 销毁节点
+        # Destroy node
         goal_pose_publisher.destroy_node()
-        # 关闭ROS2 Python客户端库
+        # Shutdown ROS2 Python client library
         rclpy.shutdown()
 
 
