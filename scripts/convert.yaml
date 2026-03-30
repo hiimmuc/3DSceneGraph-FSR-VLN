@@ -3,7 +3,7 @@
 # Edit this file and run:  python scripts/rosbag_2_dataset.py
 
 # Path to the ROS2 bag directory (e.g. rosbag2_xxx/)
-bag: ../../data/rosbag2_2026_03_26-14_12_50
+bag: ../../../../data/rosbag2_2026_03_26-14_12_50
 
 # Output dataset directory (will be created if it does not exist)
 output: ../../data/HoloAgent/rosbag2_2026_03_26-14_12_50

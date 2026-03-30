@@ -14,7 +14,7 @@ import open3d as o3d
 import torch
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree, distance
-from sklearn.cluster import DBSCAN, KMeans
+from sklearn.cluster import KMeans
 from tqdm import tqdm
 
 matplotlib.use("Agg")  # Use non-GUI backend
@@ -27,6 +27,7 @@ matplotlib.use("Agg")  # Use non-GUI backend
 _FAISS_GPU_RES = None
 try:
     import faiss.contrib.torch_utils  # noqa: F401 – registers GPU helpers
+
     _faiss_gpu_res_candidate = faiss.StandardGpuResources()
     # Smoke-test: create and immediately discard a tiny GPU index
     _smoke = faiss.index_cpu_to_gpu(_faiss_gpu_res_candidate, 0, faiss.IndexFlatL2(3))
@@ -963,6 +964,7 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
 
     # Build neighbour lookup: cell → list of mask indices
     from collections import defaultdict as _dd
+
     cell_map = _dd(list)
     for idx, key in enumerate(cell_keys):
         cell_map[key].append(idx)
@@ -989,8 +991,9 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
 
     if _FAISS_GPU_RES is not None:
         # GPU: build CPU index → transfer to GPU (not thread-safe, used serially)
-        faiss_indices = [_make_faiss_index(pts.shape[1], pts) if pts.shape[0] > 0 else None
-                         for pts in pts_list]
+        faiss_indices = [
+            _make_faiss_index(pts.shape[1], pts) if pts.shape[0] > 0 else None for pts in pts_list
+        ]
     else:
         # CPU: plain IndexFlatL2, safe for concurrent reads in ThreadPoolExecutor
         faiss_indices = []
@@ -1005,14 +1008,13 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
 
     # Apply bbox IoU as a second-pass filter on the spatial candidates
     candidate_pairs = [
-        (i, j)
-        for i, j in grid_candidates
-        if compute_3d_bbox_iou(aa_bb[i], aa_bb[j]) > iou_thresh
+        (i, j) for i, j in grid_candidates if compute_3d_bbox_iou(aa_bb[i], aa_bb[j]) > iou_thresh
     ]
 
     overlap_matrix = np.zeros((n, n))
 
     if candidate_pairs:
+
         def _compute_pair(i, j):
             if faiss_indices[i] is None or faiss_indices[j] is None:
                 return i, j, 0.0
