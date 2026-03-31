@@ -8,13 +8,12 @@ import open3d as o3d
 
 
 class Object:
-    """
-    Class to represent an object in a room.
+    """Class to represent an object in a room.
 
-    :param object_id: Unique identifier for the object
-    :param room_id: Identifier of the room this object belongs to
-    :param name: Name of the object (e.g., "Chair", "Table")
-    """
+    Args:
+        object_id: Unique identifier for the object
+        room_id: Identifier of the room this object belongs to
+        name: Name of the object (e.g., "Chair", "Table")"""
 
     def __init__(self, object_id, room_id, name=None):
         self.object_id = object_id  # Unique identifier for the object
@@ -28,15 +27,14 @@ class Object:
         self.view_ids = []  # view id the object belongs to
 
     def set_vertices(self, vertices):
-        """
-        Method to set the vertices of the object :param vertices:
+        """Method to set the vertices of the object :param vertices:
 
-        Coordinates of the object in the point cloud 8 vertices.
-        """
+        Coordinates of the object in the point cloud 8 vertices."""
         self.vertices = vertices  # Method to set the vertices of the object
 
     def save(self, path):
         """Save the object in folder as ply for the point cloud and json for
+
         the metadata."""
         # save the point cloud
         o3d.io.write_point_cloud(os.path.join(path, str(self.object_id) + ".ply"), self.pcd)
@@ -55,6 +53,7 @@ class Object:
 
     def load(self, path):
         """Load the object from folder as ply for the point cloud and json for
+
         the metadata."""
         # load the point cloud
         self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.object_id) + ".ply"))
@@ -72,6 +71,7 @@ class Object:
 
     def load_new(self, path):
         """Load the object from folder as ply for the point cloud and json for
+
         the metadata."""
         # load the point cloud
         self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.object_id) + ".ply"))
@@ -89,6 +89,7 @@ class Object:
 
     def __add__(self, other):
         """Method to add two objects together :param other: Object to add to
+
         self."""
         if self.pcd.is_empty():
             return other

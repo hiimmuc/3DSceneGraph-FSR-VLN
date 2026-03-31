@@ -9,21 +9,18 @@ from scipy.spatial.transform import Rotation as R
 
 
 class HorizonDataset(RGBDDataset):
-    """
-    Dataset class for the ScanNet dataset.
+    """Dataset class for the ScanNet dataset.
 
     This class provides an interface to load RGB-D data samples from the
     ScanNet dataset. The dataset format is assumed to follow the ScanNet v2
-    dataset format.
-    """
+    dataset format."""
 
     def __init__(self, cfg):
-        """
-        Args:
-            root_dir: Path to the root directory containing the dataset.
-            mode: "train", "val", or "test" depending on the data split.
-            transforms: Optional transformations to apply to the data.
-        """
+        """Args:
+
+        root_dir: Path to the root directory containing the dataset.
+        mode: "train", "val", or "test" depending on the data split.
+        transforms: Optional transformations to apply to the data."""
         super(HorizonDataset, self).__init__(cfg)
         self.root_dir = cfg["root_dir"]
         self.transforms = cfg["transforms"]
@@ -66,8 +63,6 @@ class HorizonDataset(RGBDDataset):
         self.indices = np.arange(len(self.ts_list))
 
         # re-range ts_list for abs ts
-        # self.ts_list = [str(int(ts)) for ts in range(len(ts_list))]
-        # self.ts_list = self.ts_list[self.start_index : self.end_index]
         if int(ts_list[0]) != ts_list[0]:
             self.image_paths = [
                 os.path.join(self.root_dir, "images", f"{float(ts):.4f}.png")
@@ -133,10 +128,6 @@ class HorizonDataset(RGBDDataset):
         tum_pose_raw = np.loadtxt(path)
         # sort by ts
         tum_pose_raw = tum_pose_raw[tum_pose_raw[:, 0].argsort()]
-        # pt = PoseTransformer()
-        # pt.loadarray(tum_pose_raw)
-        # pt.normalize2origin()
-        # tum_pose = pt.dumparray()
         tum_pose = tum_pose_raw
         # transform to (n,4,4) matrix
         ts_list = []
@@ -144,7 +135,6 @@ class HorizonDataset(RGBDDataset):
         for pose in tum_pose:
             # Extract translation and quaternion
             ts, tx, ty, tz, qx, qy, qz, qw = pose
-            # ts, tx, ty, tz, qw, qx, qy, qz = pose
             # Create rotation matrix from quaternion
             quat = [qx, qy, qz, qw]
             rot_matrix = R.from_quat(quat).as_matrix()  # Convert quaternion to 3x3 rotation matrix
@@ -153,7 +143,6 @@ class HorizonDataset(RGBDDataset):
             T[:3, :3] = rot_matrix  # Rotation part
             T[:3, 3] = [tx, ty, tz]  # Translation part
             c2w = np.linalg.inv(T)
-            # c2w = T
 
             # Append to list
             T_list.append(c2w)
@@ -175,17 +164,12 @@ class HorizonDataset(RGBDDataset):
         tum_pose_raw = np.loadtxt(path)
         # sort by ts
         tum_pose_raw = tum_pose_raw[tum_pose_raw[:, 0].argsort()]
-        # pt = PoseTransformer()
-        # pt.loadarray(tum_pose_raw)
-        # pt.normalize2origin()
-        # tum_pose = pt.dumparray()
         tum_pose = tum_pose_raw
         # transform to (n,4,4) matrix
         ts_list = []
         T_list = []
         for pose in tum_pose:
             # Extract translation and quaternion
-            # ts, tx, ty, tz, qx, qy, qz, qw = pose
             ts, tx, ty, tz, qw, qx, qy, qz = pose
             # Create rotation matrix from quaternion
             quat = [qx, qy, qz, qw]
@@ -257,12 +241,10 @@ class HorizonDataset(RGBDDataset):
         return rgb_image, depth_image, pose, self.rgb_intrinsics, self.depth_intrinsics
 
     def _get_data_list(self):
-        """
-        Get a list of RGB-D data samples based on the dataset format and mode.
+        """Get a list of RGB-D data samples based on the dataset format and mode.
 
         Returns:
-            List of RGB-D data samples (RGB image path, depth image path).
-        """
+            List of RGB-D data samples (RGB image path, depth image path)."""
         rgb_data_list = []
         depth_data_list = []
         pose_data_list = []
@@ -298,6 +280,7 @@ class HorizonDataset(RGBDDataset):
 
     def create__pcd(self, rgb, depth, camera_pose=None):
         """This method should be implemented by subclasses to create a point
+
         cloud from RGB-D images."""
         rgb = np.array(rgb)
         depth = np.array(depth)

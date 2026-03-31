@@ -14,10 +14,9 @@ def extract_feats_raw(
     bbox_margin=0,
     maskedd_weight=0.75,
 ):
-    """
-    Estimate the feature for each pixel in the image.
+    """Estimate the feature for each pixel in the image.
 
-    args:
+    Args:
         image: input image.
         mask_generator: sam model.
         clip_model: clip model.
@@ -25,13 +24,19 @@ def extract_feats_raw(
         clip_feat_dim: clip feature dimension.
         bbox_margin: margin for croped bounding box.
         maskedd_weight: weight for masked background.
-    return:
+        return:
         outfeat: pixel level feature.
         F_masks: feature for each mask.
         masks: all masks.
         croped_images: croped images.
         croped_images_masked: croped images with masked background.
-    """
+
+    Returns:
+        outfeat: pixel level feature.
+    F_masks: feature for each mask.
+    masks: all masks.
+    croped_images: croped images.
+    croped_images_masked: croped images with masked background."""
     LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH = image.shape[0], image.shape[1]
     # run SAM on the full image.
     masks = mask_generator.generate(image)
@@ -79,11 +84,11 @@ def extract_feats_per_pixel(
     bbox_margin=0,
     maskedd_weight=0.75,
 ):
-    """
-    Estimate the feature for each pixel in the image using ConceptFusion
+    """Estimate the feature for each pixel in the image using ConceptFusion
+
     method.
 
-    args:
+    Args:
         image: input image.
         mask_generator: sam model.
         clip_model: clip model.
@@ -92,14 +97,21 @@ def extract_feats_per_pixel(
         bbox_margin: margin for croped bounding box.
         maskedd_weight: weight for masked background.
         save_masks_path: the directory to save or load the clip embeddings and SAM masks
-    return:
+        return:
         outfeat: pixel level feature.
         F_masks: feature for each mask.
         masks: all masks.
         croped_images: croped images.
         croped_images_masked: croped images with masked background.
         F_g: global CLIP embedding for the image
-    """
+
+    Returns:
+        outfeat: pixel level feature.
+    F_masks: feature for each mask.
+    masks: all masks.
+    croped_images: croped images.
+    croped_images_masked: croped images with masked background.
+    F_g: global CLIP embedding for the image"""
     LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH = image.shape[0], image.shape[1]
     masks = None
 

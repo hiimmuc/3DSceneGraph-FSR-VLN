@@ -40,13 +40,11 @@ def compute_sdf(boundary_mask, distance_scale=1):
 
 class NavigationGraph:
     def __init__(self, floor_pcd: o3d.geometry.PointCloud, cell_size: int):
-        """
-        Initialization of the NavigationGraph class.
+        """Initialization of the NavigationGraph class.
 
         Args:
             floor_pcd (o3d.geometry.PointCloud): The point cloud of the floor.
-            cell_size (int): the resolution of the cell (m/cell)
-        """
+            cell_size (int): the resolution of the cell (m/cell)"""
         self.pcd_min = np.min(np.array(floor_pcd.points), axis=0)
         self.pcd_max = np.max(np.array(floor_pcd.points), axis=0)
         self.grid_size = np.ceil((self.pcd_max - self.pcd_min) / cell_size + 1).astype(np.int32)
@@ -1196,14 +1194,12 @@ class NavigationGraph:
 
     @staticmethod
     def save_voronoi_graph(graph: nx.Graph, floor_dir: str, name: str) -> None:
-        """
-        Save the Voronoi graph to a json file.
+        """Save the Voronoi graph to a json file.
 
         Args:
             graph (nx.Graph): The Voronoi graph.
             floor_dir (str): The directory where the intermediate results are stored.
-            name (str): The name of the file.
-        """
+            name (str): The name of the file."""
         graph_path = os.path.join(floor_dir, f"{name}_graph.json")
         graph_json = nx.node_link_data(graph)
         with open(graph_path, "w") as f:

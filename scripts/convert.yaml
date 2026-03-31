@@ -28,11 +28,11 @@ width: 1920
 height: 1080
 
 # Processing options
-extrinsics:
-    - [0, 0.0, 1.0, 0.0] # Rotated X-axis
-    - [-1.0, 0.0, 0.0, 0.0] # Rotated Y-axis (Right)
-    - [0.0, -1.0, 0.0, 0.0] # Z-axis (Vertical) stays the same
-    - [0.0, 0.0, 0.0, 1.0]
+# extrinsics:
+#     - [0, 0.0, 1.0, 0.0] # Rotated X-axis
+#     - [-1.0, 0.0, 0.0, 0.0] # Rotated Y-axis (Right)
+#     - [0.0, -1.0, 0.0, 0.0] # Z-axis (Vertical) stays the same
+#     - [0.0, 0.0, 0.0, 1.0]
 
 # Save every (skip+1)-th RGB frame; 0 = save all frames
 skip: 4

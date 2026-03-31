@@ -9,11 +9,20 @@ from PIL import Image
 # Compute the coordinates of the image on the plot
 def compute_plot_coordinates(image, x, y, image_centers_area_size, offset):
     """Compute the coordinates of the image on the plot :param image
-    (np.array): the image to plot :param x (float): the x coordinate of the
-    image :param y (float): the y coordinate of the image :param
-    image_centers_area_size (int): the size of the area where the images are
-    plotted :param offset (int): the offset of the image from the border of the
-    plot :return: the coordinates of the top left and bottom right corner."""
+
+    (np.array): the image to plot
+
+    Args:
+        x: (float): the x coordinate of the
+    image
+        y: (float): the y coordinate of the image
+        image_centers_area_size: (int): the size of the area where the images are
+    plotted
+        offset: (int): the offset of the image from the border of the
+    plot
+
+    Returns:
+        the coordinates of the top left and bottom right corner."""
     image_height, image_width, _ = image.shape
 
     # compute the image center coordinates on the plot
@@ -54,30 +63,38 @@ def get_nn_img(raw_imgs, text_feats, img_feats):
 
 
 def get_img_feats(img, preprocess, clip_model):
-    """
-    Get the image features from the CLIP model :param img (np.array): the image
-    to get the features from :param preprocess (torchvision.transforms):
+    """Get the image features from the CLIP model :param img (np.array): the image
 
+    to get the features from
+
+    Args:
+        preprocess: (torchvision.transforms):
     the preprocessing function
-    :param clip_model (CLIP): the CLIP model
-    :return: the image features.
-    """
+        clip_model: (CLIP): the CLIP model
+
+    Returns:
+        the image features."""
     img_pil = Image.fromarray(np.uint8(img))
     img_in = preprocess(img_pil)[None, ...]
     with torch.no_grad():
         img_feats = clip_model.encode_image(img_in.cuda()).float()
     img_feats = torch.nn.functional.normalize(img_feats, dim=-1)
     img_feats = np.float32(img_feats.cpu())
-    # import pdb; pdb.set_trace()
     # print("img_feats.shape: ", img_feats.shape)
     return img_feats
 
 
 def get_img_feats_batch(imgs, preprocess, clip_model):
     """Get the image features from the CLIP model for a batch of images :param
-    imgs (list): the images to get the features from :param preprocess
-    (torchvision.transforms): the preprocessing function :param clip_model
-    (CLIP): the CLIP model :return: the image features."""
+
+    imgs (list): the images to get the features from
+
+    Args:
+        preprocess: (torchvision.transforms): the preprocessing function
+        clip_model: (CLIP): the CLIP model
+
+    Returns:
+        the image features."""
     imgs_pil = [Image.fromarray(np.uint8(img)) for img in imgs]
     imgs_in = torch.stack([preprocess(img_pil) for img_pil in imgs_pil])
     with torch.no_grad():
@@ -89,10 +106,17 @@ def get_img_feats_batch(imgs, preprocess, clip_model):
 
 def get_imgs_feats(raw_imgs, preprocess, clip_model, clip_feat_dim):
     """Get the image features from the CLIP model for a list of images :param
-    raw_imgs (list): the images to get the features from :param preprocess
-    (torchvision.transforms): the preprocessing function :param clip_model
-    (CLIP): the CLIP model :param clip_feat_dim (int): the dimension of the
-    CLIP features :return: the image features."""
+
+    raw_imgs (list): the images to get the features from
+
+    Args:
+        preprocess: (torchvision.transforms): the preprocessing function
+        clip_model: (CLIP): the CLIP model
+        clip_feat_dim: (int): the dimension of the
+    CLIP features
+
+    Returns:
+        the image features."""
     imgs_feats = np.zeros((len(raw_imgs), clip_feat_dim))
     for img_id, img in enumerate(raw_imgs):
         imgs_feats[img_id, :] = get_img_feats(img, preprocess, clip_model)
@@ -101,11 +125,18 @@ def get_imgs_feats(raw_imgs, preprocess, clip_model, clip_feat_dim):
 
 def get_imgs_feats_batch(raw_imgs, preprocess, clip_model, clip_feat_dim, batch_size=64):
     """Get the image features from the CLIP model for a list of images :param
-    raw_imgs (list): the images to get the features from :param preprocess
-    (torchvision.transforms): the preprocessing function :param clip_model
-    (CLIP): the CLIP model :param clip_feat_dim (int): the dimension of the
-    CLIP features :param batch_size (int): the batch size for the inference
-    :return: the image features."""
+
+    raw_imgs (list): the images to get the features from
+
+    Args:
+        preprocess: (torchvision.transforms): the preprocessing function
+        clip_model: (CLIP): the CLIP model
+        clip_feat_dim: (int): the dimension of the
+    CLIP features
+        batch_size: (int): the batch size for the inference
+
+    Returns:
+        the image features."""
     imgs_feats = np.zeros((len(raw_imgs), clip_feat_dim))
     img_batch = []
     for img_id, img in enumerate(raw_imgs):
@@ -127,9 +158,16 @@ def get_imgs_feats_batch(raw_imgs, preprocess, clip_model, clip_feat_dim, batch_
 
 def get_text_feats(in_text, clip_model, clip_feat_dim, batch_size=64):
     """Get the text features from the CLIP model :param in_text (list): the
-    text to get the features from :param clip_model (CLIP): the CLIP model
-    :param clip_feat_dim (int): the dimension of the CLIP features :param
-    batch_size (int): the batch size for the inference :return: the text
+
+    text to get the features from
+
+    Args:
+        clip_model: (CLIP): the CLIP model
+        clip_feat_dim: (int): the dimension of the CLIP features
+        batch_size: (int): the batch size for the inference
+
+    Returns:
+        the text
     features."""
     # in_text = ["a {} in the scene.".format(in_text)]
     text_tokens = open_clip.tokenize(in_text).cuda()
@@ -148,15 +186,18 @@ def get_text_feats(in_text, clip_model, clip_feat_dim, batch_size=64):
 
 
 def get_text_feats_62_templates(in_text, clip_model, clip_feat_dim, batch_size=64):
-    """
-    Get the text features from the CLIP model with 62 templates :param in_text
-    (list): the text to get the features from :param clip_model (CLIP):
+    """Get the text features from the CLIP model with 62 templates :param in_text
 
+    (list): the text to get the features from
+
+    Args:
+        clip_model: (CLIP):
     the CLIP model
-    :param clip_feat_dim (int): the dimension of the CLIP features
-    :param batch_size (int): the batch size for the inference
-    :return: the text features.
-    """
+        clip_feat_dim: (int): the dimension of the CLIP features
+        batch_size: (int): the batch size for the inference
+
+    Returns:
+        the text features."""
     multiple_templates = [
         "{}",
         "a photo of {} in the scene.",
@@ -232,15 +273,18 @@ def get_text_feats_62_templates(in_text, clip_model, clip_feat_dim, batch_size=6
 
 
 def get_text_feats_multiple_templates(in_text, clip_model, clip_feat_dim, batch_size=64):
-    """
-    Get the text features from the CLIP model with text templates :param
-    in_text (list): the text to get the features from :param clip_model (CLIP):
+    """Get the text features from the CLIP model with text templates :param
 
+    in_text (list): the text to get the features from
+
+    Args:
+        clip_model: (CLIP):
     the CLIP model
-    :param clip_feat_dim (int): the dimension of the CLIP features
-    :param batch_size (int): the batch size for the inference
-    :return: the text features.
-    """
+        clip_feat_dim: (int): the dimension of the CLIP features
+        batch_size: (int): the batch size for the inference
+
+    Returns:
+        the text features."""
     multiple_templates = [
         "{}",
         # "There is the {} in the scene.",
@@ -310,9 +354,7 @@ def get_text_feats_multiple_templates(in_text, clip_model, clip_feat_dim, batch_
     multi_temp_landmarks_other = [x.format(lm) for lm in in_text for x in mul_tmp]
     # format the text with multiple templates except for "background"
     text_feats = get_text_feats(multi_temp_landmarks_other, clip_model, clip_feat_dim)
-    # import pdb; pdb.set_trace()
     # average the features
     text_feats = text_feats.reshape((-1, len(mul_tmp), text_feats.shape[-1]))
     text_feats = np.mean(text_feats, axis=1)
-    # import pdb; pdb.set_trace()
     return text_feats

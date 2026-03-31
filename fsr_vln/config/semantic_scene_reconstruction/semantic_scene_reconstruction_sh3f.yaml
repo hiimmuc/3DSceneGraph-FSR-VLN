@@ -1,7 +1,7 @@
 main:
   device: cuda
   use_gpt: false
-  dataset: horizon #scannet #hm3dsem #replica #iphone
+  dataset: horizon
   scene_id: icra_sh3f
   dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
   depth_cut: 6.0

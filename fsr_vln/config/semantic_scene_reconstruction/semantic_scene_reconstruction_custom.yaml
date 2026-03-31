@@ -1,7 +1,7 @@
 main:
     device: cuda
     use_gpt: false
-    dataset: horizon #scannet # hm3dsem #replica #iphone
+    dataset: horizon
     scene_id: rosbag2_2026_03_26-14_12_50
     dataset_path: /home/namdp15/Workspace/VMO/vm_scene_graph/vmo_scene_graph/3DSG_gen/data/HoloAgent
     # Depth threshold in meters — pixels/points beyond this distance are discarded; lower = only close objects reconstructed

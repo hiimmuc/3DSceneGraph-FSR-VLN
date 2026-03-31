@@ -1,6 +1,6 @@
 import os
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
 from typing import List, Tuple, Union
 
@@ -38,13 +38,14 @@ except Exception:
 
 
 def _make_faiss_index(dim: int, pts: np.ndarray = None) -> faiss.Index:
-    """
-    Build a FAISS flat-L2 index, preferring GPU when available.
+    """Build a FAISS flat-L2 index, preferring GPU when available.
 
-    :param dim: Feature dimension (3 for XYZ point clouds).
-    :param pts: Optional float32 array of shape (N, dim) to add immediately.
-    :return: A populated (or empty) FAISS index on GPU or CPU.
-    """
+    Args:
+        dim: Feature dimension (3 for XYZ point clouds).
+        pts: Optional float32 array of shape (N, dim) to add immediately.
+
+    Returns:
+        A populated (or empty) FAISS index on GPU or CPU."""
     cpu_index = faiss.IndexFlatL2(dim)
     if pts is not None and len(pts) > 0:
         cpu_index.add(pts)
@@ -182,18 +183,17 @@ def check_object_in_view(
 
 
 def find_intersection_share(map_points, obj_points, radius=0.05):
-    """
-    Calculate the percentage of overlapping points normalized by the query
+    """Calculate the percentage of overlapping points normalized by the query
+
     objects size.
 
-    Parameters:
-    base_points (numpy.ndarray): shape (n1, 3).
-    map_points (numpy.ndarray): shape (n1, 3).
-    radius (float): Radius for KD-Tree query (adjust based on point density).
+    Args:
+        base_points (numpy.ndarray): shape (n1, 3).
+        map_points (numpy.ndarray): shape (n1, 3).
+        radius (float): Radius for KD-Tree query (adjust based on point density).
 
     Returns:
-    float: Overlapping ratio between 0 and 1.
-    """
+        float: Overlapping ratio between 0 and 1."""
     obj_tree_points = cKDTree(obj_points)
 
     # Query all points in pcd1 for nearby points in pcd2
@@ -376,10 +376,9 @@ def compute_room_embeddings(
 
 
 def map_grid_to_point_cloud(occupancy_grid_map, resolution, point_cloud):
-    """
-    Map the occupancy grid back to the original coordinates in the point cloud.
+    """Map the occupancy grid back to the original coordinates in the point cloud.
 
-    Parameters:
+    Args:
         occupancy_grid_map (numpy.array): Occupancy grid map as a 2D numpy array, where each cell is marked as either 0 (unoccupied) or 1 (occupied).
         grid_size (tuple): A tuple (width, height) representing the size of the occupancy grid map in meters.
         resolution (float): The resolution of each cell in the grid map in meters.
@@ -408,15 +407,17 @@ def map_grid_to_point_cloud(occupancy_grid_map, resolution, point_cloud):
 
 
 def distance_transform(occupancy_map, reselotion, tmp_path):
-    """
-    Perform distance transform on the occupancy map to find the distance of
+    """Perform distance transform on the occupancy map to find the distance of
+
     each cell to the nearest occupied cell.
 
-    :param occupancy_map: 2D numpy array representing the occupancy map.
-    :param reselotion: The resolution of each cell in the grid map in meters.
-    :param path: The path to save the distance transform image.
-    :return: The distance transform of the occupancy map.
-    """
+    Args:
+        occupancy_map: 2D numpy array representing the occupancy map.
+        reselotion: The resolution of each cell in the grid map in meters.
+        path: The path to save the distance transform image.
+
+    Returns:
+        The distance transform of the occupancy map."""
 
     print("occupancy_map shape: ", occupancy_map.shape)
     bw = occupancy_map.copy()
@@ -502,98 +503,15 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
     return room_vertices
 
 
-# def distance_transform(occupancy_map, reselotion, tmp_path):
-#     """
-#         Perform distance transform on the occupancy map to find the distance of each cell to the nearest occupied cell.
-#         :param occupancy_map: 2D numpy array representing the occupancy map.
-#         :param reselotion: The resolution of each cell in the grid map in meters.
-#         :param path: The path to save the distance transform image.
-#         :return: The distance transform of the occupancy map.
-#     """
-
-#     print("occupancy_map shape: ", occupancy_map.shape)
-#     bw = occupancy_map.copy()
-#     full_map = occupancy_map.copy()
-
-#     # invert the image
-#     bw = cv2.bitwise_not(bw)
-
-#     # Perform the distance transform algorithm
-#     bw = np.uint8(bw)
-#     dist = cv2.distanceTransform(bw, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
-#     print("range of dist: ", np.min(dist), np.max(dist))
-#     # so we can visualize and threshold it
-#     cv2.normalize(dist, dist, 0, 255, cv2.NORM_MINMAX)
-#     plt.figure()
-#     plt.imshow(dist, cmap="jet", origin="lower")
-#     plt.savefig(os.path.join(tmp_path, "dist.png"))
-
-#     dist = np.uint8(dist)
-#     # apply Otsu's thresholding after Gaussian filtering
-#     blur = cv2.GaussianBlur(dist, (11, 1), 10)
-#     plt.figure()
-#     plt.imshow(blur, cmap="jet", origin="lower")
-#     plt.savefig(os.path.join(tmp_path, "dist_blur.png"))
-#     _, dist = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-#     plt.figure()
-#     plt.imshow(dist, cmap="jet", origin="lower")
-#     plt.savefig(os.path.join(tmp_path, "dist_thresh.png"))
-
-#     # Create the CV_8U version of the distance image
-#     # It is needed for findContours()
-#     dist_8u = dist.astype("uint8")
-#     # Find total markers
-#     contours, _ = cv2.findContours(dist_8u, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-#     print("number of seeds, aka rooms: ", len(contours))
-
-#     # print the area of each seed
-#     for i in range(len(contours)):
-#         print("area of seed {}: ".format(i), cv2.contourArea(contours[i]))
-
-#     # remove small seed contours
-#     min_area_m = 0.5
-#     min_area = (min_area_m / reselotion) ** 2
-#     print("min_area: ", min_area)
-#     contours = [c for c in contours if cv2.contourArea(c) > min_area]
-#     print("number of contours after remove small seeds: ", len(contours))
-
-#     # Create the marker image for the watershed algorithm
-#     markers = np.zeros(dist.shape, dtype=np.int32)
-#     # Draw the foreground markers
-#     for i in range(len(contours)):
-#         cv2.drawContours(markers, contours, i, (i + 1), -1)
-#     # Draw the background marker
-#     circle_radius = 1  # in pixels
-#     cv2.circle(markers, (3, 3), circle_radius, len(contours) + 1, -1)
-
-#     # Perform the watershed algorithm
-#     full_map = cv2.cvtColor(full_map, cv2.COLOR_GRAY2BGR)
-#     cv2.watershed(full_map, markers)
-
-#     plt.figure()
-#     plt.imshow(markers, cmap="jet", origin="lower")
-#     plt.savefig(os.path.join(tmp_path, "markers.png"))
-
-#     # find the vertices of each room
-#     room_vertices = []
-#     for i in range(len(contours)):
-#         room_vertices.append(np.where(markers == i + 1))
-#     room_vertices = np.array(room_vertices, dtype=object).squeeze()
-#     print("room_vertices shape: ", room_vertices.shape)
-
-#     return room_vertices
-
-
 def compute_iou_batch(bbox1: torch.Tensor, bbox2: torch.Tensor) -> torch.Tensor:
-    """
-    Taken from ConceptGraphs Compute IoU between two sets of axis-aligned 3D
-    bounding boxes.
+    """Taken from ConceptGraphs Compute IoU between two sets of axis-aligned 3D
 
+    bounding boxes.
     bbox1: (M, V, D), e.g. (M, 8, 3)
     bbox2: (N, V, D), e.g. (N, 8, 3)
 
-    returns: (M, N)
-    """
+    Returns:
+        (M, N)"""
     # Compute min and max for each box
     bbox1_min, _ = bbox1.min(dim=1)  # Shape: (M, 3)
     bbox1_max, _ = bbox1.max(dim=1)  # Shape: (M, 3)
@@ -626,22 +544,21 @@ def compute_iou_batch(bbox1: torch.Tensor, bbox2: torch.Tensor) -> torch.Tensor:
 
 
 def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02, index1=None, index2=None):
-    """
-    Calculate the percentage of overlapping points between two point clouds
+    """Calculate the percentage of overlapping points between two point clouds
+
     using FAISS.
 
-    Parameters:
-    pcd1 (numpy.ndarray): Point cloud 1, shape (n1, 3).
-    pcd2 (numpy.ndarray): Point cloud 2, shape (n2, 3).
-    radius (float): Radius for KD-Tree query (adjust based on point density).
-    index1 (faiss.Index, optional): Pre-built FAISS index for pcd1. If None,
+    Args:
+        pcd1 (numpy.ndarray): Point cloud 1, shape (n1, 3).
+        pcd2 (numpy.ndarray): Point cloud 2, shape (n2, 3).
+        radius (float): Radius for KD-Tree query (adjust based on point density).
+        index1 (faiss.Index, optional): Pre-built FAISS index for pcd1. If None,
         one is built on the fly. Providing pre-built indices avoids redundant
         index construction when the same cloud appears in many pairs.
-    index2 (faiss.Index, optional): Pre-built FAISS index for pcd2.
+        index2 (faiss.Index, optional): Pre-built FAISS index for pcd2.
 
     Returns:
-    float: Overlapping ratio between 0 and 1.
-    """
+        float: Overlapping ratio between 0 and 1."""
     if isinstance(pcd1, o3d.geometry.PointCloud) and isinstance(pcd2, o3d.geometry.PointCloud):
         pcd1 = np.asarray(pcd1.points)
         pcd2 = np.asarray(pcd2.points)
@@ -677,13 +594,14 @@ def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02, index1=None, index2=No
 
 
 def merge_point_clouds_list(pcd_list, voxel_size=0.02):
-    """
-    Merge a list of point clouds into a single point cloud.
+    """Merge a list of point clouds into a single point cloud.
 
-    :param pcd_list: List of point clouds to merge.
-    :param voxel_size: Voxel size for downsampling.
-    :return: Merged point cloud.
-    """
+    Args:
+        pcd_list: List of point clouds to merge.
+        voxel_size: Voxel size for downsampling.
+
+    Returns:
+        Merged point cloud."""
     merged_pcd = pcd_list[0]
     for pcd in pcd_list[1:]:
         merged_pcd += pcd
@@ -695,31 +613,30 @@ def merge_point_clouds_list(pcd_list, voxel_size=0.02):
 
 
 def feats_denoise_dbscan(feats, eps=0.02, min_points=2):
-    """
-    Aggregate per-point features into a single representative feature vector
-    for a 3D mask segment, with lightweight outlier rejection.
+    """Aggregate per-point features into a single representative feature vector
 
+    for a 3D mask segment, with lightweight outlier rejection.
     The original implementation ran ``DBSCAN(metric='cosine')`` which is
     O(n²) in feature count and cannot use spatial indexing.  For the typical
     use-case – producing a single mean embedding per segment – a much cheaper
     approach suffices:
-
     1. Compute the global mean.
     2. Reject vectors whose cosine similarity to the mean is below a
-       threshold (conservative outlier removal).
+    threshold (conservative outlier removal).
     3. Return the mean of the inlier set.
-
     This drops complexity from O(n²) to O(n) while producing virtually
     identical output for the unimodal feature distributions that arise from
     a single 3D object segment.  Use ``use_dbscan=True`` to fall back to the
     original DBSCAN path if multi-modal filtering is required.
 
-    :param feats: (N, D) array of feature vectors.
-    :param eps: Unused (kept for API compatibility with callers).
-    :param min_points: Minimum inliers required; falls back to full mean if
-        fewer inliers pass the cosine threshold.
-    :return: (D,) representative feature vector.
-    """
+    Args:
+        feats: (N, D) array of feature vectors.
+        eps: Unused (kept for API compatibility with callers).
+        min_points: Minimum inliers required; falls back to full mean if
+    fewer inliers pass the cosine threshold.
+
+    Returns:
+        (D,) representative feature vector."""
     feats = np.array(feats)
     if feats.ndim == 1 or feats.shape[0] == 0:
         return feats
@@ -751,15 +668,16 @@ def feats_denoise_dbscan(feats, eps=0.02, min_points=2):
 
 
 def pcd_denoise_dbscan_vis(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10, visualize=True):
-    """
-    Denoise the point cloud using DBSCAN and visualize clustering results.
+    """Denoise the point cloud using DBSCAN and visualize clustering results.
 
-    :param pcd: Input point cloud.
-    :param eps: DBSCAN epsilon radius.
-    :param min_points: Minimum number of neighbors to form a cluster.
-    :param visualize: Whether to visualize clustering results.
-    :return: Denoised point cloud (largest cluster).
-    """
+    Args:
+        pcd: Input point cloud.
+        eps: DBSCAN epsilon radius.
+        min_points: Minimum number of neighbors to form a cluster.
+        visualize: Whether to visualize clustering results.
+
+    Returns:
+        Denoised point cloud (largest cluster)."""
     labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_points, print_progress=True))
 
     # Convert to numpy arrays
@@ -806,16 +724,17 @@ def pcd_denoise_dbscan_vis(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10
 
 
 def pcd_denoise_statistical(pcd, nb_neighbors=20, std_ratio=1.0, visualize=True):
-    """
-    Remove outliers using statistical outlier removal.
+    """Remove outliers using statistical outlier removal.
 
-    :param pcd: PointCloud object
-    :param nb_neighbors: Number of neighbors to analyze for each point
-    :param std_ratio: Points with distance larger than (mean + std_ratio * std)
-        will be considered outliers
-    :param visualize: Whether to visualize the result
-    :return: Denoised point cloud
-    """
+    Args:
+        pcd: PointCloud object
+        nb_neighbors: Number of neighbors to analyze for each point
+        std_ratio: Points with distance larger than (mean + std_ratio * std)
+    will be considered outliers
+        visualize: Whether to visualize the result
+
+    Returns:
+        Denoised point cloud"""
     cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
 
     inlier_cloud = pcd.select_by_index(ind)
@@ -832,16 +751,17 @@ def pcd_denoise_statistical(pcd, nb_neighbors=20, std_ratio=1.0, visualize=True)
 
 
 def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10):
-    """
-    Denoise the point cloud using DBSCAN.
+    """Denoise the point cloud using DBSCAN.
 
-    :param pcd: Point cloud to denoise.
-    :param eps: Maximum distance between two samples for one to be considered
-        as in the neighborhood of the other.
-    :param min_points: The number of samples in a neighborhood for a point to
-        be considered as a core point.
-    :return: Denoised point cloud.
-    """
+    Args:
+        pcd: Point cloud to denoise.
+        eps: Maximum distance between two samples for one to be considered
+    as in the neighborhood of the other.
+        min_points: The number of samples in a neighborhood for a point to
+    be considered as a core point.
+
+    Returns:
+        Denoised point cloud."""
     # Remove noise via clustering
     pcd_clusters = pcd.cluster_dbscan(
         eps=eps,
@@ -886,14 +806,15 @@ def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10):
 
 
 def compute_3d_bbox_iou(bbox1, bbox2, padding=0):
-    """
-    Compute 3D Intersection over Union (IoU) between two point clouds.
+    """Compute 3D Intersection over Union (IoU) between two point clouds.
 
-    :param pcd1 (open3d.geometry.PointCloud): Point cloud 1.
-    :param pcd2 (open3d.geometry.PointCloud): Point cloud 2.
-    :param padding (float): Padding to add to the bounding box.
-    :return: 3D IoU between 0 and 1.
-    """
+    Args:
+        pcd1: (open3d.geometry.PointCloud): Point cloud 1.
+        pcd2: (open3d.geometry.PointCloud): Point cloud 2.
+        padding: (float): Padding to add to the bounding box.
+
+    Returns:
+        3D IoU between 0 and 1."""
     # Get the coordinates of the first bounding box
     bbox1_min = np.asarray(bbox1.get_min_bound()) - padding
     bbox1_max = np.asarray(bbox1.get_max_bound()) + padding
@@ -921,30 +842,30 @@ def compute_3d_bbox_iou(bbox1, bbox2, padding=0):
 
 
 def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.05):
-    """
-    Merge the overlapped 3D masks in the list of masks using matrix.
+    """Merge the overlapped 3D masks in the list of masks using matrix.
 
-    :param mask_list (list): list of point clouds
-    :param overlap_threshold (float): threshold for overlapping ratio
-    :param radius (float): radius for faiss search
-    :param iou_thresh (float): threshold for iou
-    :return: merged point clouds and features.
+    Args:
+        mask_list: (list): list of point clouds
+        overlap_threshold: (float): threshold for overlapping ratio
+        radius: (float): radius for faiss search
+        iou_thresh: (float): threshold for iou
 
+    Returns:
+        merged point clouds and features.
     Performance notes
     -----------------
     * **Spatial grid pre-filter (#6)**: masks are bucketed into a coarse 3D
-      hash-grid before any pair-wise check.  Only masks sharing the same cell
-      or a direct neighbor cell (26-connectivity) are considered candidates.
-      This converts the O(N²) candidate-generation step into O(N·k) where k
-      is the average neighbour count, drastically pruning the pair list for
-      large scenes without affecting correctness.
+    hash-grid before any pair-wise check.  Only masks sharing the same cell
+    or a direct neighbor cell (26-connectivity) are considered candidates.
+    This converts the O(N²) candidate-generation step into O(N·k) where k
+    is the average neighbour count, drastically pruning the pair list for
+    large scenes without affecting correctness.
     * **FAISS index caching (#2)**: one index is built per mask and reused
-      across all pairs, eliminating O(N²) redundant index construction.
+    across all pairs, eliminating O(N²) redundant index construction.
     * **GPU FAISS (#4)**: when faiss-gpu is available the indices are placed
-      on GPU.  Because GPU FAISS is not thread-safe, the GPU path uses a
-      serial loop (GPU parallelism handles speedup internally via batched ops).
-      The CPU path retains the ThreadPoolExecutor to saturate CPU cores.
-    """
+    on GPU.  Because GPU FAISS is not thread-safe, the GPU path uses a
+    serial loop (GPU parallelism handles speedup internally via batched ops).
+    The CPU path retains the ThreadPoolExecutor to saturate CPU cores."""
     if not mask_list:
         return mask_list
 
@@ -1037,9 +958,13 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
             max_workers = min(os.cpu_count() or 4, len(candidate_pairs))
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
                 futures = {pool.submit(_compute_pair, i, j): (i, j) for i, j in candidate_pairs}
-                for future in as_completed(futures):
-                    i, j, ratio = future.result()
-                    overlap_matrix[i, j] = ratio
+                for future in as_completed(futures, timeout=300):
+                    try:
+                        i, j, ratio = future.result(timeout=10)
+                        overlap_matrix[i, j] = ratio
+                    except TimeoutError:
+                        i, j = futures[future]
+                        overlap_matrix[i, j] = 0.0
 
     # check if overlap_matrix is zero size
     if overlap_matrix.size == 0:
@@ -1058,15 +983,17 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
 
 
 def merge_adjacent_frames(frames_pcd, th, down_size, proxy_th):
-    """
-    Merge adjacent frames in the list of frames :param frames_pcd (list):
+    """Merge adjacent frames in the list of frames :param frames_pcd (list):
 
     list of point clouds
-    :param th (float): threshold for overlapping ratio
-    :param down_size (float): radius for downsampling
-    :param proxy_th (float): threshold for iou
-    :return: merged point clouds and features.
-    """
+
+    Args:
+        th: (float): threshold for overlapping ratio
+        down_size: (float): radius for downsampling
+        proxy_th: (float): threshold for iou
+
+    Returns:
+        merged point clouds and features."""
     new_frames_pcd = []
     for i in tqdm(range(0, len(frames_pcd), 2)):
         # if the number of frames is odd, the last frame is appended without
@@ -1088,15 +1015,20 @@ def merge_adjacent_frames(frames_pcd, th, down_size, proxy_th):
 
 
 def hierarchical_merge(frames_pcd, th, th_factor, down_size, proxy_th):
-    """
-    Hierarchical merge the frames in the list of frames :param frames_pcd
-    (list): list of point clouds :param th (float): threshold for overlapping
-    ratio :param th_factor (float): factor for decreasing the threshold :param
-    down_size (float): radius for downsampling :param proxy_th (float):
+    """Hierarchical merge the frames in the list of frames :param frames_pcd
 
+    (list): list of point clouds
+
+    Args:
+        th: (float): threshold for overlapping
+    ratio
+        th_factor: (float): factor for decreasing the threshold
+        down_size: (float): radius for downsampling
+        proxy_th: (float):
     threshold for iou
-    :return: merged point clouds and features.
-    """
+
+    Returns:
+        merged point clouds and features."""
     while len(frames_pcd) > 1:
         frames_pcd = merge_adjacent_frames(frames_pcd, th, down_size, proxy_th)
         if len(frames_pcd) > 1:
@@ -1112,23 +1044,42 @@ def hierarchical_merge(frames_pcd, th, th_factor, down_size, proxy_th):
 
 def seq_merge(frames_pcd, th, down_size, proxy_th):
     """Merge the frames in the list of frames sequentially :param frames_pcd
-    (list): list of point clouds :param th (float): threshold for overlapping
-    ratio :param down_size (float): radius for downsampling :param proxy_th
-    (float): threshold for iou :return: merged point clouds and features."""
 
-    global_masks = frames_pcd[0]
-    for i in tqdm(range(1, len(frames_pcd))):
-        mask_list = global_masks + frames_pcd[i]
-        merged_mask_list = merge_3d_masks(
+    (list): list of point clouds
+
+    Args:
+        th: (float): threshold for overlapping
+    ratio
+        down_size: (float): radius for downsampling
+        proxy_th: (float): threshold for iou
+
+    Returns:
+        merged point clouds and features."""
+
+    # Pre-merge masks within each frame to reduce re-processing
+    print("Pre-merging masks within each frame...")
+    merged_frames = [
+        merge_3d_masks(
+            frame,
+            overlap_threshold=th,
+            radius=down_size,
+            iou_thresh=proxy_th,
+        )
+        for frame in frames_pcd
+    ]
+
+    # Incrementally merge frames across time without re-processing previous merged frames
+    global_masks = merged_frames[0]
+
+    print("Merging frames sequentially...")
+    for i in tqdm(range(1, len(merged_frames))):
+        # Only merge current merged frame with accumulated result, don't re-merge accumulated
+        mask_list = global_masks + merged_frames[i]
+        global_masks = merge_3d_masks(
             mask_list,
             overlap_threshold=th,
             radius=down_size,
             iou_thresh=proxy_th,
         )
-        global_masks = merged_mask_list
 
-    # apply one more merge
-    global_masks = merge_3d_masks(
-        global_masks, overlap_threshold=th, radius=down_size, iou_thresh=proxy_th
-    )
     return global_masks

@@ -1,49 +1,37 @@
-"""
-LICENSE.
+"""LICENSE.
 
 This project as a whole is licensed under the Apache License, Version 2.0.
-
 THIRD-PARTY LICENSES
-
 Third-party software already included in HoloAgent is governed by the separate
 Open Source license terms under which the third-party software has been
 distributed.
-
 NOTICE ON LICENSE COMPATIBILITY FOR DISTRIBUTORS
-
 Notably, this project depends on the third-party software FAST-LIVO2 and HOVSG.
 Their default licenses restrict commercial use—separate permission from their
 original authors is required for commercial integration/redistribution.
-
 The third-party software FAST-LIVO2 dependency (licensed under GPL-2.0-only)
 utilizes rpg_vikit-ros2 which contains components under the GPL-3.0. Please be
 aware of license compatibility when distributing a combined work.
-
 DISCLAIMER
-
 Users are solely responsible for ensuring compliance with all applicable
 license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
-use.
-"""
+use."""
 
 # pylint: disable=E,W,R,F
-"""
-semantic_scene_reconstruction_unified.
+"""semantic_scene_reconstruction_unified.
 
 Performs semantic scene reconstruction and builds a Hierarchical Multimodal Scene Graph (HMSG)
 for different scenes based on the provided configuration.
 The script loads configuration via Hydra, creates a `Graph` instance,
 generates and saves the feature map, point cloud, masked point clouds, and feature files,
 then calls the graph construction pipeline to write results to disk.
-
 Notes
 -----
 - Depends on `hmsg.graph.graph.Graph` and the corresponding configuration files under `config/`.
 - Creates and writes to the output directory on disk at runtime (has side effects).
 - A different configuration file can be specified via command-line arguments, e.g.:
-  python semantic_scene_reconstruction_unified.py --config-name=semantic_scene_reconstruction_ic3f
-"""
+python semantic_scene_reconstruction_unified.py --config-name=semantic_scene_reconstruction_ic3f"""
 
 
 import os
@@ -126,12 +114,10 @@ def run_scene_reconstruction(params: DictConfig):
     config_name="semantic_scene_reconstruction_ic4f",
 )  # Default: use ic4f config
 def main(params: DictConfig):
-    """
-    Main function that loads configuration via Hydra and runs scene reconstruction.
+    """Main function that loads configuration via Hydra and runs scene reconstruction.
 
-    A different config file can be specified via command-line arguments, e.g.:
-    python semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_sh3f
-    """
+A different config file can be specified via command-line arguments, e.g.:
+python semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_sh3f"""
     run_scene_reconstruction(params)
 
 

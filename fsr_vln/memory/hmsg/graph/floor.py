@@ -8,12 +8,11 @@ import open3d as o3d
 
 
 class Floor:
-    """
-    Class to represent a floor in a building.
+    """Class to represent a floor in a building.
 
-    :param floor_id: Unique identifier for the floor
-    :param name: Name of the floor (e.g., "First", "Second")
-    """
+    Args:
+        floor_id: Unique identifier for the floor
+        name: Name of the floor (e.g., "First", "Second")"""
 
     def __init__(self, floor_id, name=None):
         self.floor_id = floor_id  # Unique identifier for the floor
@@ -27,11 +26,13 @@ class Floor:
 
     def add_room(self, room):
         """Method to add rooms to the floor :param room: Room object to be
+
         added to the floor."""
         self.rooms.append(room)  # Method to add rooms to the floor
 
     def save(self, path):
         """Save the floor in folder as ply for the point cloud and json for the
+
         metadata."""
         # save the point cloud
         o3d.io.write_point_cloud(os.path.join(path, str(self.floor_id) + ".ply"), self.pcd)
@@ -49,6 +50,7 @@ class Floor:
 
     def load(self, path):
         """Load the floor from folder as ply for the point cloud and json for
+
         the metadata."""
         # load the point cloud
         self.pcd = o3d.io.read_point_cloud(path + "/" + str(self.floor_id) + ".ply")

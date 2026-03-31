@@ -26,7 +26,10 @@ def create_llm_client(provider: str = None):
 
     The returned client exposes the same ``client.chat.completions.create``
     interface regardless of the backend, making it trivial to switch.
-    """
+
+    Returns:
+        ed client exposes the same ``client.chat.completions.create``
+    interface regardless of the backend, making it trivial to switch."""
     if provider is None:
         provider = os.environ.get("LLM_PROVIDER", "ollama")
 
@@ -61,12 +64,11 @@ def infer_floor_id_from_query(floor_ids: List[int], query: str) -> int:
 
     openai_key = os.environ["OPENAI_KEY"]
     openai.api_key = openai_key
-    question = f"""
-You are a floor detector. You can infer the floor number based on a query.
+    question = f"""You are a floor detector. You can infer the floor number based on a query.
+
 The query is: {query}.
 The floor number list is: {floor_ids_str}.
-Please answer the floor number in one integer.
-    """
+Please answer the floor number in one integer."""
     print(question)
     response = openai.Completion.create(
         engine="gpt-3.5-turbo-instruct",
@@ -112,8 +114,7 @@ def infer_room_type_from_object_list_chat(
     # print(f"Objects list: {objects}")
     print(f"Room types: {room_types}")
 
-    question = """
-    """
+    question = """"""
     print(question)
     response = client.chat.completions.create(
         model=gpt_model,
@@ -152,8 +153,7 @@ def infer_room_type_from_object_list_chat(
 
 class Conversation:
     def __init__(self, messages: List[dict], include_env_messages: bool = False) -> None:
-        """
-        An interface to OPENAI chat API.
+        """An interface to OPENAI chat API.
 
         Args:
             messages (List[dict]): The list of messages to be sent to the chat API
@@ -191,10 +191,6 @@ def send_query_cached(client, messages: list, model: str, temperature: float):
 
 
 def send_query(client, messages: list, model: str, temperature: float):
-    # if temperature == 0.0:
-    #     hashable_messages = tuple(tuple(m.items()) for m in messages)
-    #     return send_query_cached(client, messages=hashable_messages, model=model, temperature=temperature)
-    # else:
     return client.chat.completions.create(
         model=model,
         messages=messages,
@@ -203,10 +199,9 @@ def send_query(client, messages: list, model: str, temperature: float):
 
 
 def parse_hier_query(params, instruction: str) -> Tuple[str, str, str]:
-    """
-    Parse long language query into a list of short queries at floor, room, and object level
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
-    """
+    """Parse long language query into a list of short queries at floor, room, and object level
+
+    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
 
     client, gpt_model = create_llm_client()
 
@@ -261,29 +256,16 @@ def parse_hier_query(params, instruction: str) -> Tuple[str, str, str]:
     print("floor, room, object:", floor, room, obj)
     return (floor, room, obj)
 
-    # if set(params.main.long_query.spec) == {"floor", "room", "obj"}:
-    #     print("floor, room, object:", result)
-    #     return [x.strip() for x in result.split(",")]
-    # elif set(params.main.long_query.spec) == {"room", "obj"}:
-    #     print("floor, room, object:", None, result)
-    #     return [None, result.split(",")[0].strip(), result.split(",")[1].strip()]
-    # elif set(params.main.long_query.spec) == {"floor", "obj"}:
-    #     print("floor, room, object:", result.split(",")[0], None, result.split(",")[1])
-    # return [result.split(",")[0].strip(), None,
-    # result.split(",")[1].strip()]
-
 
 def generate_clip_probes(self, instruction):
 
-    prompt = f"""
-    You are an AI assistant for visual navigation.
-    Given a navigation instruction, extract the main target object(s) mentioned or implied.
-    If the instruction does not explicitly mention an object, infer the most likely target object(s) based on common sense and the user's intent.
-    Generate a diverse bullet list of English phrases for CLIP-based image retrieval, including synonyms and descriptive variants.
-    If no clear object is mentioned, output an empty list.
+    prompt = f"""You are an AI assistant for visual navigation.
 
-    Instruction: {instruction}
-    """
+Given a navigation instruction, extract the main target object(s) mentioned or implied.
+If the instruction does not explicitly mention an object, infer the most likely target object(s) based on common sense and the user's intent.
+Generate a diverse bullet list of English phrases for CLIP-based image retrieval, including synonyms and descriptive variants.
+If no clear object is mentioned, output an empty list.
+Instruction: {instruction}"""
     response_flag = False
     while not response_flag:
         try:
@@ -316,10 +298,9 @@ def generate_clip_probes(self, instruction):
 
 
 def parse_hier_query_use_prompt_insentence_parse(params, instruction: str) -> Tuple[str, str, str]:
-    """
-    Parse long language query into a list of short queries at floor, room, and object level
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
-    """
+    """Parse long language query into a list of short queries at floor, room, and object level
+
+    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
 
     client, gpt_model = create_llm_client()
 
@@ -353,7 +334,6 @@ def parse_hier_query_use_prompt_insentence_parse(params, instruction: str) -> Tu
     response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
     raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
     print("raw_result:", raw_result)
-    # import pdb; pdb.set_trace()
     # Split safely
     spec = set(params.main.long_query.spec)
     parts = [x.strip() for x in raw_result.split(",")]
@@ -377,10 +357,9 @@ def parse_hier_query_use_prompt_insentence_parse(params, instruction: str) -> Tu
 def parse_hier_query_use_prompt_insentence_parse_icra(
     params, instruction: str
 ) -> Tuple[str, str, str]:
-    """
-    Parse long language query into a list of short queries at floor, room, and object level
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
-    """
+    """Parse long language query into a list of short queries at floor, room, and object level
+
+    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
     client, gpt_model = create_llm_client()
 
     # Depending on the query spec, parse the query differently:
@@ -400,23 +379,6 @@ def parse_hier_query_use_prompt_insentence_parse_icra(
         # return directly and not use the LLM for parsing
         print("floor, room, object:", None, None, instruction)
         return [None, None, instruction.strip()]
-
-    # if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
-    #     system_prompt = "You are a query parser. Your task is to parse a sentence into floor, room, and object. If only a room or object can be parsed, leave the other field empty. All descriptions must be in English."
-    #     prompt = f"Please parse the following sentence: {instruction}"
-    #     prompt += "Output format: a comma-separated list in the order of floor, room, and object. Example: [Floor 1, Horizon Exhibition Hall, sofa]"
-    # elif set(params.main.long_query.spec) == {"obj", "room"}:
-    #     system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into room and object."
-    #     prompt = f"Please parse the following sentence: {instruction}"
-    #     prompt += "Output format: a comma-separated list in the order of room and object. Example: [living room, sofa]"
-    # elif set(params.main.long_query.spec) == {"obj", "floor"}:
-    #     system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into floor and object."
-    #     prompt = f"Please parse the following sentence: {instruction}"
-    #     prompt += "Output format: a comma-separated list in the order of floor and object. Example: [Floor 1, sofa]"
-    # elif set(params.main.long_query.spec) == {"obj"}:
-    #     # return directly and not use the LLM for parsing
-    #     print("floor, room, object:", None, None, instruction)
-    #     return [None, None, instruction.strip()]
 
     conversation = Conversation(
         messages=[
@@ -449,10 +411,9 @@ def parse_hier_query_use_prompt_insentence_parse_icra(
 
 
 def parse_floor_room_object_gpt35(instruction: str) -> Tuple[str, str, str]:
-    """
-    Parse long language query into a list of short queries at floor, room, and object level
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
-    """
+    """Parse long language query into a list of short queries at floor, room, and object level
+
+    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
 
     client, gpt_model = create_llm_client()
     response = client.chat.completions.create(
@@ -524,10 +485,9 @@ def parse_floor_room_object_gpt35(instruction: str) -> Tuple[str, str, str]:
 
 
 def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:
-    """
-    Parse long language query into a list of short queries at floor, room, and object level
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")
-    """
+    """Parse long language query into a list of short queries at floor, room, and object level
+
+    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
 
     client, gpt_model = create_llm_client()
 

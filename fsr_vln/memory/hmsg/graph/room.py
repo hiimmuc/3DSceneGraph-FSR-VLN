@@ -15,13 +15,12 @@ from memory.hmsg.utils.graph_utils import (
 
 
 class Room:
-    """
-    Class to represent a room in a building.
+    """Class to represent a room in a building.
 
-    :param room_id: Unique identifier for the room
-    :param floor_id: Identifier of the floor this room belongs to
-    :param name: Name of the room (e.g., "Living Room", "Bedroom")
-    """
+    Args:
+        room_id: Unique identifier for the room
+        floor_id: Identifier of the floor this room belongs to
+        name: Name of the room (e.g., "Living Room", "Bedroom")"""
 
     def __init__(self, room_id, floor_id, name=None):
         self.room_id = room_id  # Unique identifier for the room
@@ -43,11 +42,13 @@ class Room:
 
     def add_object(self, objectt):
         """Method to add objects to the room :param objectt: Object object to
+
         be added to the room."""
         self.objects.append(objectt)  # Method to add objects to the room
 
     def add_view(self, viewv):
         """Method to add views to the room :param viewv: View object to be
+
         added to the room."""
         self.views.append(viewv)
 
@@ -58,11 +59,9 @@ class Room:
             )
         )
 
-    # def frameId2imgPath(self):
-    #     pass
-
     def merge_objects(self, overlap_threshold=0.01, radius=0.1):
         """Merge objects that are close to each other and have the same
+
         name."""
         # for every object in the room with the same name, calculate the overlap between them
         # if the overlap is more than the threshold, merge them
@@ -158,16 +157,11 @@ class Room:
         )
         embeddings = np.array(self.embeddings)
         sim_mat = np.dot(embeddings, text_feats.T)
-        # sim_mat = compute_similarity(embeddings, text_feats)
-        # print(sim_mat)
         col_ids = np.argmax(sim_mat, axis=1)
-        # votes = [default_room_types[i] for i in col_ids]  # unused variable removed
-        # print(f"the votes are: {votes}")
         unique, counts = np.unique(col_ids, return_counts=True)
         unique_id = np.argmax(counts)
         type_id = unique[unique_id]
         self.name = default_room_types[type_id]
-        # print(f"The room view ids are {self.represent_images}")
         print(f"The room type is {default_room_types[type_id]}")
         return default_room_types[type_id]
 
@@ -195,8 +189,6 @@ class Room:
             "name" : infer room type from the name of objects in the room
             "llm" : use LLM to compare room_text with default_room_types text similarity to infer room type
         """
-        # import sys
-        # sys.path.append("/mnt/disk2/hovsg/HOV-SG/hmsg/utils")
         from memory.hmsg.utils.llm_utils import infer_room_type_from_object_list_chat
 
         # use similarity of object text feature and room text feature
@@ -266,8 +258,6 @@ class Room:
             "label" : infer room type from the name of objects in the room
             "obj_embedding" : infer room type from the embeddings of objects in the room
         """
-        # import sys
-        # sys.path.append("/mnt/disk2/hovsg/HOV-SG/hmsg/utils")
         from memory.hmsg.utils.llm_utils import infer_room_type_from_object_list_chat
 
         # use similarity of object text feature and room text feature
@@ -313,6 +303,7 @@ class Room:
 
     def save(self, path):
         """Save the room in folder as ply for the point cloud and json for the
+
         metadata."""
         # save the point cloud
         o3d.io.write_point_cloud(os.path.join(path, str(self.room_id) + ".ply"), self.pcd)
@@ -336,6 +327,7 @@ class Room:
 
     def load(self, path):
         """Load the room from folder as ply for the point cloud and json for
+
         the metadata."""
         # load the point cloud
         self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.room_id) + ".ply"))
@@ -354,6 +346,7 @@ class Room:
 
     def load_new(self, path):
         """Load the room from folder as ply for the point cloud and json for
+
         the metadata."""
         # load the point cloud
         self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.room_id) + ".ply"))

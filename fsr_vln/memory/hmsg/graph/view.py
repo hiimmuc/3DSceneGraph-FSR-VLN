@@ -1,31 +1,22 @@
-"""
-LICENSE.
+"""LICENSE.
 
 This project as a whole is licensed under the Apache License, Version 2.0.
-
 THIRD-PARTY LICENSES
-
 Third-party software already included in HoloAgent is governed by the separate
 Open Source license terms under which the third-party software has been
 distributed.
-
 NOTICE ON LICENSE COMPATIBILITY FOR DISTRIBUTORS
-
 Notably, this project depends on the third-party software FAST-LIVO2 and HOVSG.
 Their default licenses restrict commercial use—separate permission from their
 original authors is required for commercial integration/redistribution.
-
 The third-party software FAST-LIVO2 dependency (licensed under GPL-2.0-only)
 utilizes rpg_vikit-ros2 which contains components under the GPL-3.0. Please be
 aware of license compatibility when distributing a combined work.
-
 DISCLAIMER
-
 Users are solely responsible for ensuring compliance with all applicable
 license terms when using, modifying, or distributing the project. Project
 maintainers accept no liability for any license violations arising from such
-use.
-"""
+use."""
 
 """Class to represent a view in a HMSG."""
 
@@ -37,12 +28,11 @@ import numpy as np
 
 
 class View:
-    """
-    Class to represent a View/image in room.
+    """Class to represent a View/image in room.
 
-    :param view_id: Unique identifier for the view
-    :param name: Name of the floor (e.g., "First", "Second")
-    """
+    Args:
+        view_id: Unique identifier for the view
+        name: Name of the floor (e.g., "First", "Second")"""
 
     def __init__(self, view_id, room_id, img_id, name=None):
         self.view_id = view_id  # Unique identifier for the view
@@ -53,11 +43,10 @@ class View:
         self.img_path = None  # image path of the view in dataset
         self.embedding = None  # CLIP Embedding of the view
         self.text_discription = []
-        # self.clip_embedding = []  # List of tensors of visual embedd
-        # self.txt_descriptions = []  # List of text descriptions of the view
 
     def add_object(self, objectt_id):
         """Method to add objects to the room :param objectt: Object object to
+
         be added to the room."""
         self.object_ids.append(objectt_id)  # Method to add objects to the view
 
@@ -76,29 +65,9 @@ class View:
         ) as outfile:
             json.dump(metadata, outfile)
 
-    # def save(self, path):
-    #     """
-    #     Save the floor in folder as ply for the point cloud
-    #     and json for the metadata
-    #     """
-    #     # save the point cloud
-    #     # o3d.io.write_point_cloud(os.path.join(path, str(self.floor_id) + ".ply"), self.pcd)
-    #     # save the metadata
-    #     metadata = {
-    #         "view_id": self.view_id,
-    #         "room_id": self.room_id,
-    #         "img_id": self.img_id,
-    #         "object_ids": self.object_ids,
-    #         "img_path": self.img_path,
-    #         # "embedding": self.embedding,
-    #         # "name": self.name,
-    #         "text_discription": self.text_discription,
-    #     }
-    #     with open(os.path.join(path, str(self.view_id) + ".json"), "w") as outfile:
-    #         json.dump(metadata, outfile)
-
     def load(self, path):
         """Load the floor from folder as ply for the point cloud and json for
+
         the metadata."""
         # load the metadata
         with open(path + "/" + str(self.view_id) + ".json", "r", encoding="utf-8") as json_file:
@@ -107,8 +76,6 @@ class View:
             self.img_id = metadata["img_id"]
             self.img_path = metadata["img_path"]
             self.object_ids = metadata["object_ids"]
-            # self.embeddings = np.asarray(metadata["embedding"])
-            # self.name = metadata["name"]
             self.text_discription = metadata["text_discription"]
 
     def __str__(self):

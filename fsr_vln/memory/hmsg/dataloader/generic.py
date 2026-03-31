@@ -7,20 +7,17 @@ from torch.utils.data import Dataset
 
 
 class RGBDDataset(Dataset, ABC):
-    """
-    Abstract class for RGBD datasets.
+    """Abstract class for RGBD datasets.
 
     This class provides a base structure for loading RGBD datasets. Subclasses
-    need to implement the abstract methods to handle specific dataset formats.
-    """
+    need to implement the abstract methods to handle specific dataset formats."""
 
     def __init__(self, cfg):
-        """
-        Args:
-            root_dir: Path to the root directory containing the dataset.
-            mode: "train", "val", or "test" depending on the data split.
-            transforms: Optional transformations to apply to the data.
-        """
+        """Args:
+
+        root_dir: Path to the root directory containing the dataset.
+        mode: "train", "val", or "test" depending on the data split.
+        transforms: Optional transformations to apply to the data."""
         self.root_dir = cfg["root_dir"]
         self.transforms = cfg["transforms"]
         self.depth_cut = cfg["depth_cut"]
@@ -32,6 +29,7 @@ class RGBDDataset(Dataset, ABC):
     @abstractmethod
     def _get_data_list(self):
         """This method should be implemented by subclasses to define how to get
+
         a list of data samples (RGB and depth image paths) based on the dataset
         format and mode (train, val, test)."""
         pass
@@ -45,44 +43,51 @@ class RGBDDataset(Dataset, ABC):
 
     def _load_image(self, path):
         """This method should be implemented by subclasses to load the RGB
+
         image based on the dataset format (e.g., OpenCV, PIL)."""
         pass
 
     def _load_depth(self, path):
         """This method should be implemented by subclasses to load the depth
+
         image based on the dataset format (e.g., OpenCV, PIL)."""
         pass
 
     def _load_pose(self, path):
         """This method should be implemented by subclasses to load the camera
+
         pose based on the dataset format."""
         pass
 
     def _load_rgb_intrinsics(self, path):
         """This method should be implemented by subclasses to load the RGB
+
         camera intrinsics based on the dataset format."""
         pass
 
     def _load_depth_intrinsics(self, path):
         """This method should be implemented by subclasses to load the depth
+
         camera intrinsics based on the dataset format."""
         pass
 
     def create_pcd(
         self, rgb, depth, camera_pose=None, idx=None, mask_img=False, filter_distance=np.inf
     ):
-        """
-        Create Open3D point cloud from RGB and depth images, and camera pose.
+        """Create Open3D point cloud from RGB and depth images, and camera pose.
 
         filter_distance is used to filter out points that are further than a
         certain distance.
-        :param rgb (pil image): RGB image
-        :param depth (pil image): Depth image
-        :param camera_pose (np.array): Camera pose
-        :param mask_img (bool): Mask image
-        :param filter_distance (float): Filter distance
-        :return: Open3D point cloud
-        """
+
+        Args:
+            rgb: (pil image): RGB image
+            depth: (pil image): Depth image
+            camera_pose: (np.array): Camera pose
+            mask_img: (bool): Mask image
+            filter_distance: (float): Filter distance
+
+        Returns:
+            Open3D point cloud"""
         # convert rgb and depth images to numpy arrays
         rgb = np.array(rgb).astype(np.uint8)
         depth = np.array(depth)
