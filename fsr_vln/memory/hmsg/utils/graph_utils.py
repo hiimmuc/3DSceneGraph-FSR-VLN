@@ -406,14 +406,14 @@ def map_grid_to_point_cloud(occupancy_grid_map, resolution, point_cloud):
     return mapped_point_cloud
 
 
-def distance_transform(occupancy_map, reselotion, tmp_path):
+def distance_transform(occupancy_map, resolution, tmp_path):
     """Perform distance transform on the occupancy map to find the distance of
 
     each cell to the nearest occupied cell.
 
     Args:
         occupancy_map: 2D numpy array representing the occupancy map.
-        reselotion: The resolution of each cell in the grid map in meters.
+        resolution: The resolution of each cell in the grid map in meters.
         path: The path to save the distance transform image.
 
     Returns:
@@ -460,7 +460,7 @@ def distance_transform(occupancy_map, reselotion, tmp_path):
 
     # remove small seed contours
     min_area_m = 0.5
-    min_area = (min_area_m / reselotion) ** 2
+    min_area = (min_area_m / resolution) ** 2
     print("min_area: ", min_area)
     contours = [c for c in contours if cv2.contourArea(c) > min_area]
     print("number of contours after remove small seeds: ", len(contours))
@@ -972,6 +972,7 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
     graph = overlap_matrix > overlap_threshold
     n_components, component_labels = connected_components(graph)
     component_indices = [np.where(component_labels == k)[0] for k in range(n_components)]
+
     # merge the masks in each component
     pcd_list_merged = []
     for indices in component_indices:
@@ -1057,7 +1058,6 @@ def seq_merge(frames_pcd, th, down_size, proxy_th):
         merged point clouds and features."""
 
     # Pre-merge masks within each frame to reduce re-processing
-    print("Pre-merging masks within each frame...")
     merged_frames = [
         merge_3d_masks(
             frame,
@@ -1071,7 +1071,6 @@ def seq_merge(frames_pcd, th, down_size, proxy_th):
     # Incrementally merge frames across time without re-processing previous merged frames
     global_masks = merged_frames[0]
 
-    print("Merging frames sequentially...")
     for i in tqdm(range(1, len(merged_frames))):
         # Only merge current merged frame with accumulated result, don't re-merge accumulated
         mask_list = global_masks + merged_frames[i]
