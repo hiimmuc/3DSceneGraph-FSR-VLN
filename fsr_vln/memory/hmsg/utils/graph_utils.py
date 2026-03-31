@@ -1,6 +1,7 @@
 import os
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Union
 
@@ -45,65 +46,118 @@ def _make_faiss_index(dim: int, pts: np.ndarray = None) -> faiss.Index:
         pts: Optional float32 array of shape (N, dim) to add immediately.
 
     Returns:
-        A populated (or empty) FAISS index on GPU or CPU."""
-    cpu_index = faiss.IndexFlatL2(dim)
-    if pts is not None and len(pts) > 0:
-        cpu_index.add(pts)
-    if _FAISS_GPU_RES is not None:
-        try:
-            gpu_index = faiss.index_cpu_to_gpu(_FAISS_GPU_RES, 0, cpu_index)
-            return gpu_index
-        except Exception:
-            pass  # Fall through to CPU index on any GPU error
-    return cpu_index
+        A populated (or empty) FAISS index on GPU or CPU.
 
-
-def visualize_pcd_on_image(obj_pcd, img, camera_matrix, pose, save_path, color=(0, 0, 255)):
+    Raises:
+        ValueError: If pts.shape[1] != dim or if index creation fails.
     """
-    Project a 3D point cloud onto a 2D image, save the visualization, and return the mean object distance.
+    if pts is not None and pts.shape[1] != dim:
+        raise ValueError(f"Points dimension {pts.shape[1]} != index dimension {dim}")
+
+    try:
+        cpu_index = faiss.IndexFlatL2(dim)
+        if pts is not None and len(pts) > 0:
+            cpu_index.add(pts)
+
+        if _FAISS_GPU_RES is not None:
+            try:
+                gpu_index = faiss.index_cpu_to_gpu(_FAISS_GPU_RES, 0, cpu_index)
+                return gpu_index
+            except RuntimeError:
+                # GPU transfer failed, fall back to CPU
+                pass
+
+        return cpu_index
+    except Exception as e:
+        raise RuntimeError(f"Failed to create FAISS index: {e}") from e
+
+
+def _project_points_to_camera(
+    points_world: np.ndarray, pose_world_to_cam: np.ndarray, near_clip: float = 0.01
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Transform points from world to camera coordinates and filter behind camera.
 
     Args:
-        obj_pcd: Open3D PointCloud object (object point cloud)
-        img: numpy.ndarray (H, W, 3), original image
-        camera_matrix: numpy.ndarray (3, 3), camera intrinsic matrix
-        pose: numpy.ndarray (4, 4), camera pose matrix (world-to-camera transform)
-        save_path: str, output save path
-        color: tuple(B, G, R), color used for drawing points
+        points_world: (N, 3) array of points in world coordinates.
+        pose_world_to_cam: (4, 4) transformation matrix from world to camera.
+        near_clip: Z-coordinate threshold; points with z <= near_clip are filtered.
 
     Returns:
-        avg_distance: float, mean distance of the object in camera coordinates (meters)
+        Tuple of (valid_points_cam, valid_mask):
+            - valid_points_cam: (M, 3) points in camera coordinates (z > near_clip)
+            - valid_mask: (N,) boolean mask indicating valid points
     """
-    # Extract point cloud coordinates (N, 3)
-    pts = np.asarray(obj_pcd.points)  # point cloud in world coordinates
-    if pts.shape[0] == 0:
-        print("Warning: Empty point cloud provided.")
-        return None
+    if points_world.shape[0] == 0:
+        return np.empty((0, 3)), np.array([], dtype=bool)
 
-    # Convert to homogeneous coordinates (N, 4)
-    pts_h = np.hstack((pts, np.ones((pts.shape[0], 1))))
+    # World -> camera coordinates
+    pts_h = np.hstack((points_world, np.ones((points_world.shape[0], 1))))
+    pts_cam = (pose_world_to_cam @ pts_h.T).T[:, :3]
 
-    # World coordinates -> camera coordinates
-    pts_cam = (pose @ pts_h.T).T[:, :3]  # (N, 3)
+    # Filter points in front of camera
+    valid_mask = pts_cam[:, 2] > near_clip
 
-    # Filter out points with Z <= 0 (behind the camera)
-    valid_mask = pts_cam[:, 2] > 0
-    pts_cam = pts_cam[valid_mask]
+    return pts_cam[valid_mask], valid_mask
+
+
+def _project_points_to_image(points_cam: np.ndarray, camera_matrix: np.ndarray) -> np.ndarray:
+    """Project camera-space points to image coordinates.
+
+    Args:
+        points_cam: (N, 3) points in camera coordinates.
+        camera_matrix: (3, 3) camera intrinsic matrix.
+
+    Returns:
+        (N, 2) array of (u, v) pixel coordinates.
+    """
+    if points_cam.shape[0] == 0:
+        return np.empty((0, 2))
+
+    uv_h = (camera_matrix @ points_cam.T).T
+    uv = uv_h[:, :2] / uv_h[:, 2:3]
+
+    return uv
+
+
+def visualize_pcd_on_image(
+    obj_pcd: o3d.geometry.PointCloud,
+    img: np.ndarray,
+    camera_matrix: np.ndarray,
+    pose: np.ndarray,
+    save_path: str,
+    color: Tuple[int, int, int] = (0, 0, 255),
+) -> float:
+    """Project a 3D point cloud onto a 2D image, save the visualization, and return the mean object distance.
+
+    Args:
+        obj_pcd: Open3D PointCloud object (object point cloud).
+        img: Image array (H, W, 3).
+        camera_matrix: Camera intrinsic matrix (3, 3).
+        pose: Camera pose matrix - world-to-camera transform (4, 4).
+        save_path: Output save path.
+        color: Color for points as (B, G, R) tuple.
+
+    Returns:
+        avg_distance: Mean distance of visible points in camera coordinates (meters),
+                      or None if no valid points.
+    """
+    pts = np.asarray(obj_pcd.points, dtype=np.float32)
+
+    # Project to camera coordinates
+    pts_cam, valid_mask_all = _project_points_to_camera(pts, pose)
 
     if pts_cam.shape[0] == 0:
         print("Warning: No valid points in front of camera.")
         return None
 
-    # Calculate mean depth (Z direction)
+    # Project to image coordinates
+    uv = _project_points_to_image(pts_cam, camera_matrix)
+
+    # Calculate mean depth
     avg_distance = float(np.mean(pts_cam[:, 2]))
 
-    # Camera coordinates -> pixel coordinates
-    uv = (camera_matrix @ pts_cam.T).T  # (N, 3)
-    uv = uv[:, :2] / uv[:, 2:]  # divide by z to get pixel coordinates
-
-    # Copy image for drawing
+    # Visualize
     img_vis = img.copy()
-
-    # Draw projected points
     for u, v in uv.astype(int):
         if 0 <= u < img_vis.shape[1] and 0 <= v < img_vis.shape[0]:
             cv2.circle(img_vis, (u, v), 2, color, -1)
@@ -111,23 +165,21 @@ def visualize_pcd_on_image(obj_pcd, img, camera_matrix, pose, save_path, color=(
     # Save result
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     cv2.imwrite(save_path, img_vis)
-    # cv2.imshow("Projected PCD on Image", img_vis)
-    # cv2.waitKey(10)
     print(f"Projected PCD visualization saved at {save_path}, avg_distance = {avg_distance:.3f}m")
 
     return avg_distance
 
 
 def check_object_in_view(
-    img_w,
-    img_h,
-    camera_matrix,
-    cam_pose_inv,
-    obj_points,
-    min_visible_ratio=0.5,
-    max_depth=10.0,
-    return_depth=False,
-):
+    img_w: int,
+    img_h: int,
+    camera_matrix: np.ndarray,
+    cam_pose_inv: np.ndarray,
+    obj_points: np.ndarray,
+    min_visible_ratio: float = 0.5,
+    max_depth: float = 10.0,
+    return_depth: bool = False,
+) -> Union[bool, Tuple[bool, float]]:
     """
     Check whether an object point cloud is within the camera's field of view and has a mean depth below max_depth.
 
@@ -139,50 +191,46 @@ def check_object_in_view(
         obj_points (numpy.ndarray): object point cloud (N x 3)
         min_visible_ratio (float): minimum fraction of points that must be visible to count as in-view
         max_depth (float): mean depth threshold (meters)
+        return_depth (bool): whether to return (bool, depth) tuple or just bool
 
     Returns:
-        bool: True if the object is in view and mean depth is below max_depth, otherwise False
+        If return_depth=True: (visible, mean_depth) tuple
+        If return_depth=False: visibility boolean
     """
 
     if obj_points.shape[0] == 0:
         return (False, np.inf) if return_depth else False
 
-    # ---- 1. World -> camera coordinates ----
-    ones = np.ones((obj_points.shape[0], 1))
-    obj_points_h = np.hstack([obj_points, ones])  # (N,4)
-    obj_points_cam = (cam_pose_inv @ obj_points_h.T).T[:, :3]  # (N,3)
+    # Project to camera coordinates
+    pts_cam, _ = _project_points_to_camera(obj_points, cam_pose_inv)
 
-    # ---- 2. Keep only points in front of the camera ----
-    obj_points_cam = obj_points_cam[obj_points_cam[:, 2] > 0]
-    if obj_points_cam.shape[0] == 0:
+    if pts_cam.shape[0] == 0:
         return (False, np.inf) if return_depth else False
 
-    # ---- 3. Project to image coordinates ----
-    pixels_h = (camera_matrix @ obj_points_cam.T).T  # (N,3)
-    pixels = pixels_h[:, :2] / pixels_h[:, 2:3]  # (u,v)
+    # Project to image coordinates
+    uv = _project_points_to_image(pts_cam, camera_matrix)
 
-    # ---- 4. Check if points fall within the image bounds ----
-    inside_mask = (
-        (pixels[:, 0] >= 0) & (pixels[:, 0] < img_w) & (pixels[:, 1] >= 0) & (pixels[:, 1] < img_h)
-    )
+    # Check if points fall within image bounds
+    inside_mask = (uv[:, 0] >= 0) & (uv[:, 0] < img_w) & (uv[:, 1] >= 0) & (uv[:, 1] < img_h)
 
     if not np.any(inside_mask):
         return (False, np.inf) if return_depth else False
 
     visible_ratio = np.sum(inside_mask) / obj_points.shape[0]
-
     if visible_ratio < min_visible_ratio:
         return (False, np.inf) if return_depth else False
 
-    # ---- 5. Depth constraint ----
-    mean_depth = np.mean(obj_points_cam[inside_mask, 2]) if np.any(inside_mask) else np.inf
+    # Check depth constraint
+    mean_depth = np.mean(pts_cam[inside_mask, 2]) if np.any(inside_mask) else np.inf
     if mean_depth > max_depth:
         return (False, mean_depth) if return_depth else False
 
     return (True, mean_depth) if return_depth else True
 
 
-def find_intersection_share(map_points, obj_points, radius=0.05):
+def find_intersection_share(
+    map_points: np.ndarray, obj_points: np.ndarray, radius: float = 0.05
+) -> float:
     """Calculate the percentage of overlapping points normalized by the query
 
     objects size.
@@ -593,7 +641,9 @@ def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02, index1=None, index2=No
     return overlapping_ratio
 
 
-def merge_point_clouds_list(pcd_list, voxel_size=0.02):
+def merge_point_clouds_list(
+    pcd_list: List[o3d.geometry.PointCloud], voxel_size: float = 0.02
+) -> o3d.geometry.PointCloud:
     """Merge a list of point clouds into a single point cloud.
 
     Args:
@@ -612,7 +662,9 @@ def merge_point_clouds_list(pcd_list, voxel_size=0.02):
     return merged_pcd
 
 
-def feats_denoise_dbscan(feats, eps=0.02, min_points=2):
+def feats_denoise_dbscan(
+    feats: Union[np.ndarray, List], eps: float = 0.02, min_points: int = 2
+) -> np.ndarray:
     """Aggregate per-point features into a single representative feature vector
 
     for a 3D mask segment, with lightweight outlier rejection.
@@ -667,82 +719,99 @@ def feats_denoise_dbscan(feats, eps=0.02, min_points=2):
     return np.mean(inliers, axis=0)
 
 
-def pcd_denoise_dbscan_vis(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10, visualize=True):
-    """Denoise the point cloud using DBSCAN and visualize clustering results.
+def _visualize_point_clusters(
+    points: np.ndarray,
+    labels: np.ndarray,
+    show_outliers: bool = True,
+) -> np.ndarray:
+    """Visualize point cloud clustering with colored clusters.
+
+    Args:
+        points: (N, 3) array of point coordinates.
+        labels: (N,) array of cluster labels, where -1 represents noise/outliers.
+        show_outliers: Whether to show outlier points in the visualization.
+
+    Returns:
+        (N, 3) RGB color array for points.
+    """
+    colors = np.zeros_like(points, dtype=np.float64)
+    cmap = plt.get_cmap("tab20")
+
+    for label in np.unique(labels):
+        if label == -1:
+            # Noise points - black
+            color = np.array([0, 0, 0])
+        else:
+            # Clusters - indexed from colormap
+            color = cmap(label % 20)[:3]
+
+        colors[labels == label] = color
+
+    # Optionally suppress outlier visualization
+    if not show_outliers:
+        colors[labels == -1] = np.array([1, 1, 1])  # white for outliers
+
+    return colors
+
+
+def pcd_denoise(
+    pcd: o3d.geometry.PointCloud, method: str = "statistical", viz: bool = False, **kwargs
+) -> o3d.geometry.PointCloud:
+    """Unified point cloud denoising interface.
+
+    Supports multiple denoising methods: statistical outlier removal (SOR)
+    and DBSCAN clustering-based denoising.
+
+    Args:
+        pcd: Input point cloud to denoise.
+        method: Denoising method ("statistical" or "dbscan").
+        viz: Whether to visualize denoising results.
+        **kwargs: Method-specific parameters:
+            - statistical: nb_neighbors (int, default 20), std_ratio (float, default 1.0)
+            - dbscan: eps (float, default 0.02), min_points (int, default 10),
+                      min_cluster_size (int, default 5)
+
+    Returns:
+        Denoised point cloud.
+
+    Raises:
+        ValueError: If method is not recognized.
+    """
+    method = method.lower()
+
+    if method == "statistical":
+        return _denoise_statistical(pcd, viz=viz, **kwargs)
+    elif method == "dbscan":
+        return _denoise_dbscan(pcd, viz=viz, **kwargs)
+    else:
+        raise ValueError(f"Unknown denoising method: {method}. Use 'statistical' or 'dbscan'.")
+
+
+def _denoise_statistical(
+    pcd: o3d.geometry.PointCloud, nb_neighbors: int = 20, std_ratio: float = 1.0, viz: bool = False
+) -> o3d.geometry.PointCloud:
+    """Remove outliers using statistical outlier removal (SOR).
 
     Args:
         pcd: Input point cloud.
-        eps: DBSCAN epsilon radius.
-        min_points: Minimum number of neighbors to form a cluster.
-        visualize: Whether to visualize clustering results.
+        nb_neighbors: Number of neighbors to analyze for each point.
+        std_ratio: Points with distance > (mean + std_ratio * std) are outliers.
+        viz: Whether to visualize results.
 
     Returns:
-        Denoised point cloud (largest cluster)."""
-    labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_points, print_progress=True))
-
-    # Convert to numpy arrays
-    obj_points = np.asarray(pcd.points)
-    obj_colors = np.zeros_like(obj_points)  # initialize color array
-
-    max_label = labels.max()
-    print(f"[INFO] Point cloud has {max_label + 1} clusters and {np.sum(labels==-1)} noise points")
-
-    # Assign a unique color to each cluster
-    cmap = plt.get_cmap("tab20")
-    for label in np.unique(labels):
-        if label == -1:
-            # Noise - black color
-            color = np.array([0, 0, 0])
-        else:
-            color = cmap(label % 20)[:3]  # use modulo in case clusters > 20
-
-        obj_colors[labels == label] = color
-
-    # Apply the colors back to the point cloud
-    pcd.colors = o3d.utility.Vector3dVector(obj_colors)
-
-    # Optionally visualize all clusters
-    if visualize:
-        o3d.visualization.draw_geometries([pcd], window_name="DBSCAN Clustering Result")
-
-    # Keep only the largest cluster (if any)
-    counter = Counter(labels)
-    if -1 in counter:
-        del counter[-1]
-
-    if counter:
-        largest_label, _ = counter.most_common(1)[0]
-        keep_mask = labels == largest_label
-
-        if np.sum(keep_mask) >= 5:
-            denoised_pcd = o3d.geometry.PointCloud()
-            denoised_pcd.points = o3d.utility.Vector3dVector(obj_points[keep_mask])
-            denoised_pcd.colors = o3d.utility.Vector3dVector(obj_colors[keep_mask])
-            return denoised_pcd
-
-    return pcd  # fallback if no good cluster
-
-
-def pcd_denoise_statistical(pcd, nb_neighbors=20, std_ratio=1.0, visualize=True):
-    """Remove outliers using statistical outlier removal.
-
-    Args:
-        pcd: PointCloud object
-        nb_neighbors: Number of neighbors to analyze for each point
-        std_ratio: Points with distance larger than (mean + std_ratio * std)
-    will be considered outliers
-        visualize: Whether to visualize the result
-
-    Returns:
-        Denoised point cloud"""
+        Denoised point cloud (inliers only).
+    """
     cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
 
     inlier_cloud = pcd.select_by_index(ind)
-    outlier_cloud = pcd.select_by_index(ind, invert=True)
-    outlier_cloud.paint_uniform_color([0, 0, 0])  # black for outliers
 
-    if visualize:
-        print(f"[INFO] Kept {len(ind)} inliers, removed {len(pcd.points)-len(ind)} outliers")
+    if viz:
+        outlier_cloud = pcd.select_by_index(ind, invert=True)
+        outlier_cloud.paint_uniform_color([0, 0, 0])  # black for outliers
+
+        print(
+            f"[INFO] SOR: Kept {len(ind)} inliers, removed {len(pcd.points) - len(ind)} outliers"
+        )
         o3d.visualization.draw_geometries(
             [inlier_cloud, outlier_cloud], window_name="Statistical Outlier Removal"
         )
@@ -750,62 +819,90 @@ def pcd_denoise_statistical(pcd, nb_neighbors=20, std_ratio=1.0, visualize=True)
     return inlier_cloud
 
 
-def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10):
-    """Denoise the point cloud using DBSCAN.
+def _denoise_dbscan(
+    pcd: o3d.geometry.PointCloud,
+    eps: float = 0.02,
+    min_points: int = 10,
+    min_cluster_size: int = 5,
+    viz: bool = False,
+) -> o3d.geometry.PointCloud:
+    """Remove outliers using DBSCAN clustering.
 
     Args:
-        pcd: Point cloud to denoise.
-        eps: Maximum distance between two samples for one to be considered
-    as in the neighborhood of the other.
-        min_points: The number of samples in a neighborhood for a point to
-    be considered as a core point.
+        pcd: Input point cloud to denoise.
+        eps: DBSCAN epsilon radius (distance threshold).
+        min_points: Minimum neighbors to form a cluster.
+        min_cluster_size: Minimum points required in largest cluster.
+        viz: Whether to visualize clustering results.
 
     Returns:
-        Denoised point cloud."""
-    # Remove noise via clustering
-    pcd_clusters = pcd.cluster_dbscan(
-        eps=eps,
-        min_points=min_points,
-    )
+        Denoised point cloud (largest cluster only).
+    """
+    labels = np.array(pcd.cluster_dbscan(eps=eps, min_points=min_points, print_progress=viz))
 
-    # Convert to numpy arrays
     obj_points = np.asarray(pcd.points)
     obj_colors = np.asarray(pcd.colors)
-    pcd_clusters = np.array(pcd_clusters)
 
-    # Count all labels in the cluster
-    counter = Counter(pcd_clusters)
+    # Visualize all clusters if requested
+    if viz:
+        colored_pcd = o3d.geometry.PointCloud(pcd)
+        vis_colors = _visualize_point_clusters(obj_points, labels, show_outliers=True)
+        colored_pcd.colors = o3d.utility.Vector3dVector(vis_colors)
 
-    # Remove the noise label
-    if counter and (-1 in counter):
+        n_clusters = np.max(labels) + 1
+        n_noise = np.sum(labels == -1)
+        print(f"[INFO] DBSCAN: {n_clusters} clusters and {n_noise} noise points")
+        o3d.visualization.draw_geometries([colored_pcd], window_name="DBSCAN Clustering Result")
+
+    # Extract largest cluster
+    counter = Counter(labels)
+    if -1 in counter:
         del counter[-1]
 
-    if counter:
-        # Find the label of the largest cluster
-        most_common_label, _ = counter.most_common(1)[0]
+    if not counter:
+        # No valid clusters found
+        return pcd
 
-        # Create mask for points in the largest cluster
-        largest_mask = pcd_clusters == most_common_label
+    largest_label, _ = counter.most_common(1)[0]
+    keep_mask = labels == largest_label
 
-        # Apply mask
-        largest_cluster_points = obj_points[largest_mask]
-        largest_cluster_colors = obj_colors[largest_mask]
+    if np.sum(keep_mask) < min_cluster_size:
+        # Largest cluster too small - return original
+        return pcd
 
-        # If the largest cluster is too small, return the original point cloud
-        if len(largest_cluster_points) < 5:
-            return pcd
+    # Create denoised point cloud from largest cluster
+    denoised_pcd = o3d.geometry.PointCloud()
+    denoised_pcd.points = o3d.utility.Vector3dVector(obj_points[keep_mask])
+    denoised_pcd.colors = o3d.utility.Vector3dVector(obj_colors[keep_mask])
 
-        # Create a new PointCloud object
-        largest_cluster_pcd = o3d.geometry.PointCloud()
-        largest_cluster_pcd.points = o3d.utility.Vector3dVector(largest_cluster_points)
-        largest_cluster_pcd.colors = o3d.utility.Vector3dVector(largest_cluster_colors)
-
-        pcd = largest_cluster_pcd
-
-    return pcd
+    return denoised_pcd
 
 
-def compute_3d_bbox_iou(bbox1, bbox2, padding=0):
+# Backward compatibility aliases (deprecated - use pcd_denoise instead)
+def pcd_denoise_statistical(pcd, nb_neighbors=20, std_ratio=1.0, visualize=True):
+    """Deprecated: use pcd_denoise(pcd, method='statistical', viz=visualize, ...) instead."""
+    return pcd_denoise(
+        pcd, method="statistical", viz=visualize, nb_neighbors=nb_neighbors, std_ratio=std_ratio
+    )
+
+
+def pcd_denoise_dbscan(pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10):
+    """Deprecated: use pcd_denoise(pcd, method='dbscan', viz=False, ...) instead."""
+    return pcd_denoise(pcd, method="dbscan", viz=False, eps=eps, min_points=min_points)
+
+
+def pcd_denoise_dbscan_visualize(
+    pcd: o3d.geometry.PointCloud, eps=0.02, min_points=10, visualize=True
+):
+    """Deprecated: use pcd_denoise(pcd, method='dbscan', viz=visualize, ...) instead."""
+    return pcd_denoise(pcd, method="dbscan", viz=visualize, eps=eps, min_points=min_points)
+
+
+def compute_3d_bbox_iou(
+    bbox1: o3d.geometry.AxisAlignedBoundingBox,
+    bbox2: o3d.geometry.AxisAlignedBoundingBox,
+    padding: float = 0,
+) -> float:
     """Compute 3D Intersection over Union (IoU) between two point clouds.
 
     Args:
@@ -832,22 +929,23 @@ def compute_3d_bbox_iou(bbox1, bbox2, padding=0):
     bbox1_volume = np.prod(bbox1_max - bbox1_min)
     bbox2_volume = np.prod(bbox2_max - bbox2_min)
 
-    obj_1_overlap = overlap_volume / bbox1_volume
-    obj_2_overlap = overlap_volume / bbox2_volume
-    max_overlap = max(obj_1_overlap, obj_2_overlap)
-
     iou = overlap_volume / (bbox1_volume + bbox2_volume - overlap_volume)
 
     return iou
 
 
-def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.05):
+def merge_3d_masks(
+    mask_list: List[o3d.geometry.PointCloud],
+    overlap_threshold: float = 0.5,
+    radius: float = 0.02,
+    iou_thresh: float = 0.05,
+) -> List[o3d.geometry.PointCloud]:
     """Merge the overlapped 3D masks in the list of masks using matrix.
 
     Args:
-        mask_list: (list): list of point clouds
-        overlap_threshold: (float): threshold for overlapping ratio
-        radius: (float): radius for faiss search
+        mask_list: list of point clouds
+        overlap_threshold: threshold for overlapping ratio
+        radius: radius for faiss search
         iou_thresh: (float): threshold for iou
 
     Returns:
@@ -969,6 +1067,7 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
     # check if overlap_matrix is zero size
     if overlap_matrix.size == 0:
         return mask_list
+
     graph = overlap_matrix > overlap_threshold
     n_components, component_labels = connected_components(graph)
     component_indices = [np.where(component_labels == k)[0] for k in range(n_components)]
@@ -983,15 +1082,63 @@ def merge_3d_masks(mask_list, overlap_threshold=0.5, radius=0.02, iou_thresh=0.0
     return pcd_list_merged
 
 
-def merge_adjacent_frames(frames_pcd, th, down_size, proxy_th):
-    """Merge adjacent frames in the list of frames :param frames_pcd (list):
+@dataclass
+class MergeConfig:
+    """Configuration for point cloud merging operations.
 
-    list of point clouds
+    Attributes:
+        overlap_threshold: Threshold for considering masks as overlapping (0-1).
+        voxel_size: Size for voxel downsampling during merges.
+        search_radius: Radius used in FAISS spatial searches.
+        iou_threshold: IoU threshold for bounding box filtering.
+    """
+
+    overlap_threshold: float = 0.5
+    voxel_size: float = 0.5 * 0.02  # default 0.01
+    search_radius: float = 0.02
+    iou_threshold: float = 0.05
+
+
+def select_merge_strategy(strategy: str = "sequential") -> callable:
+    """Factory function to select point cloud merge strategy.
 
     Args:
-        th: (float): threshold for overlapping ratio
-        down_size: (float): radius for downsampling
-        proxy_th: (float): threshold for iou
+        strategy: One of "sequential", "hierarchical", or "adjacent".
+            - "sequential": Best for temporal sequences; merges frames incrementally.
+            - "hierarchical": Best for large batches; uses decreasing thresholds.
+            - "adjacent": Best for pairwise merging; processes pairs sequentially.
+
+    Returns:
+        Merge function with signature (frames_pcd, th, down_size, proxy_th).
+
+    Raises:
+        ValueError: If strategy is not recognized.
+    """
+    strategies = {
+        "sequential": seq_merge,
+        "hierarchical": hierarchical_merge,
+        "adjacent": merge_adjacent_frames,
+    }
+
+    strategy = strategy.lower()
+    if strategy not in strategies:
+        raise ValueError(
+            f"Unknown merge strategy: {strategy}. Available: {list(strategies.keys())}"
+        )
+
+    return strategies[strategy]
+
+
+def merge_adjacent_frames(
+    frames_pcd: List[List[o3d.geometry.PointCloud]], th: float, down_size: float, proxy_th: float
+) -> List[List[o3d.geometry.PointCloud]]:
+    """Merge adjacent frames in the list of frames.
+
+    Args:
+        frames_pcd: list of point clouds
+        th: threshold for overlapping ratio
+        down_size: radius for downsampling
+        proxy_th: threshold for iou
 
     Returns:
         merged point clouds and features."""
@@ -1015,18 +1162,21 @@ def merge_adjacent_frames(frames_pcd, th, down_size, proxy_th):
     return new_frames_pcd
 
 
-def hierarchical_merge(frames_pcd, th, th_factor, down_size, proxy_th):
-    """Hierarchical merge the frames in the list of frames :param frames_pcd
-
-    (list): list of point clouds
+def hierarchical_merge(
+    frames_pcd: List[List[o3d.geometry.PointCloud]],
+    th: float,
+    th_factor: float,
+    down_size: float,
+    proxy_th: float,
+) -> List[o3d.geometry.PointCloud]:
+    """Hierarchical merge the frames in the list of frames.
 
     Args:
-        th: (float): threshold for overlapping
-    ratio
-        th_factor: (float): factor for decreasing the threshold
-        down_size: (float): radius for downsampling
-        proxy_th: (float):
-    threshold for iou
+        frames_pcd: list of point clouds
+        th: threshold for overlapping ratio
+        th_factor: factor for decreasing the threshold
+        down_size: radius for downsampling
+        proxy_th: threshold for iou
 
     Returns:
         merged point clouds and features."""
@@ -1043,16 +1193,16 @@ def hierarchical_merge(frames_pcd, th, th_factor, down_size, proxy_th):
     return frames_pcd
 
 
-def seq_merge(frames_pcd, th, down_size, proxy_th):
-    """Merge the frames in the list of frames sequentially :param frames_pcd
-
-    (list): list of point clouds
+def seq_merge(
+    frames_pcd: List[List[o3d.geometry.PointCloud]], th: float, down_size: float, proxy_th: float
+) -> List[o3d.geometry.PointCloud]:
+    """Merge the frames in the list of frames sequentially.
 
     Args:
-        th: (float): threshold for overlapping
-    ratio
-        down_size: (float): radius for downsampling
-        proxy_th: (float): threshold for iou
+        frames_pcd: list of point clouds
+        th: threshold for overlapping ratio
+        down_size: radius for downsampling
+        proxy_th: threshold for iou
 
     Returns:
         merged point clouds and features."""

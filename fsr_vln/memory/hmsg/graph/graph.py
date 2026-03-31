@@ -43,6 +43,7 @@ from memory.hmsg.utils.graph_utils import (
     hierarchical_merge,
     map_grid_to_point_cloud,
     pcd_denoise_dbscan,
+    pcd_denoise_dbscan_visualize,
     seq_merge,
     visualize_pcd_on_image,
 )
@@ -254,17 +255,18 @@ Instruction: {instruction}"""
             rgb_image, depth_image, pose, _, depth_intrinsics = self.dataset[i]
             self.full_pcd += self.dataset.create_pcd(rgb_image, depth_image, pose, idx=i)
             # Periodically downsample to keep memory usage bounded
-            if loop_idx % 10 == 9:
-                self.full_pcd = self.full_pcd.voxel_down_sample(
-                    voxel_size=self.cfg.pipeline.voxel_size
-                )
+            # if loop_idx % 10 == 9:
+            #     self.full_pcd = self.full_pcd.voxel_down_sample(
+            #         voxel_size=self.cfg.pipeline.voxel_size
+            #     )
 
         # filter point cloud
-        self.full_pcd = self.full_pcd.voxel_down_sample(voxel_size=self.cfg.pipeline.voxel_size)
-        self.full_pcd = pcd_denoise_dbscan(self.full_pcd, eps=0.01, min_points=100)
-        cl, ind = self.full_pcd.remove_radius_outlier(nb_points=1000, radius=1.0)  # 0.05,
-        inlier_cloud = self.full_pcd.select_by_index(ind)
-        self.full_pcd = inlier_cloud
+        # self.full_pcd = self.full_pcd.voxel_down_sample(voxel_size=self.cfg.pipeline.voxel_size)
+        _ = pcd_denoise_dbscan_visualize(self.full_pcd, eps=0.05, min_points=50)
+        # self.full_pcd = pcd_denoise_dbscan(self.full_pcd, eps=0.01, min_points=100)
+        # cl, ind = self.full_pcd.remove_radius_outlier(nb_points=1000, radius=1.0)  # 0.05,
+        # inlier_cloud = self.full_pcd.select_by_index(ind)
+        # self.full_pcd = inlier_cloud
         self.save_full_pcd(path=self.cfg.main.save_path)
 
         # create tree from full point cloud
