@@ -120,6 +120,7 @@ Thumbs.db # Windows specific
 */DB/
 *db/
 *.png
+*.npy
 
 .pre-commit-config.yaml
 

@@ -39,11 +39,11 @@ from memory.hmsg.utils.graph_utils import (
     compute_room_embeddings,
     distance_transform,
     feats_denoise_dbscan,
+    filter_point_cloud,
     find_intersection_share,
     hierarchical_merge,
     map_grid_to_point_cloud,
-    pcd_denoise_dbscan,
-    pcd_denoise_dbscan_visualize,
+    pcd_denoise,
     seq_merge,
     visualize_pcd_on_image,
 )
@@ -81,9 +81,7 @@ class Graph:
         self.cfg = cfg
         self.full_pcd = o3d.geometry.PointCloud()
         self.mask_feats = []
-        self.mask_feats_d = []
         self.mask_pcds = []
-        self.mask_weights = []
         self.objects = []
         self.rooms = []
         self.floors = []
@@ -119,6 +117,14 @@ class Graph:
 
         self.clip_model.eval()
 
+        self.graph_tmp_folder = os.path.join(cfg.main.save_path, "tmp")
+        os.makedirs(self.graph_tmp_folder, exist_ok=True)
+
+        self.vln_result_dir = os.path.join(cfg.main.save_path, "vln_result_presentation")
+        os.makedirs(self.vln_result_dir, exist_ok=True)
+
+        self.curr_query_save_dir = self.vln_result_dir
+
         if self.cfg.main.use_gpt:
             self.graph_path = self.cfg.main.graph_path
 
@@ -141,32 +147,11 @@ class Graph:
             }
             self.dataset = HorizonDataset(dataset_cfg)
 
-            self.graph_tmp_folder = os.path.join(cfg.main.save_path, "tmp")
-            if not os.path.exists(self.graph_tmp_folder):
-                os.makedirs(self.graph_tmp_folder)
+        if not hasattr(self.cfg, "pipeline"):
+            print("-- entering querying and evaluation mode")
+            return
 
-            self.vln_result_dir = os.path.join(cfg.main.save_path, "vln_result_presentation")
-            if not os.path.exists(self.vln_result_dir):
-                os.makedirs(self.vln_result_dir)
-            self.curr_query_save_dir = self.vln_result_dir
-            if not hasattr(self.cfg, "pipeline"):
-                print("-- entering querying and evaluation mode")
-                return
-
-        else:
-            self.graph_tmp_folder = os.path.join(cfg.main.save_path, "tmp")
-            if not os.path.exists(self.graph_tmp_folder):
-                os.makedirs(self.graph_tmp_folder)
-
-            self.vln_result_dir = os.path.join(cfg.main.save_path, "vln_result_presentation")
-            if not os.path.exists(self.vln_result_dir):
-                os.makedirs(self.vln_result_dir)
-
-            self.curr_query_save_dir = self.vln_result_dir
-            if not hasattr(self.cfg, "pipeline"):
-                print("-- entering querying and evaluation mode")
-                return
-
+        if not self.cfg.main.use_gpt:
             # load the SAM model
             model_type = self.cfg.models.sam.type
             self.sam = sam_model_registry[model_type](
@@ -232,61 +217,73 @@ Instruction: {instruction}"""
         text_probes = [item for item in text_probes if len(item) > 0]
         return text_probes
 
-    def create_feature_map(self, save_path=None):
-        """Create the feature map of the HMSG (full point cloud + feature map
+    def create_feature_map(self):
+        """Create hierarchical multi-modal scene graph feature maps.
 
-        point level + feature map mask level)
-
-        Args:
-            save_path: str, optional,
-        The path to save the feature map."""
-
+        Generates per-point CLIP features for the full point cloud and per-mask
+        aggregated features. Implements a 3-stage pipeline:
+        1. Build full RGB-D point cloud from dataset frames
+        2. Extract per-pixel CLIP features and project to 3D
+        3. Merge overlapping 3D masks and aggregate mask-level features
+        """
         if self.dataset is None:
-            print("No dataset loaded")
-            return
+            raise ValueError("No dataset loaded. Call load_dataset() first.")
 
-        # create the RGB-D point cloud
-        for loop_idx, i in enumerate(
-            tqdm(
-                range(0, len(self.dataset), self.cfg.pipeline.skip_frames),
-                desc="#1 Creating RGB-D point cloud",
-            )
+        # === STAGE 1: RGB-D Point Cloud Accumulation ===
+        print("[Stage 1/3] Accumulating RGB-D point cloud from frames...")
+        for i in tqdm(
+            range(0, len(self.dataset), self.cfg.pipeline.skip_frames),
+            desc="Building full point cloud",
         ):
-            rgb_image, depth_image, pose, _, depth_intrinsics = self.dataset[i]
+            rgb_image, depth_image, pose, _, _ = self.dataset[i]
             self.full_pcd += self.dataset.create_pcd(rgb_image, depth_image, pose, idx=i)
-            # Periodically downsample to keep memory usage bounded
-            # if loop_idx % 10 == 9:
-            #     self.full_pcd = self.full_pcd.voxel_down_sample(
-            #         voxel_size=self.cfg.pipeline.voxel_size
-            #     )
 
-        # filter point cloud
-        # self.full_pcd = self.full_pcd.voxel_down_sample(voxel_size=self.cfg.pipeline.voxel_size)
-        _ = pcd_denoise_dbscan_visualize(self.full_pcd, eps=0.05, min_points=50)
-        # self.full_pcd = pcd_denoise_dbscan(self.full_pcd, eps=0.01, min_points=100)
-        # cl, ind = self.full_pcd.remove_radius_outlier(nb_points=1000, radius=1.0)  # 0.05,
-        # inlier_cloud = self.full_pcd.select_by_index(ind)
-        # self.full_pcd = inlier_cloud
+        print(f"   Full PCD points (raw): {len(self.full_pcd.points)}")
+
+        # === Optional: Multi-Stage Point Cloud Filtering ===
+        # For real RGB-D sensor data, apply noise reduction pipeline
+        if self.cfg.pipeline.get("enable_pcd_filtering", True):
+            # Build config dict for filter_point_cloud utility
+            filter_config = {
+                "enable_voxel_downsampling": self.cfg.pipeline.get(
+                    "enable_voxel_downsampling", True
+                ),
+                "voxel_size": self.cfg.pipeline.voxel_size,
+                "enable_dbscan_filtering": self.cfg.pipeline.get("enable_dbscan_filtering", True),
+                "dbscan_eps": self.cfg.pipeline.get("dbscan_eps", 0.01),
+                "dbscan_min_points": self.cfg.pipeline.get("dbscan_min_points", 100),
+                "enable_radius_outlier_filtering": self.cfg.pipeline.get(
+                    "enable_radius_outlier_filtering", True
+                ),
+                "radius_nb_points": self.cfg.pipeline.get("radius_nb_points", 1000),
+                "radius_distance": self.cfg.pipeline.get("radius_distance", 1.0),
+                "visualize_filtering": self.cfg.pipeline.get("visualize_filtering", False),
+                "coloring_mode": self.cfg.pipeline.get("coloring_mode", "depth"),
+            }
+            self.full_pcd = filter_point_cloud(
+                self.full_pcd, filter_config, save_dir=self.cfg.main.save_path
+            )
+
         self.save_full_pcd(path=self.cfg.main.save_path)
 
-        # create tree from full point cloud
+        # === STAGE 2: Per-Point Feature Extraction ===
+        print("[Stage 2/3] Extracting and aggregating per-point CLIP features...")
         locs_in = np.array(self.full_pcd.points)
-        print("full_pcd point num: ", locs_in.shape)
-        tree_pcd = cKDTree(locs_in)  # NOTE: shows too much warnings
+        tree_pcd = cKDTree(locs_in)
         n_points = locs_in.shape[0]
         counter = torch.zeros((n_points, 1), device="cpu")
         sum_features = torch.zeros((n_points, self.clip_feat_dim), device="cpu")
 
-        # extract features for each frame
         frames_pcd = []
-        frames_feats = []
         for i in tqdm(
             range(0, len(self.dataset), self.cfg.pipeline.skip_frames),
-            desc="#2 Extracting features",
+            desc="Computing per-point features",
         ):
             rgb_image, depth_image, pose, _, _ = self.dataset[i]
             if rgb_image.size != depth_image.size:
                 rgb_image = rgb_image.resize(depth_image.size)
+
+            # Extract per-pixel features and masks
             F_2D, F_masks, masks, F_g = extract_feats_per_pixel(
                 np.array(rgb_image),
                 self.mask_generator,
@@ -297,6 +294,8 @@ Instruction: {instruction}"""
                 maskedd_weight=self.cfg.pipeline.clip_masked_weight,
             )
             F_2D = F_2D.cpu()
+
+            # Project frame to 3D and create mask point clouds
             pcd = self.dataset.create_pcd(rgb_image, depth_image, pose, idx=i)
             masks_3d = self.dataset.create_3d_masks(
                 masks,
@@ -309,33 +308,43 @@ Instruction: {instruction}"""
                 filter_distance=self.cfg.pipeline.max_mask_distance,
             )
             frames_pcd.append(masks_3d)
-            frames_feats.append(F_masks)
-            # fuse features for each point in the full pcd
-            mask = np.array(depth_image) > 0
-            mask = torch.from_numpy(mask)
-            F_2D = F_2D[mask]
-            # using cKdtree to find the closest point in the full pcd for each
-            # point in frame pcd
-            dis, idx = tree_pcd.query(np.asarray(pcd.points), k=1, workers=-1)
-            sum_features[idx] += F_2D
-            counter[idx] += 1
-            pass
 
-        # compute the average features
+            # Aggregate features: find nearest full_pcd point for each frame point
+            depth_mask = np.array(depth_image) > 0
+            depth_mask = torch.from_numpy(depth_mask)
+            F_2D_masked = F_2D[depth_mask]
+            _, idx = tree_pcd.query(np.asarray(pcd.points), k=1, workers=-1)
+            sum_features[idx] += F_2D_masked
+            counter[idx] += 1
+
+        # Compute per-point average features
         counter[counter == 0] = 1e-5
         sum_features = sum_features / counter
         self.full_feats_array = sum_features.cpu().numpy()
-        self.full_feats_array: np.ndarray
+        print(f"   Full feature array shape: {self.full_feats_array.shape}")
 
-        print("self.full_feats_array.shape : ", self.full_feats_array.shape)
-
-        # free memory
+        # Free intermediate tensors
         del sum_features, counter
         torch.cuda.empty_cache()
 
-        # merging the masks
-        if self.cfg.pipeline.merge_type == "hierarchical":
-            tqdm.write("#3 Merging 3d masks hierarchically", end=": ")
+        # === STAGE 3: 3D Mask Merging and Feature Aggregation ===
+        print("[Stage 3/3] Merging overlapping masks and aggregating mask features...")
+        self._merge_masks(frames_pcd)
+        self._aggregate_mask_features(tree_pcd)
+
+    def _merge_masks(self, frames_pcd: List[List[o3d.geometry.PointCloud]]):
+        """Merge overlapping 3D masks using selected merge strategy.
+
+        Args:
+            frames_pcd: List of per-frame mask point clouds.
+
+        Raises:
+            ValueError: If merge_type config is invalid.
+        """
+        merge_type = self.cfg.pipeline.merge_type.lower()
+
+        if merge_type == "hierarchical":
+            tqdm.write("  Merging masks hierarchically...")
             self.mask_pcds = hierarchical_merge(
                 frames_pcd,
                 self.cfg.pipeline.init_overlap_thresh,
@@ -343,40 +352,58 @@ Instruction: {instruction}"""
                 self.cfg.pipeline.voxel_size,
                 self.cfg.pipeline.iou_thresh,
             )
-        elif self.cfg.pipeline.merge_type == "sequential":
-            tqdm.write("#3 Merging 3d masks sequentially", end=": ")
+        elif merge_type == "sequential":
+            tqdm.write("  Merging masks sequentially...")
             self.mask_pcds = seq_merge(
                 frames_pcd,
                 self.cfg.pipeline.init_overlap_thresh,
                 self.cfg.pipeline.voxel_size,
                 self.cfg.pipeline.iou_thresh,
             )
+        else:
+            raise ValueError(
+                f"Invalid merge_type: '{merge_type}'. Must be 'hierarchical' or 'sequential'. "
+                f"Check config.pipeline.merge_type"
+            )
 
-        # remove any small pcds
-        for i, pcd in reversed(list(enumerate(self.mask_pcds))):
-            # if pcd.is_empty() or len(pcd.points) < 100:
-            if pcd.is_empty() or len(pcd.points) < 10:
-                self.mask_pcds.pop(i)
-        # fuse point features in every 3d mask
-        # self.mask_pcds, finally merged 3d instances
-        #
-        # Optimized: gather all mask point arrays first, then issue a single
-        # batched cKDTree query instead of one query per mask.  This lets
-        # scipy use its internal parallelism (workers=-1) over a much larger
-        # work unit and avoids per-mask Python loop overhead.
+        # Filter small point clouds (noise/artifacts)
+        original_count = len(self.mask_pcds)
+        min_points_threshold = self.cfg.pipeline.get("min_mask_points", 10)
+        self.mask_pcds = [
+            pcd
+            for pcd in self.mask_pcds
+            if not pcd.is_empty() and len(pcd.points) >= min_points_threshold
+        ]
+        removed_count = original_count - len(self.mask_pcds)
+        if removed_count > 0:
+            print(f"   Filtered {removed_count} masks below {min_points_threshold} points")
+
+    def _aggregate_mask_features(self, tree_pcd: cKDTree):
+        """Aggregate full-cloud features into per-mask features.
+
+        Uses batched KDTree queries for efficiency. Removes points with
+        poor reconstruction quality (distance > threshold).
+
+        Args:
+            tree_pcd: KDTree over full point cloud for nearest-neighbor queries.
+        """
         masks_feats = []
         voxel_size = self.cfg.pipeline.voxel_size
-        dist_threshold = 0.8
+        dist_threshold = self.cfg.pipeline.get("mask_feature_dist_threshold", 0.8)
 
-        # --- Downsample and collect all points with mask-membership tags ---
+        # Batch gather all mask points for single KDTree query
         downsampled_masks = [m.voxel_down_sample(voxel_size) for m in self.mask_pcds]
         pts_per_mask = [np.asarray(m.points) for m in downsampled_masks]
         mask_lengths = [len(p) for p in pts_per_mask]
 
+        # Query all mask points at once (scipy parallelizes internally with workers=-1)
         if sum(mask_lengths) > 0:
             all_points = np.vstack([p for p in pts_per_mask if len(p) > 0])
             all_dist, all_idx = tree_pcd.query(all_points, k=1, workers=-1)
+        else:
+            all_dist, all_idx = np.array([]), np.array([])
 
+        # Extract features for each mask
         offset = 0
         for i, pts in enumerate(pts_per_mask):
             n = mask_lengths[i]
@@ -390,48 +417,43 @@ Instruction: {instruction}"""
             idx = all_idx[offset : offset + n]
             offset += n
 
+            # Filter points biased toward camera (good reconstruction)
             valid_mask = dist <= dist_threshold
-            n_total = n
             n_valid = int(valid_mask.sum())
-            n_removed = n_total - n_valid
-            if n_removed > 0:
-                tqdm.write(f"mask {i}: removed {n_removed}/{n_total} points with dist > {0.1}")
+            n_removed = n - n_valid
+            if n_removed > 0 and n_valid > 0:
+                tqdm.write(
+                    f"    mask[{i}]: kept {n_valid}/{n} points (dist <= {dist_threshold:.2f}m)"
+                )
 
-            valid_idx = idx[valid_mask]
-            feats = self.full_feats_array[valid_idx]
-            feats = np.nan_to_num(feats)
-
-            if feats.shape[0] == 0:
+            if n_valid == 0:
                 masks_feats.append(
                     np.zeros((1, self.clip_feat_dim), dtype=self.full_feats_array.dtype)
                 )
                 continue
+
+            # Aggregate features from valid points
+            valid_idx = idx[valid_mask]
+            feats = self.full_feats_array[valid_idx]
+            feats = np.nan_to_num(feats)
             feats = feats_denoise_dbscan(feats, eps=0.01, min_points=100)
             masks_feats.append(feats)
+
         self.mask_feats = masks_feats
-        print("number of masks: ", len(self.mask_feats))
-        print("number of pcds in hmsg: ", len(self.mask_pcds))
-        assert len(self.mask_pcds) == len(self.mask_feats)
+        print(f"   Created {len(self.mask_feats)} mask features from {len(self.mask_pcds)} masks")
+        assert len(self.mask_pcds) == len(self.mask_feats), "Mask-feature mismatch!"
 
     def segment_floors_manually(self, path, flip_zy=False, mid_points=[]):
         """Segment the floors from the full point cloud :param path: str, The
 
         path to save the intermediate results."""
-        import matplotlib
-
-        matplotlib.use("Agg")  # Use non-interactive backend
-        import matplotlib.pyplot as plt
-
         # downsample the point cloud
-        # downpcd = o3d.io.read_point_cloud(path).voxel_down_sample(voxel_size=0.05)
         downpcd = self.full_pcd.voxel_down_sample(voxel_size=0.05)
         # flip the z and y axis
         if flip_zy:
             downpcd.points = o3d.utility.Vector3dVector(np.array(downpcd.points)[:, [0, 2, 1]])
             downpcd.transform(np.eye(4) * np.array([1, 1, -1, 1]))
         # rotate the point cloud to align floor with the y axis
-        T1 = np.eye(4)
-        T1[:3, :3] = Rotation.from_euler("x", 90, degrees=True).as_matrix()
         downpcd = np.asarray(downpcd.points)
         print("downpcd", downpcd.shape)
 
@@ -508,9 +530,6 @@ Instruction: {instruction}"""
                 adjusted_peaks.append(mid_point)
         adjusted_peaks.append(clustred_peaks[-1])
 
-        # # If the last peak is far from the point cloud max, insert a ceiling boundary
-        # max_z = np.max(downpcd[:, 1])
-
         clustred_peaks = np.array(adjusted_peaks)
         print("adjusted_peaks", clustred_peaks)
         floors = []
@@ -525,20 +544,13 @@ Instruction: {instruction}"""
 
         # Extend the first and last floor ranges
         floors[0][0] = (floors[0][0] + np.min(downpcd[:, 1])) / 2
-        # floors[-1][1] = (floors[-1][1] + np.max(downpcd[:, 1])) / 2
         floors[-1][1] = np.max(downpcd[:, 1])
 
-        # Debug output: print clustred_peaks and adjusted_peaks
         print("Original clustred_peaks:", clustred_peaks)
         print("Adjusted clustred_peaks after inserting virtual boundaries:", adjusted_peaks)
-
-        # Debug output: print floor ranges
         print("Generated floor ranges:", floors)
-        # Confirm the number of floors
         print("Total number of floors detected:", len(floors))
-        print("number of floors: ", len(floors))
 
-        floors_pcd = []
         for i, floor in enumerate(floors):
             floor_obj = Floor(str(i), name="floor_" + str(i))
             floor_pcd = self.full_pcd.crop(
@@ -553,7 +565,6 @@ Instruction: {instruction}"""
             floor_obj.floor_zero_level = np.min(np.array(floor_pcd.points)[:, 1])
             floor_obj.floor_height = floor[1] - floor_obj.floor_zero_level
             self.floors.append(floor_obj)
-            floors_pcd.append(floor_pcd)
         print("final floors: ", floors)
         return floors
 
@@ -573,26 +584,17 @@ Instruction: {instruction}"""
         floor_pcd = floor.pcd
         xyz = np.asarray(floor_pcd.points)
         xyz_full = xyz.copy()
-        # print("xyz.shape: ", xyz.shape)
         floor_zero_level = floor.floor_zero_level
         floor_height = floor.floor_height
         print("floor_zero_level, floor_height = ", floor_zero_level, floor_height)
         ## Slice below the ceiling ##
         xyz = xyz[xyz[:, 1] < floor_zero_level + floor_height - 0.3]
-        # xyz = xyz[xyz[:, 1] >= floor_zero_level + 1.5]
         xyz = xyz[xyz[:, 1] >= floor_zero_level + 0.3]
-        # xyz = xyz[xyz[:, 1] >= floor_zero_level + 0.5]
         xyz_full = xyz_full[xyz_full[:, 1] < floor_zero_level + floor_height - 0.2]
-        ## Slice above the floor and below the ceiling ##
-        # xyz = xyz[xyz[:, 1] < floor_zero_level + 1.8]
-        # xyz = xyz[xyz[:, 1] > floor_zero_level + 0.8]
-        # xyz_full = xyz_full[xyz_full[:, 1] < floor_zero_level + 1.8]
 
         # project the point cloud to 2d
         pcd_2d = xyz[:, [0, 2]]
         xyz_full = xyz_full[:, [0, 2]]
-
-        # print("pcd_2d.shape: ", pcd_2d.shape)
 
         # define the grid size and resolution based on the 2d point cloud
         grid_size = (
@@ -678,7 +680,6 @@ Instruction: {instruction}"""
             plt.savefig(os.path.join(tmp_floor_path, "full_map.png"))
         # apply distance transform to the full map
         room_vertices = distance_transform(full_map, resolution, tmp_floor_path)
-        # room_vertices = [room_vertices[0]] # one room case
 
         # using the 2D room vertices, map the room back to the original point
         # cloud using KDTree
@@ -713,12 +714,10 @@ Instruction: {instruction}"""
             _, idx = floor_tree.query(np.array(pcd.points), k=1, workers=-1)
             pcd = floor_pcd.select_by_index(idx)
             room_pcds.append(pcd)
-            # room_pcds.append(floor_pcd) # one room case
         self.room_masks[floor.floor_id] = room_masks
 
         # compute the features of room: input a list of poses and images,
         # output a list of embeddings list
-        rgb_list = []
         pose_list = []
         F_g_list = []
 
@@ -730,7 +729,6 @@ Instruction: {instruction}"""
             rgb_image, _, pose, _, _ = self.dataset[img_id]
             F_g = get_img_feats(np.array(rgb_image), self.preprocess, self.clip_model)
             all_global_clip_feats[str(img_id)] = F_g
-            rgb_list.append(rgb_image)
             pose_list.append(pose)
             F_g_list.append(F_g)
         np.savez(
@@ -750,7 +748,6 @@ Instruction: {instruction}"""
         assert len(repr_embs_list) == len(room_2d_points)
         assert len(repr_img_ids_list) == len(room_2d_points)
         assert len(room_id2img_id) == len(room_2d_points)
-        self.room_id2img_ids = room_id2img_id
 
         room_index = 0
         for i in range(len(room_2d_points)):
@@ -782,7 +779,6 @@ Instruction: {instruction}"""
         # Build view hierarchy
         view_index = 0
         for room_id in range(len(room_id2img_id)):
-            # all_view_cnt += len(room_id2img_id[room_id])
             for i, img_id in enumerate(room_id2img_id[room_id]):
                 retarget_img_id = img_id * self.cfg.pipeline.skip_frames
                 img_path = self.dataset.frameId2imgPath[retarget_img_id]
@@ -792,7 +788,6 @@ Instruction: {instruction}"""
                     retarget_img_id,
                 )
                 view.img_path = img_path
-                # view.embedding = room_clip_embeddings_list[room_id][i]
                 self.views.append(view)
                 view_index += 1
                 floor.rooms[room_id].views.append(view)
@@ -821,21 +816,20 @@ Instruction: {instruction}"""
             save_dir: str, optional, The path to save the intermediate
         results"""
         for i, pcd in enumerate(self.mask_pcds):
-            self.mask_pcds[i] = pcd_denoise_dbscan(pcd, eps=0.05, min_points=10)
+            self.mask_pcds[i] = pcd_denoise(
+                pcd, method="dbscan", viz=False, eps=0.05, min_points=10
+            )
         text_feats, classes = get_label_feats(
             self.clip_model,
             self.clip_feat_dim,
             self.cfg.pipeline.obj_labels,
             self.cfg.main.save_path,
         )
-        # print("self.clip_feat_dim: ", self.clip_feat_dim)
-        # print("text_feats.shape: ", text_feats.shape)
 
         pbar = tqdm(enumerate(self.floors), total=len(self.floors), desc="Floor: ")
         margin = 0.2
         for f_idx, floor in pbar:
             pbar.set_description(f"Floor: {f_idx}")
-            floor_pcd = floor.pcd
             objects_inside_floor = list()
             # assign objects to rooms
             for i, pcd in enumerate(self.mask_pcds):
@@ -925,7 +919,6 @@ Instruction: {instruction}"""
                 object.pcd = self.mask_pcds[mask_idx]
                 object.vertices = np.array(self.mask_pcds[mask_idx].points)[:, [0, 2]]
                 object.embedding = self.mask_feats[mask_idx]
-                # floor.rooms[closest_room_idx].add_object(object)
                 # build view-object topology graph
                 best_view_id = None
                 best_depth = float("inf")
@@ -1194,7 +1187,6 @@ Instruction: {instruction}"""
             needs to be provided to this method"""
         for i in range(len(self.rooms)):
             if generate_method in ["obj_embedding", "view_embedding"]:
-                # print(default_room_types)
                 assert (
                     default_room_types is not None
                 ), "You should provide a list of default room types"
@@ -1225,8 +1217,6 @@ Instruction: {instruction}"""
         # compute similarity between the text query and the objects embeddings
         # in the graph
         similarity = np.dot(text_feats, np.array([o.embedding for o in self.objects]).T)
-        # similarity = compute_similarity(text_feats, np.array([o.embedding for o in self.objects]))
-        # find top 5 similar objects
         top_index = np.argsort(similarity[0])[::-1][:5]
         # print the top 5 similar objects
         for i in top_index:
@@ -1259,7 +1249,6 @@ Instruction: {instruction}"""
         # TODO: assume that the self.floors are ordered according to the floor
         # level in ascending order. Check again.
         zero_levels_list = [x.floor_zero_level for x in self.floors]
-        # print("zero_levels_list: ", zero_levels_list)
         zero_level_order_ids = np.argsort(zero_levels_list)
 
         # check whether the query is a number that is an integer
@@ -1275,8 +1264,6 @@ Instruction: {instruction}"""
                     floor_names, self.clip_model, self.clip_feat_dim
                 )
                 sim_mat = np.dot(text_feats, floor_embs.T)
-                # sim_mat = compute_similarity(text_feats, floor_embs)
-                # print(sim_mat)
                 top_index = np.argsort(sim_mat[0])[::-1][0]
                 return zero_level_order_ids[top_index]
 
@@ -1291,9 +1278,6 @@ Instruction: {instruction}"""
         self.src_img_root = os.path.dirname(retrieved_img_list[0])
         img_dir_prefix = f"{os.path.basename(self.src_img_root)}/images"
         img_list = retrieved_img_list  # Do not sort
-        # img_list = sorted(
-        # )
-        n_images = len(img_list)
         self.downsampeld_img_list = img_list
         auth = oss2.ProviderAuth(EnvironmentVariableCredentialsProvider())
         bucket = oss2.Bucket(auth, "oss-cn-beijing.aliyuncs.com", "mapvln")
@@ -1412,13 +1396,6 @@ to a specific location by finding the closest frame in the provided locations to
             if has_object:
                 # Step 2: Scoring
                 prompt_score = f"On a scale from 0 to 1, how strongly does this image contain a '{query}'? Respond only with a single number (e.g., 0.73)."
-                # prompt_score = (
-                # f"On a scale from 0 to 1, how strongly and prominently does this image show a '{query}'? "
-                # f"Consider both the confidence of presence and the relative size/visual prominence of the object in the image. "
-                # f"If the object is large and visually central, score closer to 1. "
-                # f"If the object is small, partially hidden, or in the background, score lower to 0.5. "
-                # f"Respond only with a single number (e.g., 0.85)."
-                # )
                 messages_score = [
                     {
                         "role": "system",
@@ -1614,7 +1591,6 @@ to a specific location by finding the closest frame in the provided locations to
     ):
         """Query the graph with text input for room and object."""
         print("process object query use gpt....")
-        offline_start_time = time.time()
         query_time_consumer = dict()
         query_time_consumer["room_query"] = room_query
         query_time_consumer["object_query"] = object_query
@@ -1665,19 +1641,14 @@ to a specific location by finding the closest frame in the provided locations to
                 [room_query], self.clip_model, self.clip_feat_dim
             )
             room2query_sim = dict()
-            room2query_feat = dict()  # Store the corresponding feature vectors
-            room2query_id = dict()  # Store the corresponding embedding indices
             for room in rooms_list:
                 embeddings = np.stack(room.embeddings)  # [view_num, 768]
                 # [1, view_num], similarity between query and each view
                 sims = np.dot(query_room_text_feats, embeddings.T)
                 max_idx = np.argmax(sims)  # Find the position of maximum similarity
                 max_sim = sims[0, max_idx]  # Maximum similarity value
-                max_feat = embeddings[max_idx]  # Corresponding feature vector (768,)
 
                 room2query_sim[room.room_id] = max_sim
-                room2query_feat[room.room_id] = max_feat
-                room2query_id[room.room_id] = max_idx
 
             room2query_sim_sorted = {
                 int(k.split("_")[-1]): v
@@ -1693,7 +1664,6 @@ to a specific location by finding the closest frame in the provided locations to
         query_time_consumer["room_retrieval_by_clip"] = room_retrival_time
 
         # query object
-        # goal_room_id = target_ids[0]
         if not is_dectect_obj:
             print("not found object, use llm to find intention object")
             object_query = self.generate_object_querys(instruction)
@@ -1752,7 +1722,6 @@ to a specific location by finding the closest frame in the provided locations to
                     )  # sort the obj ids based on max score (descending)
                     top_index = obj_ids[resort_ids]  # get the top index
                     top_index = top_index[:top_k]
-            target_object_score = [sim_mat[query_id][i] for i in top_index]
             target_object_id = [objects_list[i].object_id for i in top_index]
             target_room_id = [room_ids_list[i] for i in top_index]
             target_id = []
@@ -1762,7 +1731,6 @@ to a specific location by finding the closest frame in the provided locations to
             query_time_consumer["FastMatching_time"] = FastMatching_time
 
         save_json_path = os.path.join(self.curr_query_save_dir, "query_time_consumer.json")
-        # elif object_query_method == "gpt":
         best_object = self.objects[target_id[0]]
         best_object_best_view_id = best_object.best_view_id
         best_view = None
@@ -1786,14 +1754,9 @@ to a specific location by finding the closest frame in the provided locations to
 
         best_view_image_path = best_view.img_path
         best_view_img_id = best_view.img_id
-        best_view_view_id = best_view.view_id
         print("online_best_view_image_path: ", best_view_image_path)
         goal_image_path_online = best_view_image_path
         query_time_consumer["top1_image_path_online_object_best_view"] = goal_image_path_online
-        # query_time_consumer["top2_image_path_online_object_best_view"] = top2_best_view_image_path
-        # query_time_consumer["top3_image_path_online_object_best_view"] = top3_best_view_image_path
-        # query_time_consumer["top4_image_path_online_object_best_view"] = top4_best_view_image_path
-        # query_time_consumer["top5_image_path_online_object_best_view"] = top5_best_view_image_path
         start_time = time.time()
         Object_in_goal_view_check = self.detect_object_in_image(
             best_view_image_path, object_query[query_id]
@@ -1836,12 +1799,6 @@ to a specific location by finding the closest frame in the provided locations to
                 print(f"find goal image in room {room_id}")
                 start_time = time.time()
                 # find goal image by clip
-                # room_img_indices = rooms_list[room_id].represent_images[0] # use repr images in curr room
-                # room_img_indices = rooms_list[room_id].sample_images # use all images in curr room
-                # room_image_local_feature = rooms_list[room_id].embeddings
-                # room_image_local_feature = rooms_list[room_id].clip_embeddings
-                # room_embeddings = np.stack(room_image_local_feature)   #
-                # [view_num, 768]
                 gloal_embedding = np.stack(all_image_embedding)  # [total_view_num, 768]
                 sims = np.dot(
                     query_object_text_feats[0], gloal_embedding.T
@@ -1891,12 +1848,6 @@ to a specific location by finding the closest frame in the provided locations to
                 print("goal_image_path_by_gpt: ", goal_image_path_by_gpt)
 
                 # judge whether object in goal image
-                # goal_index = all_image_incides.index(best_view_img_id)
-                # goal_image_clip_embedding = np.array(all_image_embedding[goal_index])
-                # goal_sim_mat = np.dot(query_object_text_feats[0], goal_image_clip_embedding.T)
-                # select_imgs = [goal_image_path_online, top2_best_view_image_path, top3_best_view_image_path,
-                # top4_best_view_image_path, top5_best_view_image_path,
-                # goal_image_path_by_gpt]
                 select_imgs = [
                     goal_image_path_online,
                     goal_image_path_by_clip,
@@ -1909,12 +1860,10 @@ to a specific location by finding the closest frame in the provided locations to
                 )
                 gpt_check_time = time.time() - gpt_check_start_time
                 query_time_consumer["gpt_check_time"] = gpt_check_time
-                # print("goal_sim_mat:" , goal_sim_mat)
                 print("Detection results:", gpt_check_result)  # [True, False]
                 print("Best image:", best_image_path)
                 query_time_consumer["detection_results"] = gpt_check_result
                 query_time_consumer["best_image"] = best_image_path
-                # query_time_consumer["goal_sim_mat"] = goal_sim_mat.tolist()
                 print(best_image_path != goal_image_path_online)
                 print("update_flatg ", update_flag)
                 avg_distance_in_gptview = -1.0
@@ -1954,7 +1903,6 @@ to a specific location by finding the closest frame in the provided locations to
                         if not isinstance(img, np.ndarray):
                             img = np.array(img)
                             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                            # save_path = os.path.join(self.curr_query_save_dir, save_name)
                         avg_distance_in_gptview = visualize_pcd_on_image(
                             final_obj_pcd,
                             img,
@@ -1965,8 +1913,6 @@ to a specific location by finding the closest frame in the provided locations to
                                 f"gpt_refine_object_id_{final_object.object_id}.png",
                             ),
                         )
-                        # replace and save obect feature embedding?
-                        # final_object.embedding = final_object.embedding * 0.2 + query_object_text_feats[0] * 0.8
                         new_objects_path = os.path.join(self.graph_path, "objects_update")
                         if not os.path.exists(new_objects_path):
                             os.makedirs(new_objects_path)
@@ -1976,18 +1922,16 @@ to a specific location by finding the closest frame in the provided locations to
 
                 # Calculate distance
                 obj_pcd = deepcopy(best_object.pcd)
-                obj_center = obj_pcd.get_center()
                 camera_matrix = self.dataset.get_camera_intrinsics()
                 img, _, pose, _, _ = self.dataset[best_view_img_id]
-                obj_in_view, mean_depth_online = check_object_in_view(
+                _, mean_depth_online = check_object_in_view(
                     np.array(img).shape[1],
                     np.array(img).shape[0],
                     camera_matrix,
                     np.linalg.inv(pose),
                     np.array(obj_pcd.points),
-                    return_depth=True,  # Modified check_object_in_view to support returning depth
+                    return_depth=True,
                 )
-                # gpt_index = all_image_incides.index()
                 if best_image_path is not None:
                     self.visualize_goal_images(
                         mean_depth_online,
@@ -2060,17 +2004,11 @@ to a specific location by finding the closest frame in the provided locations to
         print(f"query_id: {query_id}")
         print(f"categories list: {query}")
 
-        if query is None or query == "":
-            is_object_text_valid = False
-
-        print(f"object query: {query}")
-
         query_text_feats = get_text_feats_multiple_templates(
             query, self.clip_model, self.clip_feat_dim
         )  # (len(categories), feat_dim)
 
         room_ids_list = []
-        idd = 0
         for obj in self.objects:
             for i, room in enumerate(self.rooms):
                 if obj.room_id == room.room_id:
@@ -2092,23 +2030,16 @@ to a specific location by finding the closest frame in the provided locations to
         if query_method == "clip":
             object_embs = np.array([obj.embedding for obj in objects_list])
             sim_mat = np.dot(query_text_feats, object_embs.T)  # shape [2,37]
-            top_index = np.argsort(sim_mat[query_id])[::-1][:20]
-            #     # print("object id: ", objects_listq[i].object_id)
-
             top_index = np.argsort(sim_mat[query_id])[::-1][:top_k]
             if len(negative_prompt) > 0:
                 # category id for each object
                 cls_ids = np.argmax(sim_mat, axis=0)
-                # print(f"cls_ids: {cls_ids}")
                 # max scores for each object
                 max_scores = np.max(sim_mat, axis=0)
                 # find the obj ids that assign max score to the target category
                 obj_ids = np.where(cls_ids == query_id)[0]
-                # print(f"obj_ids: {obj_ids}")
-                # print(f"max_scores: {max_scores}")
                 if len(obj_ids) > 0:
                     obj_scores = max_scores[obj_ids]
-                    # print(f"obj_scores: {obj_scores}")
                     resort_ids = np.argsort(
                         -obj_scores
                     )  # sort the obj ids based on max score (descending)
@@ -2158,17 +2089,14 @@ to a specific location by finding the closest frame in the provided locations to
                     room.name is not None
                 ), "The name attribute for the room has not been generated"
             room_names_list = [room.name for room in rooms_list]
-            # print(room_names_list)
             room_embs = get_text_feats_multiple_templates(
                 room_names_list, self.clip_model, self.clip_feat_dim
             )
             similarity = np.dot(query_text_feats, room_embs.T)
-            # similarity = compute_similarity(query_text_feats, room_embs)
             top_index = np.argsort(similarity[0])[::-1]
             # print the top 3 matching rooms
             for i in top_index[:3]:
                 print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
-                # print("room: ", rooms_list[i].room_id)
 
             same_sim_indices = []
             tar_sim = similarity[0, top_index[0]]
@@ -2179,24 +2107,12 @@ to a specific location by finding the closest frame in the provided locations to
 
             target_rooms = [rooms_list[i] for i in same_sim_indices]
             target_room_ids = [target_room.room_id for target_room in target_rooms]
-            target_ids = [
-                # i for i, x in enumerate(self.rooms) if x.room_id in
-                # target_room_ids
-                i
-                for i, x in enumerate(rooms_list)
-                if x.room_id in target_room_ids
-            ]
+            target_ids = [i for i, x in enumerate(rooms_list) if x.room_id in target_room_ids]
 
             return target_ids
         else:
             print("query room use view embedding")
-            # room2query_sim = dict()
-            #     # find best goal-img id for each room
-            #     )
-            #     # room_query_sim_median = np.max(compute_similarity(query_text_feats, np.stack(room.embeddings)))
             room2query_sim = dict()
-            room2query_feat = dict()  # Store the corresponding feature vectors
-            room2query_id = dict()  # Store the corresponding embedding indices
 
             for room in rooms_list:
                 embeddings = np.stack(room.embeddings)  # [view_num, 768]
@@ -2204,11 +2120,8 @@ to a specific location by finding the closest frame in the provided locations to
                 sims = np.dot(query_text_feats, embeddings.T)
                 max_idx = np.argmax(sims)  # Find the position of maximum similarity
                 max_sim = sims[0, max_idx]  # Maximum similarity value
-                max_feat = embeddings[max_idx]  # Corresponding feature vector (768,)
 
                 room2query_sim[room.room_id] = max_sim
-                room2query_feat[room.room_id] = max_feat
-                room2query_id[room.room_id] = max_idx
 
             room2query_sim_sorted = {
                 int(k.split("_")[-1]): v
@@ -2222,8 +2135,6 @@ to a specific location by finding the closest frame in the provided locations to
                 return list(room2query_sim_sorted.keys())[
                     0 : min(len(room2query_sim_sorted), 10)
                 ]  # return three highest-ranking rooms
-
-        # elif query_method == "children_embedding":
 
     def query_room(
         self, query: str, floor_id: int = -1, query_method: str = "view_embedding"
@@ -2258,17 +2169,14 @@ to a specific location by finding the closest frame in the provided locations to
                     room.name is not None
                 ), "The name attribute for the room has not been generated"
             room_names_list = [room.name for room in rooms_list]
-            # print(room_names_list)
             room_embs = get_text_feats_multiple_templates(
                 room_names_list, self.clip_model, self.clip_feat_dim
             )
             similarity = np.dot(query_text_feats, room_embs.T)
-            # similarity = compute_similarity(query_text_feats, room_embs)
             top_index = np.argsort(similarity[0])[::-1]
             # print the top 3 matching rooms
             for i in top_index[:3]:
                 print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
-                # print("room: ", rooms_list[i].room_id)
 
             same_sim_indices = []
             tar_sim = similarity[0, top_index[0]]
@@ -2288,7 +2196,6 @@ to a specific location by finding the closest frame in the provided locations to
                 room_query_sim_median = np.max(
                     np.dot(query_text_feats, np.stack(room.embeddings).T)
                 )
-                # room_query_sim_median = np.max(compute_similarity(query_text_feats, np.stack(room.embeddings)))
                 room2query_sim[room.room_id] = room_query_sim_median
             room2query_sim_sorted = {
                 int(k.split("_")[-1]): v
@@ -2297,7 +2204,6 @@ to a specific location by finding the closest frame in the provided locations to
             return list(room2query_sim_sorted.keys())[
                 0 : min(len(room2query_sim_sorted), 3)
             ]  # return three highest-ranking rooms
-        # elif query_method == "children_embedding":
 
     def query_object(
         self,
@@ -2338,23 +2244,12 @@ to a specific location by finding the closest frame in the provided locations to
         print(f"query_id: {query_id}")
         print(f"categories list: {query}")
 
-        if query is None or query == "":
-            is_object_text_valid = False
-
-        print(f"object query: {query}")
-
         query_text_feats = get_text_feats_multiple_templates(
             query, self.clip_model, self.clip_feat_dim
         )  # (len(categories), feat_dim)
-        # print(f"text_feats.shape: {query_text_feats.shape}")
-        # print(query_text_feats[:, :10])
 
         room_ids_list = []
-        idd = 0
         for obj in self.objects:
-            # print(idd)
-            # print(obj.object_id)
-            # idd = idd + 1
             for i, room in enumerate(self.rooms):
                 if obj.room_id == room.room_id:
                     room_ids_list.append(i)
@@ -2375,16 +2270,10 @@ to a specific location by finding the closest frame in the provided locations to
         if query_method == "clip":
             object_embs = np.array([obj.embedding for obj in objects_list])
             sim_mat = np.dot(query_text_feats, object_embs.T)
-            # sim_mat = compute_similarity(query_text_feats, object_embs)  #
-            # (len(categories), len(objects_list))
             top_index = np.argsort(sim_mat[query_id])[::-1][:10]
-            # top_index = np.argsort(sim_mat[query_id])[::1][:10]
             for i in top_index:
                 print("object name, score: ", objects_list[i].name, sim_mat[0][i])
                 print("object id: ", objects_list[i].object_id)
-
-            # plt.hist(sim_mat.flatten(), bins=100)
-            # plt.show()
 
             top_index = np.argsort(sim_mat[query_id])[::-1][:top_k]
             if len(negative_prompt) > 0:
@@ -2425,18 +2314,13 @@ to a specific location by finding the closest frame in the provided locations to
         Returns:
             Tuple[Floor, List[Room], List[Object]]: return a floor object, a room object and a list of object objects
         """
-        # negative_labels = ["background", "wall"]
         negative_labels = ["background"]
-        # negative_labels = ["wall"]
         start_time = time.time()
         floor_query, room_query, object_query = parse_hier_query_use_prompt_insentence_parse_icra(
             self.cfg, query_instruction
         )
         llm_parse_time = time.time() - start_time
         print("llm_parse_time: ", llm_parse_time)
-        # log these in a txt file
-        # with open("room_obj_query_log.txt", "a") as f:
-        # print((f"query: {query_instruction} -- {floor_query}, {room_query}, {object_query}\n"))
 
         if "Exhibition" in room_query:
             negative_labels = ["wall"]
@@ -2481,15 +2365,12 @@ to a specific location by finding the closest frame in the provided locations to
                 res_dict,
             )
         room_ids = (
-            # self.query_room_new(room_query, floor_id=floor_id, query_method="label")
             self.query_hmsg_room(room_query, floor_id=floor_id, query_method="label")
             if room_query is not None
             else []
         )
         print("room_ids: ", room_ids)
 
-        best_room_id = room_ids[0] if len(room_ids) > 0 else -1
-        # best room, best object
         print(f"room ids: {room_ids}")
         object_ids, room_ids, object_scores = (
             self.query_hmsg_object(
@@ -2502,7 +2383,6 @@ to a specific location by finding the closest frame in the provided locations to
             if object_query is not None
             else ([], [])
         )
-        # print(f"object ids: {object_ids}")
 
         res_dict = dict()
         res_dict["room_query"] = room_query
@@ -2632,7 +2512,6 @@ to a specific location by finding the closest frame in the provided locations to
         """Save the masked pcds to disk :params state: str 'both' or 'objects'
 
         or 'full' to save the full masked pcds or only the objects."""
-        # # remove any small pcds
         tqdm.write("-- removing small and empty masks --")
         for i, pcd in reversed(list(enumerate(self.mask_pcds))):
             if len(pcd.points) < 10:
@@ -2699,16 +2578,11 @@ to a specific location by finding the closest frame in the provided locations to
                 else:
                     print("masked pcd {} not found in {}".format(i, path))
                     not_found.append(i)
-            # # new add
             print("number of masked pcds loaded from disk {}".format(len(self.mask_pcds)))
             # remove masks_feats that are not found
             not_found = [i for i in not_found if i < len(self.mask_feats)]
             self.mask_feats = np.delete(self.mask_feats, not_found, axis=0)
             print("number of mask_feats loaded from disk {}".format(len(self.mask_feats)))
-
-            # # # new
-            #         self.mask_feats.pop(i)
-
             return self.mask_pcds
         else:
             print("masked pcds for objects not found in {}".format(path))
@@ -2738,9 +2612,6 @@ to a specific location by finding the closest frame in the provided locations to
             # remove masks_feats that are not found
             self.mask_feats = np.delete(self.mask_feats, not_found, axis=0)
             print("number of mask_feats loaded from disk {}".format(len(self.mask_feats)))
-            # # # new
-            #         self.mask_feats.pop(i)
-
             return self.mask_pcds
         else:
             print("masked pcds for objects not found in {}".format(path))

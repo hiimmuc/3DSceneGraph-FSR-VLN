@@ -4,7 +4,7 @@ main:
     dataset: horizon
     scene_id: LivingRoomDataset_20260330
     dataset_path: /home/namdp15/Workspace/VMO/vm_scene_graph/vmo_scene_graph/3DSG_gen/data/HoloAgent
-    # Depth threshold in meters — pixels/points beyond this distance are discarded; lower = only close objects reconstructed
+    # Depth threshold in meters — pixels/points beyond this distance are discarded; lower = only close objects reconstructed, depends on how far the camera to the objects
     depth_cut: 6.0
     save_path: outputs/built_graphs
 models:
@@ -28,8 +28,42 @@ models:
 pipeline:
     # 3D spatial resolution in meters — smaller = finer detail but more memory/time
     voxel_size: 0.05 # default 0.05
+
+    # ========== Point Cloud Filtering Pipeline ==========
+    # Multi-stage noise reduction for real RGB-D sensor data
+    # Pipeline order: DBSCAN → Voxel downsample → Radius outlier removal
+    # DBSCAN runs FIRST on the dense raw cloud where flying pixels are identifiable.
+    # Voxel downsampling runs SECOND to reduce spatial density uniformly.
+    # Radius outlier removal runs LAST to clean residual artifacts.
+    enable_pcd_filtering: false
+
+    # Stage 1: DBSCAN clustering — runs on the DENSE raw cloud to remove flying pixels
+    # At raw density (~4M pts, avg spacing ~0.005m), eps=0.02 finds many neighbors.
+    # min_points=10 is enough to distinguish real geometry from isolated noise.
+    enable_dbscan_filtering: true
+    dbscan_eps: 0.02
+    dbscan_min_points: 10
+
+    # Stage 2: Voxel downsampling — uniform density reduction after noise removal
+    enable_voxel_downsampling: true
+
+    # Stage 3: Radius outlier removal — final cleanup after downsampling
+    enable_radius_outlier_filtering: true
+    # Minimum neighbors in radius to keep a point
+    radius_nb_points: 1000
+    # Search radius (meters)
+    radius_distance: 1.0
+
+    # Visualization of filtering stages (shows before/after for each step)
+    visualize_filtering: true
+    # Coloring mode for visualization: 'depth' (blue=near, yellow=far), 'clusters' (each cluster different color), 'uniform' (red=before, green=after)
+    coloring_mode: depth # options: depth, clusters, uniform
+
     # Processes every Nth frame — higher = faster but may miss objects / should be match with skip + 1 in convert.yaml
-    skip_frames: 8
+    skip_frames: 5
+
+    # ========== Mask Merging and Feature Extraction ==========
+
     init_overlap_thresh: 0.75 # default 0.75
     # Scales init_overlap_thresh adaptively — controls how the threshold evolves
     overlap_thresh_factor: 0.025
@@ -39,17 +73,11 @@ pipeline:
     clip_masked_weight: 0.4418
     # Pixel padding around bounding boxes before CLIP encoding — larger margin includes more context
     clip_bbox_margin: 50 # in pixels
-    # DBSCAN clustering radius in CLIP feature space — larger = more aggressive merging of similar objects
-    feature_dbscan_eps: 0.01
     # Maximum 3D distance (meters) between masks to consider association — effectively a spatial cutoff
     max_mask_distance: 10000 # 6.4239 in meters
-    # Minimum 3D points for an object to be kept in the graph — filters out spurious tiny reconstructions
-    min_pcd_points: 100
-    # When true, weights contributions by inverse depth (closer = more trusted)
-    depth_weighting: false
     grid_resolution: 0.05
     # sequential merges frame-by-frame; hierarchical does multi-level merging — hierarchical is more thorough but slower
-    merge_type: sequential # hierarchical, sequential
+    merge_type: hierarchical # hierarchical, sequential
     save_intermediate_results: true
     obj_labels: FINALLABEL #FINALLABEL #SCANNET200 #COCO_STUFF_CLASSES #IMAGENET21K_LABELS #HM3DSEM_LABELS
     # When true, post-processes the graph to further merge duplicate object nodes
