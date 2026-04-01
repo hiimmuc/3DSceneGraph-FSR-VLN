@@ -1,11 +1,7 @@
 """Class to represent the HMSG graph."""
 
-try:
-    import oss2
-    from oss2.credentials import EnvironmentVariableCredentialsProvider
-except ImportError:
-    oss2 = None
-    EnvironmentVariableCredentialsProvider = None
+# NOTE: the upload2oss is removed. upload2oss makes local images reachable by the cloud VLM/LLM by uploading them to Aliyun OSS and producing public HTTPS URLs
+
 import json
 import os
 import re
@@ -45,15 +41,16 @@ from memory.hmsg.utils.graph_utils import (
     map_grid_to_point_cloud,
     pcd_denoise,
     seq_merge,
+    visualize_pcd_clusters,
     visualize_pcd_on_image,
 )
 from memory.hmsg.utils.label_feats import get_label_feats
 from memory.hmsg.utils.llm_utils import (
+    create_llm_client,
     infer_floor_id_from_query,
     parse_hier_query_use_prompt_insentence_parse_icra,
 )
 from omegaconf import DictConfig
-from openai import AzureOpenAI
 from perception.models.sam_clip_feats_extractor import extract_feats_per_pixel
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
@@ -79,6 +76,23 @@ class Graph:
 
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
+        self._init_state()
+        self._load_clip_model()
+        self._init_directories()
+
+        if not hasattr(self.cfg, "pipeline"):
+            print("-- entering querying and evaluation mode")
+            return
+
+        self._load_dataset()
+
+        if self.cfg.main.use_vlm:
+            self._init_vlm_client()
+        else:
+            self._load_sam_model()
+
+    def _init_state(self) -> None:
+        """Initialize all graph data containers and device."""
         self.full_pcd = o3d.geometry.PointCloud()
         self.mask_feats = []
         self.mask_pcds = []
@@ -91,95 +105,66 @@ class Graph:
         self.graph.add_node(0, name="building", type="building")
         self.room_masks = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        # load CLIP model
-        if self.cfg.models.clip.type == "ViT-L/14":
-            self.clip_model, _, self.preprocess = open_clip.create_model_and_transforms(
-                "ViT-L-14",
-                pretrained=str(self.cfg.models.clip.checkpoint),
-                device=self.device,
-            )
-            self.clip_feat_dim = CLIP_DIM["ViT-L-14"]
-        elif self.cfg.models.clip.type == "ViT-H-14":
-            self.clip_model, _, self.preprocess = open_clip.create_model_and_transforms(
-                "ViT-H-14",
-                pretrained=str(self.cfg.models.clip.checkpoint),
-                device=self.device,
-            )
-            self.clip_feat_dim = CLIP_DIM["ViT-H-14"]
-        elif self.cfg.models.clip.type == "ViT-B-32":
-            self.clip_model, _, self.preprocess = open_clip.create_model_and_transforms(
-                "ViT-B-32",
-                pretrained=str(self.cfg.models.clip.checkpoint),
-                device=self.device,
-                precision="fp16",
-            )
-            self.clip_feat_dim = CLIP_DIM["ViT-B-32"]
 
+    def _load_clip_model(self) -> None:
+        """Load and configure the CLIP model specified in config."""
+        clip_type = self.cfg.models.clip.type
+        checkpoint = str(self.cfg.models.clip.checkpoint)
+        _MODEL_MAP = {
+            "ViT-L/14": ("ViT-L-14", {}),
+            "ViT-H-14": ("ViT-H-14", {}),
+            "ViT-B-32": ("ViT-B-32", {"precision": "fp16"}),
+        }
+        if clip_type not in _MODEL_MAP:
+            raise ValueError(f"Unsupported CLIP model type: {clip_type}")
+        model_name, extra_kwargs = _MODEL_MAP[clip_type]
+        self.clip_model, _, self.preprocess = open_clip.create_model_and_transforms(
+            model_name, pretrained=checkpoint, device=self.device, **extra_kwargs
+        )
+        self.clip_feat_dim = CLIP_DIM[model_name]
         self.clip_model.eval()
 
-        self.graph_tmp_folder = os.path.join(cfg.main.save_path, "tmp")
+    def _init_directories(self) -> None:
+        """Create working directories and set save paths."""
+        self.graph_tmp_folder = os.path.join(self.cfg.main.save_path, "tmp")
         os.makedirs(self.graph_tmp_folder, exist_ok=True)
-
-        self.vln_result_dir = os.path.join(cfg.main.save_path, "vln_result_presentation")
+        self.vln_result_dir = os.path.join(self.cfg.main.save_path, "vln_result_presentation")
         os.makedirs(self.vln_result_dir, exist_ok=True)
-
         self.curr_query_save_dir = self.vln_result_dir
 
-        if self.cfg.main.use_gpt:
-            self.graph_path = self.cfg.main.graph_path
+    def _load_dataset(self) -> None:
+        """Load the HorizonDataset from config."""
+        dataset_cfg = {
+            "root_dir": self.cfg.main.dataset_path,
+            "transforms": None,
+            "depth_cut": self.cfg.main.depth_cut,
+        }
+        self.dataset = HorizonDataset(dataset_cfg)
 
-            end_point = "xxxx"
-            api_key = "xxxx"
-            api_version = "xxxx"
-            self.gpt_model = "xxxx"
+    def _init_vlm_client(self) -> None:
+        """Initialize the VLM client (Azure OpenAI or local Qwen) from .env."""
+        self.graph_path = self.cfg.main.graph_path
+        self.client, self.vlm_model = create_llm_client()
 
-            self.client = AzureOpenAI(
-                azure_endpoint=end_point,
-                api_key=api_key,
-                api_version=api_version,
-            )
+    def _load_sam_model(self) -> None:
+        """Load and configure the SAM model specified in config."""
+        model_type = self.cfg.models.sam.type
+        self.sam = sam_model_registry[model_type](checkpoint=str(self.cfg.models.sam.checkpoint))
+        self.sam.to(device=self.device)
+        self.mask_generator = SamAutomaticMaskGenerator(
+            model=self.sam,
+            points_per_side=self.cfg.models.sam.points_per_side,
+            pred_iou_thresh=self.cfg.models.sam.pred_iou_thresh,
+            points_per_batch=self.cfg.models.sam.points_per_batch,
+            stability_score_thresh=self.cfg.models.sam.stability_score_thresh,
+            crop_n_layers=self.cfg.models.sam.crop_n_layers,
+            min_mask_region_area=self.cfg.models.sam.min_mask_region_area,
+        )
+        self.sam.eval()
 
-            # load the dataset
-            dataset_cfg = {
-                "root_dir": self.cfg.main.dataset_path,
-                "transforms": None,
-                "depth_cut": self.cfg.main.depth_cut,
-            }
-            self.dataset = HorizonDataset(dataset_cfg)
-
-        if not hasattr(self.cfg, "pipeline"):
-            print("-- entering querying and evaluation mode")
-            return
-
-        if not self.cfg.main.use_gpt:
-            # load the SAM model
-            model_type = self.cfg.models.sam.type
-            self.sam = sam_model_registry[model_type](
-                checkpoint=str(self.cfg.models.sam.checkpoint)
-            )
-            self.sam.to(device=self.device)
-            self.mask_generator = SamAutomaticMaskGenerator(
-                model=self.sam,
-                points_per_side=self.cfg.models.sam.points_per_side,
-                pred_iou_thresh=self.cfg.models.sam.pred_iou_thresh,
-                points_per_batch=self.cfg.models.sam.points_per_batch,
-                stability_score_thresh=self.cfg.models.sam.stability_score_thresh,
-                crop_n_layers=self.cfg.models.sam.crop_n_layers,
-                min_mask_region_area=self.cfg.models.sam.min_mask_region_area,
-            )
-            self.sam.eval()
-
-            # load the dataset
-            dataset_cfg = {
-                "root_dir": self.cfg.main.dataset_path,
-                "transforms": None,
-                "depth_cut": self.cfg.main.depth_cut,
-            }
-            self.dataset = HorizonDataset(dataset_cfg)
-
-    def generate_object_querys(self, instruction):
+    def generate_object_queries(self, instruction):
         prompt = f"""
-You are an AI assistant for visual navigation, and your name is Motion. Please ignore all occurrences of the word Motion in the input instructions, as they do not represent navigation targets.
+You are an AI assistant for visual navigation, and your name is **Motion**. Please ignore all occurrences of the word Motion in the input instructions, as they do not represent navigation targets.
 
 Given a navigation instruction, extract the main target object(s) mentioned or implied.
 If the instruction does not explicitly mention an object, infer the most likely target object(s) based on common sense and the user's intent.
@@ -192,7 +177,7 @@ Instruction: {instruction}"""
             try:
                 print("Sending request stage 1 ...")
                 response = self.client.chat.completions.create(
-                    model=self.gpt_model,
+                    model=self.vlm_model,
                     messages=[
                         {
                             "role": "user",
@@ -257,12 +242,8 @@ Instruction: {instruction}"""
                 ),
                 "radius_nb_points": self.cfg.pipeline.get("radius_nb_points", 1000),
                 "radius_distance": self.cfg.pipeline.get("radius_distance", 1.0),
-                "visualize_filtering": self.cfg.pipeline.get("visualize_filtering", False),
-                "coloring_mode": self.cfg.pipeline.get("coloring_mode", "depth"),
             }
-            self.full_pcd = filter_point_cloud(
-                self.full_pcd, filter_config, save_dir=self.cfg.main.save_path
-            )
+            self.full_pcd = filter_point_cloud(self.full_pcd, filter_config)
 
         self.save_full_pcd(path=self.cfg.main.save_path)
 
@@ -946,7 +927,7 @@ Instruction: {instruction}"""
                 floor.rooms[closest_room_idx].add_object(object)
                 self.objects.append(object)
 
-    def create_graph_new(self):
+    def create_graph(self):
         """Create the full HMSG graph as a networkx graph."""
         # add nodes to the graph
         for floor in self.floors:
@@ -1093,7 +1074,7 @@ Instruction: {instruction}"""
                 print(" number of objects after merging: ", len(room.objects))
 
         print("creating graph...")
-        self.create_graph_new()
+        self.create_graph()
 
         # create navigation graph for each floor
         print("createing nav_graph...")
@@ -1240,14 +1221,13 @@ Instruction: {instruction}"""
         Args:
             query (str): a number in text format
             query_method (str): "clip" match the clip embeddings of the query text and the text description of all floors.
-                                "gpt" provide the floor ids in the graph and the text query to a gpt agent, and ask for the
+                                "vlm" provide the floor ids in the graph and the text query to a vlm agent, and ask for the
                                 matching floor id.
 
         Returns:
             int: The target floor id in self.floors
         """
-        # TODO: assume that the self.floors are ordered according to the floor
-        # level in ascending order. Check again.
+        # TODO: assume that the self.floors are ordered according to the floor level in ascending order. Check again.
         zero_levels_list = [x.floor_zero_level for x in self.floors]
         zero_level_order_ids = np.argsort(zero_levels_list)
 
@@ -1267,49 +1247,25 @@ Instruction: {instruction}"""
                 top_index = np.argsort(sim_mat[0])[::-1][0]
                 return zero_level_order_ids[top_index]
 
-            elif query_method == "gpt":
+            elif query_method == "vlm":
                 floor_ids_list = [i + 1 for i in range(len(self.floors))]
                 floor_id = infer_floor_id_from_query(floor_ids_list, query)
                 return zero_level_order_ids[floor_id - 1]
-
-    def upload2oss(self, retrieved_img_list: list):
-        self.upload_flag = True
-        self.force_reupload = False
-        self.src_img_root = os.path.dirname(retrieved_img_list[0])
-        img_dir_prefix = f"{os.path.basename(self.src_img_root)}/images"
-        img_list = retrieved_img_list  # Do not sort
-        self.downsampeld_img_list = img_list
-        auth = oss2.ProviderAuth(EnvironmentVariableCredentialsProvider())
-        bucket = oss2.Bucket(auth, "oss-cn-beijing.aliyuncs.com", "mapvln")
-        self.oss_img_list = []
-        for file in tqdm(self.downsampeld_img_list):
-            file_name = os.path.basename(file)
-            self.oss_img_list.append(
-                f"https://mapvln.oss-cn-beijing.aliyuncs.com/{img_dir_prefix}/{file_name}"
-            )
-            oss_url = f"{img_dir_prefix}/{file_name}"
-            if self.upload_flag:
-                if not bucket.object_exists(oss_url) or self.force_reupload:
-                    bucket.put_object_from_file(
-                        oss_url,
-                        file,
-                    )
-                else:
-                    print(f"{oss_url} already exists in Aliyun OSS, skipping.")
-        print(f"Uploaded {len(self.downsampeld_img_list)} images to Aliyun OSS.")
 
     def vlm_choose(self, video_image_local_paths: list, instruction: str):
         system_prompt = """You are a robot operating in an indoor environment and your task is to respond to the user command about going
 
 to a specific location by finding the closest frame in the provided locations to navigate to."""
-        self.upload2oss(video_image_local_paths)
-        video_prompt = []
-        for i, img_url in enumerate(self.oss_img_list):
-            video_prompt.append({"type": "text", "text": f"Frame:{i}"})
-            video_prompt.append({"type": "image_url", "image_url": {"url": img_url}})
-        instruction_prompt = f"User says: {instruction}. Can you find the closet frame in the provided locations to navigate to?"
-        rules_prompt = """Rules to follow:
 
+        # self.upload2oss(video_image_local_paths)
+
+        video_prompt = []
+        for i, img_path in enumerate(video_image_local_paths):
+            video_prompt.append({"type": "text", "text": f"Frame:{i}"})
+            video_prompt.append({"type": "image_url", "image_url": {"url": img_path}})
+        instruction_prompt = f"User says: {instruction}. Can you find the closet frame in the provided locations to navigate to?"
+        rules_prompt = """
+Rules to follow:
 1. Output the frame id (integer) wrapped in the <frame_id> tag.
 2. Carefully compare the candidate locations with the user instruction and select the closest one.  Describe the image you choose in detail to justify your choice after you respond the frame_id."""
 
@@ -1338,7 +1294,7 @@ to a specific location by finding the closest frame in the provided locations to
             try:
                 print("Sending request stage 2 ...")
                 response = self.client.chat.completions.create(
-                    model=self.gpt_model,
+                    model=self.vlm_model,
                     messages=messages,
                     seed=123,
                 )
@@ -1350,11 +1306,11 @@ to a specific location by finding the closest frame in the provided locations to
         response = response.choices[0].message.content
         return response
 
-    def detect_and_select_best_gpt(
+    def detect_and_select_best_vlm(
         self, imglist: List[str], query: str, score_threshold: float = 0.5
     ):
         """
-        Use GPT Vision to detect whether an object appears in each image and return the best matching image.
+        Use VLM Vision to detect whether an object appears in each image and return the best matching image.
         Args:
             imglist: list of image paths or URLs
             query: target object to query
@@ -1363,11 +1319,11 @@ to a specific location by finding the closest frame in the provided locations to
             results: List[bool], whether each image contains the object
             best_image: str, the image best matching the query (None if not found)
         """
-        self.upload2oss(imglist)
+        # self.upload2oss(imglist)
 
         results, scores = [], []
 
-        for img in self.oss_img_list:
+        for img in imglist:
             # Step 1: yes/no detection
             prompt_yesno = (
                 f"Does this image contain a '{query}'? Answer strictly with 'yes' or 'no'."
@@ -1386,7 +1342,7 @@ to a specific location by finding the closest frame in the provided locations to
                 },
             ]
             resp_yesno = self.client.chat.completions.create(
-                model=self.gpt_model,
+                model=self.vlm_model,
                 messages=messages_yesno,
             )
             ans_raw = resp_yesno.choices[0].message.content.strip().lower()
@@ -1410,7 +1366,7 @@ to a specific location by finding the closest frame in the provided locations to
                     },
                 ]
                 resp_score = self.client.chat.completions.create(
-                    model=self.gpt_model,
+                    model=self.vlm_model,
                     messages=messages_score,
                 )
                 ans_score_raw = resp_score.choices[0].message.content.strip()
@@ -1428,7 +1384,7 @@ to a specific location by finding the closest frame in the provided locations to
             results.append(has_object)
             scores.append(score)
             print(
-                f"[GPT] Image: {img} → raw_yesno='{ans_raw}', score={score:.3f}, has_object={has_object}, query={query}"
+                f"[VLM] Image: {img} → raw_yesno='{ans_raw}', score={score:.3f}, has_object={has_object}, query={query}"
             )
 
         # Step 3: Select best (return None if none found)
@@ -1443,12 +1399,8 @@ to a specific location by finding the closest frame in the provided locations to
     def detect_object_in_image(
         self, img_path: str, query: str, score_threshold: float = 0.3
     ) -> bool:
-
-        # Upload image to OSS
-        self.upload2oss([img_path])
-        img_url = self.oss_img_list[0]
-
-        # Directly output a 0~1 score
+        # self.upload2oss([img_path])
+        img_url = img_path
         prompt = (
             f"On a scale from 0 to 1, does this image contain a '{query}'? "
             "Respond only with a single number between 0 and 1."
@@ -1468,7 +1420,7 @@ to a specific location by finding the closest frame in the provided locations to
         ]
 
         resp = self.client.chat.completions.create(
-            model=self.gpt_model,
+            model=self.vlm_model,
             messages=messages,
         )
         ans_raw = resp.choices[0].message.content.strip()
@@ -1481,7 +1433,7 @@ to a specific location by finding the closest frame in the provided locations to
             score = 0.0
 
         has_object = score >= score_threshold
-        print(f"[GPT] Image: {img_url} → score={score:.3f}, has_object={has_object}")
+        print(f"[VLM] Image: {img_url} → score={score:.3f}, has_object={has_object}")
         return has_object
 
     def visualize_goal_images(
@@ -1489,20 +1441,20 @@ to a specific location by finding the closest frame in the provided locations to
         mean_depth,
         goal_image_path_online,
         goal_image_path_by_clip,
-        goal_image_path_by_gpt,
+        goal_image_path_by_vlm,
         save_name="goal_compare.png",
     ):
         # Read the images
         img_online = cv2.imread(goal_image_path_online)
-        img_gpt_best = cv2.imread(goal_image_path_by_clip)
-        img_gpt = cv2.imread(goal_image_path_by_gpt)
+        img_vlm_best = cv2.imread(goal_image_path_by_clip)
+        img_vlm = cv2.imread(goal_image_path_by_vlm)
 
-        if img_gpt_best is None or img_gpt is None or img_online is None:
+        if img_vlm_best is None or img_vlm is None or img_online is None:
             raise FileNotFoundError("One of the image paths is invalid, please verify the paths")
 
         # Ensure both images have the same size (scaled to 640x480)
-        img_gpt_best = cv2.resize(img_gpt_best, (640, 480))
-        img_gpt = cv2.resize(img_gpt, (640, 480))
+        img_vlm_best = cv2.resize(img_vlm_best, (640, 480))
+        img_vlm = cv2.resize(img_vlm, (640, 480))
         img_online = cv2.resize(img_online, (640, 480))
 
         # Add labels in the top-left corner
@@ -1512,9 +1464,9 @@ to a specific location by finding the closest frame in the provided locations to
         color = (0, 255, 0)  # Green
 
         cv2.putText(
-            img_gpt_best, "BEST", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA
+            img_vlm_best, "BEST", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA
         )
-        cv2.putText(img_gpt, "GPT", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA)
+        cv2.putText(img_vlm, "VLM", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA)
         cv2.putText(
             img_online, "ObjBestView", (10, 30), font, font_scale, color, thickness, cv2.LINE_AA
         )
@@ -1529,7 +1481,7 @@ to a specific location by finding the closest frame in the provided locations to
             cv2.LINE_AA,
         )
         # Horizontal concatenation
-        combined = np.hstack((img_online, img_gpt_best, img_gpt))
+        combined = np.hstack((img_online, img_vlm_best, img_vlm))
         # Save result
         save_path = os.path.join(self.curr_query_save_dir, save_name)
         cv2.imwrite(save_path, combined)
@@ -1553,7 +1505,7 @@ to a specific location by finding the closest frame in the provided locations to
         return best_view_image_path, best_view_img_id, target_object_id
 
     def get_object_best_view(self, target_object):
-        target_object_id = target_object.object_id
+        # target_object_id = target_object.object_id
         target_object_best_view_id = target_object.best_view_id
         best_view = None
         for view in self.views:
@@ -1590,7 +1542,7 @@ to a specific location by finding the closest frame in the provided locations to
         update_flag=True,
     ):
         """Query the graph with text input for room and object."""
-        print("process object query use gpt....")
+        print("process object query use vlm....")
         query_time_consumer = dict()
         query_time_consumer["room_query"] = room_query
         query_time_consumer["object_query"] = object_query
@@ -1666,7 +1618,7 @@ to a specific location by finding the closest frame in the provided locations to
         # query object
         if not is_dectect_obj:
             print("not found object, use llm to find intention object")
-            object_query = self.generate_object_querys(instruction)
+            object_query = self.generate_object_queries(instruction)
 
         if object_query in negative_prompt:
             query_id = negative_prompt.index(object_query)
@@ -1779,7 +1731,7 @@ to a specific location by finding the closest frame in the provided locations to
             res_dict["Total_Time"] = total_online_query_time
             return res_dict, target_id, target_room_id
 
-        else:  # run gpt-refine
+        else:  # run vlm-refine
             total_online_query_time = FastMatching_time + Object_in_goal_view_check_time
             all_image_incides = []
             all_image_embedding = []
@@ -1822,7 +1774,7 @@ to a specific location by finding the closest frame in the provided locations to
                 query_time_consumer["goal_image_path_by_clip"] = goal_image_path_by_clip
                 start_time = time.time()
 
-                # find goal image by gpt
+                # find goal image by vlm
                 room_clip_refined_topk_image_local_paths = [
                     self.dataset.frameId2imgPath[all_image_incides[idx]] for idx in top_idx
                 ]
@@ -1834,53 +1786,53 @@ to a specific location by finding the closest frame in the provided locations to
                 match = re.findall(r"\d+", response)
                 if match:
                     frame_id = match[0]
-                    goal_img_path = self.downsampeld_img_list[int(frame_id)]
+                    goal_img_path = room_image_local_paths[int(frame_id)]
                 else:
                     print("No frame id found in response text.")
                     goal_img_path = None
-                goal_image_path_by_gpt = goal_img_path
+                goal_image_path_by_vlm = goal_img_path
                 end_time = time.time()
-                query_time_consumer[f"goal_image_reterival_by_gpt_{room_id}"] = (
+                query_time_consumer[f"goal_image_reterival_by_vlm_{room_id}"] = (
                     end_time - start_time
                 )
-                query_time_consumer["goal_image_path_by_gpt"] = goal_image_path_by_gpt
-                print(f"find goal image by gpt elapsed time: {end_time - start_time:.4f} seconds")
-                print("goal_image_path_by_gpt: ", goal_image_path_by_gpt)
+                query_time_consumer["goal_image_path_by_vlm"] = goal_image_path_by_vlm
+                print(f"find goal image by vlm elapsed time: {end_time - start_time:.4f} seconds")
+                print("goal_image_path_by_vlm: ", goal_image_path_by_vlm)
 
                 # judge whether object in goal image
                 select_imgs = [
                     goal_image_path_online,
                     goal_image_path_by_clip,
-                    goal_image_path_by_gpt,
+                    goal_image_path_by_vlm,
                 ]
 
-                gpt_check_start_time = time.time()
-                gpt_check_result, best_image_path = self.detect_and_select_best_gpt(
+                vlm_check_start_time = time.time()
+                vlm_check_result, best_image_path = self.detect_and_select_best_vlm(
                     select_imgs, object_query[query_id]
                 )
-                gpt_check_time = time.time() - gpt_check_start_time
-                query_time_consumer["gpt_check_time"] = gpt_check_time
-                print("Detection results:", gpt_check_result)  # [True, False]
+                vlm_check_time = time.time() - vlm_check_start_time
+                query_time_consumer["vlm_check_time"] = vlm_check_time
+                print("Detection results:", vlm_check_result)  # [True, False]
                 print("Best image:", best_image_path)
-                query_time_consumer["detection_results"] = gpt_check_result
+                query_time_consumer["detection_results"] = vlm_check_result
                 query_time_consumer["best_image"] = best_image_path
                 print(best_image_path != goal_image_path_online)
                 print("update_flatg ", update_flag)
-                avg_distance_in_gptview = -1.0
-                gpt_refine_time_start = time.time()
+                avg_distance_in_vlmview = -1.0
+                vlm_refine_time_start = time.time()
                 if (
-                    gpt_check_result[0] is False
+                    vlm_check_result[0] is False
                     and update_flag
                     and best_image_path != goal_image_path_online
                     and best_image_path is not None
                 ):
-                    print("performing gpt refineing..............................")
+                    print("performing vlm refineing..............................")
                     objs_embedding_in_view = []
-                    gpt_refine_best_view, gpt_refine_best_view_img_id = self.find_view_by_imgpath(
+                    vlm_refine_best_view, vlm_refine_best_view_img_id = self.find_view_by_imgpath(
                         best_image_path
                     )
-                    assert gpt_refine_best_view is not None
-                    object_ids_in_view = gpt_refine_best_view.object_ids
+                    assert vlm_refine_best_view is not None
+                    object_ids_in_view = vlm_refine_best_view.object_ids
                     for object_id in object_ids_in_view:
                         object_target = self.find_object_by_object_id(object_id)
                         assert object_target is not None
@@ -1899,26 +1851,26 @@ to a specific location by finding the closest frame in the provided locations to
                         final_object = self.find_object_by_object_id(max_sim_object_id)
                         final_obj_pcd = final_object.pcd
                         camera_matrix = self.dataset.get_camera_intrinsics()
-                        img, _, pose, _, _ = self.dataset[gpt_refine_best_view_img_id]
+                        img, _, pose, _, _ = self.dataset[vlm_refine_best_view_img_id]
                         if not isinstance(img, np.ndarray):
                             img = np.array(img)
                             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                        avg_distance_in_gptview = visualize_pcd_on_image(
+                        avg_distance_in_vlmview = visualize_pcd_on_image(
                             final_obj_pcd,
                             img,
                             camera_matrix,
                             np.linalg.inv(pose),
                             save_path=os.path.join(
                                 self.curr_query_save_dir,
-                                f"gpt_refine_object_id_{final_object.object_id}.png",
+                                f"vlm_refine_object_id_{final_object.object_id}.png",
                             ),
                         )
                         new_objects_path = os.path.join(self.graph_path, "objects_update")
                         if not os.path.exists(new_objects_path):
                             os.makedirs(new_objects_path)
                         final_object.save(os.path.join(self.graph_path, "objects_update"))
-                gpt_refine_time = time.time() - gpt_refine_time_start
-                query_time_consumer["gpt_refine_time"] = gpt_refine_time
+                vlm_refine_time = time.time() - vlm_refine_time_start
+                query_time_consumer["vlm_refine_time"] = vlm_refine_time
 
                 # Calculate distance
                 obj_pcd = deepcopy(best_object.pcd)
@@ -1937,273 +1889,33 @@ to a specific location by finding the closest frame in the provided locations to
                         mean_depth_online,
                         goal_image_path_online,
                         goal_image_path_by_clip,
-                        goal_image_path_by_gpt,
+                        goal_image_path_by_vlm,
                         save_name=f"goal_compare_room_{room_id}.png",
                     )
                 else:
-                    best_image_path = goal_image_path_by_gpt
+                    best_image_path = goal_image_path_by_vlm
                     self.visualize_goal_images(
                         mean_depth_online,
                         goal_image_path_online,
                         goal_image_path_by_clip,
-                        goal_image_path_by_gpt,
+                        goal_image_path_by_vlm,
                         save_name=f"goal_compare_room_{room_id}.png",
                     )
 
                 # Save as JSON file
-            total_query_time_offline = total_online_query_time + gpt_check_time + gpt_refine_time
+            total_query_time_offline = total_online_query_time + vlm_check_time + vlm_refine_time
             query_time_consumer["total_query_time"] = f"{total_query_time_offline:.4f} seconds"
             query_time_consumer["online_object_distance_in_online_view"] = mean_depth_online
-            query_time_consumer["gptref_object_distance_in_ofline_view"] = avg_distance_in_gptview
+            query_time_consumer["vlmref_object_distance_in_ofline_view"] = avg_distance_in_vlmview
             with open(save_json_path, "w", encoding="utf-8") as f:
                 json.dump(query_time_consumer, f, ensure_ascii=False, indent=4)
             res_dict = dict()
             res_dict["FastMatching"] = FastMatching_time
             res_dict["ObjectInImageCheck"] = Object_in_goal_view_check_time
-            res_dict["VLM_Rethinking"] = gpt_check_time
-            res_dict["Re_Matching"] = gpt_refine_time
+            res_dict["VLM_Rethinking"] = vlm_check_time
+            res_dict["Re_Matching"] = vlm_refine_time
             res_dict["Total_Time"] = total_query_time_offline
             return res_dict, target_id, target_room_id
-
-    def query_hmsg_object(
-        self,
-        query: str,
-        floor_id: int = -1,
-        room_ids: List[int] = [],
-        query_method: str = "clip",
-        top_k: int = 1,
-        negative_prompt: List[str] = [],
-    ) -> Tuple[List[int], List[int]]:
-        """
-        Search an object (from a room) with a text query.
-
-        Args:
-            query (str): a description of the object
-            room_ids (List[int], optional): The room ids. Defaults to [], which means search from all rooms.
-            query_method (str, optional): "clip" means using clip features of the objects and the query to search.
-                                          Defaults to "clip".
-            top_k (int, optional): The number of top results to return. Default to 1.
-            negative_prompt (List[str], optional): A list of categories used as negative prompt.
-
-
-        Returns:
-            Tuple[int, int]: The target object id in self.objects and the corresponding room id in self.rooms.
-        """
-
-        if query in negative_prompt:
-            query_id = negative_prompt.index(query)
-        else:
-            query_id = None
-
-        if query_id is None:
-            query = [query, *negative_prompt]
-            query_id = 0
-        else:
-            query = negative_prompt
-
-        print(f"query_id: {query_id}")
-        print(f"categories list: {query}")
-
-        query_text_feats = get_text_feats_multiple_templates(
-            query, self.clip_model, self.clip_feat_dim
-        )  # (len(categories), feat_dim)
-
-        room_ids_list = []
-        for obj in self.objects:
-            for i, room in enumerate(self.rooms):
-                if obj.room_id == room.room_id:
-                    room_ids_list.append(i)
-                    break
-
-        if len(room_ids) != 0:
-            objects_list = []
-            room_ids_list = []
-            for i in room_ids:
-                if floor_id != -1:
-                    objects_list.extend(self.floors[floor_id].rooms[i].objects)
-                    room_ids_list.extend([i] * len(self.floors[floor_id].rooms[i].objects))
-                else:
-                    objects_list.extend(self.rooms[i].objects)
-                    room_ids_list.extend([i] * len(self.rooms[i].objects))
-
-        objects_list: List[Object]
-        if query_method == "clip":
-            object_embs = np.array([obj.embedding for obj in objects_list])
-            sim_mat = np.dot(query_text_feats, object_embs.T)  # shape [2,37]
-            top_index = np.argsort(sim_mat[query_id])[::-1][:top_k]
-            if len(negative_prompt) > 0:
-                # category id for each object
-                cls_ids = np.argmax(sim_mat, axis=0)
-                # max scores for each object
-                max_scores = np.max(sim_mat, axis=0)
-                # find the obj ids that assign max score to the target category
-                obj_ids = np.where(cls_ids == query_id)[0]
-                if len(obj_ids) > 0:
-                    obj_scores = max_scores[obj_ids]
-                    resort_ids = np.argsort(
-                        -obj_scores
-                    )  # sort the obj ids based on max score (descending)
-                    top_index = obj_ids[resort_ids]  # get the top index
-                    top_index = top_index[:top_k]
-
-            target_object_id = [objects_list[i].object_id for i in top_index]
-            target_object_score = [sim_mat[query_id][i] for i in top_index]
-            target_room_id = [room_ids_list[i] for i in top_index]
-            target_id = []
-            for ti in target_object_id:
-                target_id.append([i for i, x in enumerate(self.objects) if x.object_id == ti][0])
-
-            return target_id, target_room_id, target_object_score
-        return NotImplementedError
-
-    def query_hmsg_room(
-        self, query: str, floor_id: int = -1, query_method: str = "view_embedding"
-    ) -> List[int]:
-        """
-        Search a room node with a text query.
-
-        Args:
-            query (str): a text describing the room
-            floor_id (int): -1 means global search. 0-(max_floor - 1) means searching the target room on a specific floor.
-            query_method (str): "label" use pre-defined label stored in the room node. "view_embedding" use the room embedding
-                                stored in the room node. "children_embedding" use all children objects' embedding and find
-                                the most representative one for the room.
-        Returns:
-            (Room): the target room ids in self.rooms which matches th equery the best
-        """
-        is_room_text_valid = "unknown" not in query.lower()
-        if query is None or query == "":
-            is_room_text_valid = False
-        query_text_feats = get_text_feats_multiple_templates(
-            [query], self.clip_model, self.clip_feat_dim
-        )
-
-        rooms_list = self.rooms
-        if floor_id != -1:
-            rooms_list = self.floors[floor_id].rooms
-        rooms_list: List[Room]
-        if query_method == "label" and is_room_text_valid:
-            print("query room use label")
-            for room in rooms_list:
-                assert (
-                    room.name is not None
-                ), "The name attribute for the room has not been generated"
-            room_names_list = [room.name for room in rooms_list]
-            room_embs = get_text_feats_multiple_templates(
-                room_names_list, self.clip_model, self.clip_feat_dim
-            )
-            similarity = np.dot(query_text_feats, room_embs.T)
-            top_index = np.argsort(similarity[0])[::-1]
-            # print the top 3 matching rooms
-            for i in top_index[:3]:
-                print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
-
-            same_sim_indices = []
-            tar_sim = similarity[0, top_index[0]]
-            same_sim_indices.append(top_index[0])
-            for i in top_index[1:]:
-                if np.abs(similarity[0, i] - tar_sim) < 1e-3:
-                    same_sim_indices.append(i)
-
-            target_rooms = [rooms_list[i] for i in same_sim_indices]
-            target_room_ids = [target_room.room_id for target_room in target_rooms]
-            target_ids = [i for i, x in enumerate(rooms_list) if x.room_id in target_room_ids]
-
-            return target_ids
-        else:
-            print("query room use view embedding")
-            room2query_sim = dict()
-
-            for room in rooms_list:
-                embeddings = np.stack(room.embeddings)  # [view_num, 768]
-                # [1, view_num], similarity between query and each view
-                sims = np.dot(query_text_feats, embeddings.T)
-                max_idx = np.argmax(sims)  # Find the position of maximum similarity
-                max_sim = sims[0, max_idx]  # Maximum similarity value
-
-                room2query_sim[room.room_id] = max_sim
-
-            room2query_sim_sorted = {
-                int(k.split("_")[-1]): v
-                for k, v in sorted(room2query_sim.items(), key=lambda item: item[1], reverse=True)
-            }
-            if is_room_text_valid:
-                return list(room2query_sim_sorted.keys())[
-                    0 : min(len(room2query_sim_sorted), 5)
-                ]  # return three highest-ranking rooms
-            else:
-                return list(room2query_sim_sorted.keys())[
-                    0 : min(len(room2query_sim_sorted), 10)
-                ]  # return three highest-ranking rooms
-
-    def query_room(
-        self, query: str, floor_id: int = -1, query_method: str = "view_embedding"
-    ) -> List[int]:
-        """
-        Search a room node with a text query.
-
-        Args:
-            query (str): a text describing the room
-            floor_id (int): -1 means global search. 0-(max_floor - 1) means searching the target room on a specific floor.
-            query_method (str): "label" use pre-defined label stored in the room node. "view_embedding" use the room embedding
-                                stored in the room node. "children_embedding" use all children objects' embedding and find
-                                the most representative one for the room.
-        Returns:
-            (Room): the target room ids in self.rooms which matches th equery the best
-        """
-        is_room_text_valid = "unknown" not in query.lower()
-        if query is None or query == "":
-            is_room_text_valid = False
-        query_text_feats = get_text_feats_multiple_templates(
-            [query], self.clip_model, self.clip_feat_dim
-        )
-
-        rooms_list = self.rooms
-        if floor_id != -1:
-            rooms_list = self.floors[floor_id].rooms
-        rooms_list: List[Room]
-        if query_method == "label" and is_room_text_valid:
-            print("query room use label")
-            for room in rooms_list:
-                assert (
-                    room.name is not None
-                ), "The name attribute for the room has not been generated"
-            room_names_list = [room.name for room in rooms_list]
-            room_embs = get_text_feats_multiple_templates(
-                room_names_list, self.clip_model, self.clip_feat_dim
-            )
-            similarity = np.dot(query_text_feats, room_embs.T)
-            top_index = np.argsort(similarity[0])[::-1]
-            # print the top 3 matching rooms
-            for i in top_index[:3]:
-                print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
-
-            same_sim_indices = []
-            tar_sim = similarity[0, top_index[0]]
-            same_sim_indices.append(top_index[0])
-            for i in top_index[1:]:
-                if np.abs(similarity[0, i] - tar_sim) < 1e-3:
-                    same_sim_indices.append(i)
-
-            target_rooms = [rooms_list[i] for i in same_sim_indices]
-            target_room_ids = [target_room.room_id for target_room in target_rooms]
-            target_ids = [i for i, x in enumerate(rooms_list) if x.room_id in target_room_ids]
-            return target_ids
-        else:
-            print("query room use view embedding")
-            room2query_sim = dict()
-            for room in rooms_list:
-                room_query_sim_median = np.max(
-                    np.dot(query_text_feats, np.stack(room.embeddings).T)
-                )
-                room2query_sim[room.room_id] = room_query_sim_median
-            room2query_sim_sorted = {
-                int(k.split("_")[-1]): v
-                for k, v in sorted(room2query_sim.items(), key=lambda item: item[1], reverse=True)
-            }
-            return list(room2query_sim_sorted.keys())[
-                0 : min(len(room2query_sim_sorted), 3)
-            ]  # return three highest-ranking rooms
 
     def query_object(
         self,
@@ -2213,23 +1925,23 @@ to a specific location by finding the closest frame in the provided locations to
         query_method: str = "clip",
         top_k: int = 1,
         negative_prompt: List[str] = [],
+        return_scores: bool = False,
     ) -> Tuple[List[int], List[int]]:
-        """
-        Search an object (from a room) with a text query.
+        """Search an object with a text query.
 
         Args:
-            query (str): a description of the object
-            room_ids (List[int], optional): The room ids. Defaults to [], which means search from all rooms.
-            query_method (str, optional): "clip" means using clip features of the objects and the query to search.
-                                          Defaults to "clip".
-            top_k (int, optional): The number of top results to return. Default to 1.
-            negative_prompt (List[str], optional): A list of categories used as negative prompt.
-
+            query: Text description of the target object.
+            floor_id: -1 for global search; 0-(max_floor-1) restricts to a floor.
+            room_ids: Restrict search to these room indices. Empty = search all rooms.
+            query_method: "clip" uses CLIP embedding similarity.
+            top_k: Number of top results to return.
+            negative_prompt: Category names used as contrastive negatives.
+            return_scores: When True, also returns per-object similarity scores as a
+                           third element of the tuple.
 
         Returns:
-            Tuple[int, int]: The target object id in self.objects and the corresponding room id in self.rooms.
+            (object_ids, room_ids) — or (object_ids, room_ids, scores) if return_scores=True.
         """
-
         if query in negative_prompt:
             query_id = negative_prompt.index(query)
         else:
@@ -2248,61 +1960,115 @@ to a specific location by finding the closest frame in the provided locations to
             query, self.clip_model, self.clip_feat_dim
         )  # (len(categories), feat_dim)
 
-        room_ids_list = []
+        # Build default room→object mapping from all objects
+        room_id_by_obj_idx = []
         for obj in self.objects:
             for i, room in enumerate(self.rooms):
                 if obj.room_id == room.room_id:
-                    room_ids_list.append(i)
+                    room_id_by_obj_idx.append(i)
                     break
+
+        objects_list: List[Object] = self.objects
+        room_ids_list: List[int] = room_id_by_obj_idx
 
         if len(room_ids) != 0:
             objects_list = []
             room_ids_list = []
             for i in room_ids:
-                if floor_id != -1:
-                    objects_list.extend(self.floors[floor_id].rooms[i].objects)
-                    room_ids_list.extend([i] * len(self.floors[floor_id].rooms[i].objects))
-                else:
-                    objects_list.extend(self.rooms[i].objects)
-                    room_ids_list.extend([i] * len(self.rooms[i].objects))
+                src_rooms = self.floors[floor_id].rooms if floor_id != -1 else self.rooms
+                objects_list.extend(src_rooms[i].objects)
+                room_ids_list.extend([i] * len(src_rooms[i].objects))
 
-        objects_list: List[Object]
         if query_method == "clip":
             object_embs = np.array([obj.embedding for obj in objects_list])
             sim_mat = np.dot(query_text_feats, object_embs.T)
-            top_index = np.argsort(sim_mat[query_id])[::-1][:10]
-            for i in top_index:
+
+            # Log top-10 matches for debugging
+            debug_top = np.argsort(sim_mat[query_id])[::-1][:10]
+            for i in debug_top:
                 print("object name, score: ", objects_list[i].name, sim_mat[0][i])
                 print("object id: ", objects_list[i].object_id)
 
             top_index = np.argsort(sim_mat[query_id])[::-1][:top_k]
             if len(negative_prompt) > 0:
-                # category id for each object
                 cls_ids = np.argmax(sim_mat, axis=0)
                 print(f"cls_ids: {cls_ids}")
-                # max scores for each object
                 max_scores = np.max(sim_mat, axis=0)
-                # find the obj ids that assign max score to the target category
                 obj_ids = np.where(cls_ids == query_id)[0]
                 if len(obj_ids) > 0:
-                    obj_scores = max_scores[obj_ids]
-                    resort_ids = np.argsort(
-                        -obj_scores
-                    )  # sort the obj ids based on max score (descending)
-                    top_index = obj_ids[resort_ids]  # get the top index
-                    top_index = top_index[:top_k]
+                    resort_ids = np.argsort(-max_scores[obj_ids])
+                    top_index = obj_ids[resort_ids][:top_k]
 
             target_object_id = [objects_list[i].object_id for i in top_index]
+            object_id_map = {obj.object_id: idx for idx, obj in enumerate(self.objects)}
+            target_id = [object_id_map[oid] for oid in target_object_id]
             target_room_id = [room_ids_list[i] for i in top_index]
-            target_id = []
-            for ti in target_object_id:
-                target_id.append([i for i, x in enumerate(self.objects) if x.object_id == ti][0])
+            target_scores = [sim_mat[query_id][i] for i in top_index]
 
+            if return_scores:
+                return target_id, target_room_id, target_scores
             return target_id, target_room_id
-        return NotImplementedError
+        raise NotImplementedError(f"Unsupported query_method: {query_method}")
+
+    def query_room(
+        self,
+        query: str,
+        floor_id: int = -1,
+        query_method: str = "view_embedding",
+        top_k: int = 3,
+    ) -> List[int]:
+        """Search a room node with a text query.
+
+        Args:
+            query: Text describing the target room.
+            floor_id: -1 for global search; 0-(max_floor-1) to restrict to a floor.
+            query_method: "label" matches against stored room name embeddings;
+                          "view_embedding" scores rooms by their best-matching view.
+            top_k: Maximum number of candidate room indices to return (view_embedding only).
+
+        Returns:
+            List of room indices into self.rooms (or floor's room list) ranked by relevance.
+        """
+        is_room_text_valid = query is not None and query != "" and "unknown" not in query.lower()
+        query_text_feats = get_text_feats_multiple_templates(
+            [query], self.clip_model, self.clip_feat_dim
+        )
+
+        rooms_list: List[Room] = self.floors[floor_id].rooms if floor_id != -1 else self.rooms
+
+        if query_method == "label" and is_room_text_valid:
+            print("query room use label")
+            for room in rooms_list:
+                assert room.name is not None, "Room name has not been generated"
+            room_names_list = [room.name for room in rooms_list]
+            room_embs = get_text_feats_multiple_templates(
+                room_names_list, self.clip_model, self.clip_feat_dim
+            )
+            similarity = np.dot(query_text_feats, room_embs.T)
+            top_index = np.argsort(similarity[0])[::-1]
+            for i in top_index[:3]:
+                print("room: ", rooms_list[i].room_id, rooms_list[i].name, similarity[0][i])
+
+            # Collect all indices with similarity equal to the best match
+            tar_sim = similarity[0, top_index[0]]
+            same_sim_indices = [i for i in top_index if np.abs(similarity[0, i] - tar_sim) < 1e-3]
+            room_id_set = {rooms_list[i].room_id for i in same_sim_indices}
+            return [i for i, r in enumerate(rooms_list) if r.room_id in room_id_set]
+        else:
+            print("query room use view embedding")
+            room2query_sim = {
+                room.room_id: float(np.max(np.dot(query_text_feats, np.stack(room.embeddings).T)))
+                for room in rooms_list
+            }
+            sorted_ids = [
+                int(k.split("_")[-1])
+                for k, _ in sorted(room2query_sim.items(), key=lambda x: x[1], reverse=True)
+            ]
+            limit = top_k if is_room_text_valid else top_k * 2
+            return sorted_ids[: min(len(sorted_ids), limit)]
 
     def query_hierarchy_protected_icra(
-        self, query_instruction: str, top_k: int = 1, use_gpt: bool = False
+        self, query_instruction: str, top_k: int = 1, use_vlm: bool = False
     ) -> Tuple[Floor, Room, List[Object]]:
         """
         Return the target floor, room, object.
@@ -2338,8 +2104,8 @@ to a specific location by finding the closest frame in the provided locations to
 
         print("is_dectect_room: ", is_dectect_room, "is_dectect_obj: ", is_dectect_obj)
 
-        # ## offline use gpt to check and update object-reterival
-        if use_gpt:
+        # ## offline use vlm to check and update object-retrieval
+        if use_vlm:
             res_dict, object_ids, room_ids = self.query_room_obj_slow_reasoning(
                 query_instruction,
                 room_query,
@@ -2365,7 +2131,7 @@ to a specific location by finding the closest frame in the provided locations to
                 res_dict,
             )
         room_ids = (
-            self.query_hmsg_room(room_query, floor_id=floor_id, query_method="label")
+            self.query_room(room_query, floor_id=floor_id, query_method="label")
             if room_query is not None
             else []
         )
@@ -2373,15 +2139,16 @@ to a specific location by finding the closest frame in the provided locations to
 
         print(f"room ids: {room_ids}")
         object_ids, room_ids, object_scores = (
-            self.query_hmsg_object(
+            self.query_object(
                 object_query,
                 floor_id=floor_id,
                 room_ids=room_ids,
                 top_k=top_k,
                 negative_prompt=negative_labels,
+                return_scores=True,
             )
             if object_query is not None
-            else ([], [])
+            else ([], [], [])
         )
 
         res_dict = dict()
@@ -2407,7 +2174,7 @@ to a specific location by finding the closest frame in the provided locations to
             res_dict,
         )
 
-    def save_full_pcd(self, path):
+    def save_full_pcd(self, path, visualize_clusters=True) -> None:
         """Save the full pcd to disk :param path: str, The path to save the
 
         full pcd."""
@@ -2415,6 +2182,26 @@ to a specific location by finding the closest frame in the provided locations to
             os.makedirs(path)
         o3d.io.write_point_cloud(os.path.join(path, "full_pcd.ply"), self.full_pcd)
         print("full pcd saved to disk in {}".format(path))
+
+        if visualize_clusters:
+            # Visualize the final full point cloud with cluster coloring
+            dbscan_eps = (
+                self.cfg.pipeline.get("dbscan_eps", 0.02)
+                if hasattr(self.cfg, "pipeline")
+                else 0.02
+            )
+            dbscan_min = (
+                self.cfg.pipeline.get("dbscan_min_points", 10)
+                if hasattr(self.cfg, "pipeline")
+                else 10
+            )
+            visualize_pcd_clusters(
+                self.full_pcd,
+                save_dir=path,
+                dbscan_eps=dbscan_eps,
+                dbscan_min_points=dbscan_min,
+            )
+
         return None
 
     def load_full_pcd(self, path):
@@ -2558,36 +2345,6 @@ to a specific location by finding the closest frame in the provided locations to
             o3d.io.write_point_cloud(os.path.join(path, "masked_pcd.ply"), masked_pcd)
             print("masked pcds saved to disk in {}".format(path))
 
-    def load_masked_pcds_new(self, path):
-        """Load the masked pcds from disk."""
-        # make sure that self.mask_feats is already loaded
-        if len(self.mask_feats) == 0:
-            print("load full pcd feats first")
-            return None
-        if os.path.exists(os.path.join(path, "objects")):
-            self.mask_pcds = []
-            number_of_pcds = len(os.listdir(os.path.join(path, "objects")))
-            not_found = []
-            for i in range(number_of_pcds):
-                if os.path.exists(os.path.join(path, "objects", "pcd_{}.ply".format(i))):
-                    self.mask_pcds.append(
-                        o3d.io.read_point_cloud(
-                            os.path.join(path, "objects", "pcd_{}.ply".format(i))
-                        )
-                    )
-                else:
-                    print("masked pcd {} not found in {}".format(i, path))
-                    not_found.append(i)
-            print("number of masked pcds loaded from disk {}".format(len(self.mask_pcds)))
-            # remove masks_feats that are not found
-            not_found = [i for i in not_found if i < len(self.mask_feats)]
-            self.mask_feats = np.delete(self.mask_feats, not_found, axis=0)
-            print("number of mask_feats loaded from disk {}".format(len(self.mask_feats)))
-            return self.mask_pcds
-        else:
-            print("masked pcds for objects not found in {}".format(path))
-            return None
-
     def load_masked_pcds(self, path):
         """Load the masked pcds from disk."""
         # make sure that self.mask_feats is already loaded
@@ -2609,7 +2366,8 @@ to a specific location by finding the closest frame in the provided locations to
                     print("masked pcd {} not found in {}".format(i, path))
                     not_found.append(i)
             print("number of masked pcds loaded from disk {}".format(len(self.mask_pcds)))
-            # remove masks_feats that are not found
+            # remove mask_feats that are not found, guarding against out-of-bounds indices
+            not_found = [i for i in not_found if i < len(self.mask_feats)]
             self.mask_feats = np.delete(self.mask_feats, not_found, axis=0)
             print("number of mask_feats loaded from disk {}".format(len(self.mask_feats)))
             return self.mask_pcds
@@ -2639,3 +2397,32 @@ to a specific location by finding the closest frame in the provided locations to
         print("number of objects: ", number_of_objects)
         o3d.visualization.draw_geometries([all_objects_pcd])
         return None
+
+    # def upload2oss(self, retrieved_img_list: list):
+    #     import oss2
+    #     from oss2.credentials import EnvironmentVariableCredentialsProvider
+
+    #     self.upload_flag = True
+    #     self.force_reupload = False
+    #     self.src_img_root = os.path.dirname(retrieved_img_list[0])
+    #     img_dir_prefix = f"{os.path.basename(self.src_img_root)}/images"
+    #     img_list = retrieved_img_list  # Do not sort
+    #     self.downsampeld_img_list = img_list
+    #     auth = oss2.ProviderAuth(EnvironmentVariableCredentialsProvider())
+    #     bucket = oss2.Bucket(auth, "oss-cn-beijing.aliyuncs.com", "mapvln")
+    #     self.oss_img_list = []
+    #     for file in tqdm(self.downsampeld_img_list):
+    #         file_name = os.path.basename(file)
+    #         self.oss_img_list.append(
+    #             f"https://mapvln.oss-cn-beijing.aliyuncs.com/{img_dir_prefix}/{file_name}"
+    #         )
+    #         oss_url = f"{img_dir_prefix}/{file_name}"
+    #         if self.upload_flag:
+    #             if not bucket.object_exists(oss_url) or self.force_reupload:
+    #                 bucket.put_object_from_file(
+    #                     oss_url,
+    #                     file,
+    #                 )
+    #             else:
+    #                 print(f"{oss_url} already exists in Aliyun OSS, skipping.")
+    #     print(f"Uploaded {len(self.downsampeld_img_list)} images to Aliyun OSS.")

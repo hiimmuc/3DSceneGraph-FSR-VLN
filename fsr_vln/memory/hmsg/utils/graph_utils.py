@@ -100,6 +100,11 @@ def _project_points_to_camera(
     return pts_cam[valid_mask], valid_mask
 
 
+# =========================================================================
+# Camera Projection Utilities (World → Camera → Image coordinates)
+# =========================================================================
+
+
 def _project_points_to_image(points_cam: np.ndarray, camera_matrix: np.ndarray) -> np.ndarray:
     """Project camera-space points to image coordinates.
 
@@ -117,6 +122,11 @@ def _project_points_to_image(points_cam: np.ndarray, camera_matrix: np.ndarray) 
     uv = uv_h[:, :2] / uv_h[:, 2:3]
 
     return uv
+
+
+# =========================================================================
+# Visualization Utilities (PCD projection, cluster coloring)
+# =========================================================================
 
 
 def visualize_pcd_on_image(
@@ -228,6 +238,11 @@ def check_object_in_view(
     return (True, mean_depth) if return_depth else True
 
 
+# =========================================================================
+# Geometry & Bounding Box Utilities (IoU, intersection, overlaps)
+# =========================================================================
+
+
 def find_intersection_share(
     map_points: np.ndarray, obj_points: np.ndarray, radius: float = 0.05
 ) -> float:
@@ -260,6 +275,11 @@ def find_intersection_share(
 
     del indices
     return overlapping_ratio
+
+
+# =========================================================================
+# Scene Understanding (Room embeddings, spatial analysis)
+# =========================================================================
 
 
 def compute_room_embeddings(
@@ -421,6 +441,11 @@ def compute_room_embeddings(
         repr_embs_list.append(repr_embs)
     plt.savefig(os.path.join(save_path, "pcd_reprImgs_pose.png"))
     return repr_embs_list, repr_img_ids_list, room_id2img_id, room_clip_embeddings_list
+
+
+# =========================================================================
+# Occupancy Grid & Distance Transforms (grid mapping, distance field)
+# =========================================================================
 
 
 def map_grid_to_point_cloud(occupancy_grid_map, resolution, point_cloud):
@@ -591,6 +616,11 @@ def compute_iou_batch(bbox1: torch.Tensor, bbox2: torch.Tensor) -> torch.Tensor:
     return iou
 
 
+# =========================================================================
+# Spatial Search & Point Cloud Overlap (FAISS-based queries)
+# =========================================================================
+
+
 def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02, index1=None, index2=None):
     """Calculate the percentage of overlapping points between two point clouds
 
@@ -639,6 +669,11 @@ def find_overlapping_ratio_faiss(pcd1, pcd2, radius=0.02, index1=None, index2=No
     )
 
     return overlapping_ratio
+
+
+# =========================================================================
+# Point Cloud Merging & Spatial Grouping (3D mask merging, merge strategies)
+# =========================================================================
 
 
 def merge_point_clouds_list(
@@ -752,6 +787,11 @@ def _visualize_point_clusters(
         colors[labels == -1] = np.array([1, 1, 1])  # white for outliers
 
     return colors
+
+
+# =========================================================================
+# Point Cloud Denoising & Filtering (DBSCAN, statistical, voxel, radius)
+# =========================================================================
 
 
 def pcd_denoise(
@@ -1165,6 +1205,7 @@ def hierarchical_merge(
         if len(frames_pcd) > 1:
             th -= th_factor * (len(frames_pcd) - 2) / max(1, len(frames_pcd) - 1)
             print("th: ", th)
+
     # apply one more merge
     frames_pcd = frames_pcd[0]
     frames_pcd = merge_3d_masks(
@@ -1211,121 +1252,19 @@ def seq_merge(
             iou_thresh=proxy_th,
         )
 
+    # Final cleanup pass for any residual overlaps
+    global_masks = merge_3d_masks(
+        global_masks,
+        overlap_threshold=th,
+        radius=down_size,
+        iou_thresh=proxy_th,
+    )
     return global_masks
 
 
 # =========================================================================
 # Point Cloud Filtering Utilities
 # =========================================================================
-
-
-def visualize_filtering_stage(
-    pcd_before: o3d.geometry.PointCloud,
-    pcd_after: o3d.geometry.PointCloud,
-    stage_name: str,
-    save_dir: str,
-    coloring_mode: str = "depth",
-    dbscan_eps: float = 0.02,
-    dbscan_min_points: int = 10,
-) -> None:
-    """Visualize point cloud before and after a filtering stage.
-
-    Supports multiple coloring modes:
-    - 'depth': Color by Z-depth with viridis colormap (blue=near, yellow=far)
-    - 'clusters': Color by DBSCAN clusters with unique colors per cluster
-    - 'uniform': Red for before, green for after (simple comparison)
-
-    Args:
-        pcd_before: Point cloud before filtering
-        pcd_after: Point cloud after filtering
-        stage_name: Name of filtering stage (e.g., "02_dbscan_denoising")
-        save_dir: Directory to save visualization files
-        coloring_mode: 'depth' | 'clusters' | 'uniform' (default: 'depth')
-        dbscan_eps: DBSCAN epsilon radius — must match pipeline value for meaningful results
-        dbscan_min_points: Minimum neighbors to form a cluster — must match pipeline value
-    """
-    pcd_before_colored = o3d.geometry.PointCloud(pcd_before)
-    pcd_after_colored = o3d.geometry.PointCloud(pcd_after)
-
-    if coloring_mode == "depth":
-        # Color by Z-depth using viridis colormap
-        def colorize_by_depth(pcd: o3d.geometry.PointCloud) -> None:
-            """Apply depth-based coloring to point cloud."""
-            points = np.asarray(pcd.points)
-            if len(points) == 0:
-                return
-
-            z_vals = points[:, 2]
-            z_min, z_max = z_vals.min(), z_vals.max()
-
-            if z_max > z_min:
-                z_norm = (z_vals - z_min) / (z_max - z_min)
-            else:
-                z_norm = np.ones_like(z_vals) * 0.5
-
-            cmap = cm.get_cmap("viridis")
-            colors = cmap(z_norm)[:, :3]
-            pcd.colors = o3d.utility.Vector3dVector(colors)
-
-        colorize_by_depth(pcd_before_colored)
-        colorize_by_depth(pcd_after_colored)
-        print(f"  Displaying {stage_name}: Depth-colored (blue=near, yellow=far)")
-
-    elif coloring_mode == "clusters":
-        # Color by DBSCAN clusters with unique colors per cluster
-        def colorize_by_clusters(pcd: o3d.geometry.PointCloud, label_prefix: str = "") -> None:
-            """Apply DBSCAN cluster coloring to point cloud."""
-            labels = np.array(
-                pcd.cluster_dbscan(
-                    eps=dbscan_eps, min_points=dbscan_min_points, print_progress=False
-                )
-            )
-
-            points = np.asarray(pcd.points)
-            colors = np.zeros_like(points)
-
-            max_label = labels.max()
-            n_clusters = max_label + 1 if max_label >= 0 else 0
-            n_noise = int(np.sum(labels == -1))
-            print(f"    {label_prefix}: {n_clusters} clusters, {n_noise} noise points")
-
-            cmap = plt.get_cmap("tab20")
-            for label in np.unique(labels):
-                if label == -1:
-                    color = np.array([0.0, 0.0, 0.0])  # Noise → black
-                else:
-                    color = np.array(cmap(label % 20)[:3])  # Unique color per cluster
-                colors[labels == label] = color
-
-            pcd.colors = o3d.utility.Vector3dVector(colors)
-
-        colorize_by_clusters(pcd_before_colored, label_prefix="Before")
-        colorize_by_clusters(pcd_after_colored, label_prefix="After")
-        print(f"  Displaying {stage_name}: Cluster-colored (colors=clusters, black=noise)")
-
-    else:  # uniform
-        # Fallback: uniform colors
-        pcd_before_colored.paint_uniform_color([0.7, 0.0, 0.0])  # Red
-        pcd_after_colored.paint_uniform_color([0.0, 0.7, 0.0])  # Green
-        print(f"  Displaying {stage_name}: Before (red) vs After (green)")
-
-    # Display in Open3D viewer (if available)
-    try:
-        o3d.visualization.draw_geometries(
-            [pcd_before_colored, pcd_after_colored], window_name=f"Filtering: {stage_name}"
-        )
-    except Exception as e:
-        print(f"  Could not display visualization (headless environment): {e}")
-
-    # Save visualization as point cloud files
-    before_path = os.path.join(save_dir, f"{stage_name}_before.pcd")
-    after_path = os.path.join(save_dir, f"{stage_name}_after.pcd")
-    os.makedirs(save_dir, exist_ok=True)
-
-    o3d.io.write_point_cloud(before_path, pcd_before_colored)
-    o3d.io.write_point_cloud(after_path, pcd_after_colored)
-    print(f"  Saved: {before_path}")
-    print(f"  Saved: {after_path}")
 
 
 def filter_point_cloud(
@@ -1336,38 +1275,27 @@ def filter_point_cloud(
     """Apply multi-stage noise reduction to point cloud.
 
     For real RGB-D sensor data, applies complementary filtering:
-    1. Voxel downsampling - Reduces spatial density
-    2. DBSCAN denoising - Removes isolated points (flying pixels)
+    1. DBSCAN denoising - Removes isolated points (flying pixels)
+    2. Voxel downsampling - Reduces spatial density
     3. Radius outlier removal - Cleans thin noise artifacts
 
     Args:
         pcd: Input point cloud to filter
         config: Configuration dict with keys:
-            - enable_voxel_downsampling: bool (default True)
-            - voxel_size: float (default 0.02)
             - enable_dbscan_filtering: bool (default True)
-            - dbscan_eps: float (default 0.01)
-            - dbscan_min_points: int (default 100)
+            - dbscan_eps: float (default 0.02)
+            - dbscan_min_points: int (default 10)
+            - enable_voxel_downsampling: bool (default True)
+            - voxel_size: float (default 0.05)
             - enable_radius_outlier_filtering: bool (default True)
             - radius_nb_points: int (default 1000)
             - radius_distance: float (default 1.0)
-            - visualize_filtering: bool (default False)
-            - coloring_mode: 'depth' | 'clusters' | 'uniform' (default 'depth')
-              * 'depth': Color by Z-depth (blue=near, yellow=far)
-              * 'clusters': Color by DBSCAN clusters (useful for denoising stage)
-              * 'uniform': Red before, green after
-        save_dir: Directory to save visualization files (optional)
+        save_dir: Unused (kept for backward compatibility)
 
     Returns:
         Filtered point cloud
     """
     original_size = len(pcd.points)
-    viz_enabled = config.get("visualize_filtering", False)
-    coloring_mode = config.get("coloring_mode", "depth")  # 'depth', 'clusters', or 'uniform'
-
-    # Save initial point cloud for visualization
-    if viz_enabled:
-        pcd_before = o3d.geometry.PointCloud(pcd)
 
     # Step 1: DBSCAN denoising on the DENSE raw cloud.
     # Flying pixels (isolated depth sensor artifacts) form small isolated clusters.
@@ -1377,24 +1305,9 @@ def filter_point_cloud(
     if config.get("enable_dbscan_filtering", True):
         dbscan_eps = config.get("dbscan_eps", 0.02)
         dbscan_min = config.get("dbscan_min_points", 10)
-        pcd = pcd_denoise(
-            pcd, method="dbscan", viz=viz_enabled, eps=dbscan_eps, min_points=dbscan_min
-        )
+        pcd = pcd_denoise(pcd, method="dbscan", eps=dbscan_eps, min_points=dbscan_min)
         after_count = len(pcd.points)
         print(f"  DBSCAN denoising: {original_size} → {after_count} points")
-
-        if viz_enabled and save_dir:
-            visualize_filtering_stage(
-                pcd_before,
-                pcd,
-                "01_dbscan_denoising",
-                save_dir,
-                coloring_mode=coloring_mode,
-                dbscan_eps=dbscan_eps,
-                dbscan_min_points=dbscan_min,
-            )
-            pcd_before = o3d.geometry.PointCloud(pcd)
-
         original_size = after_count
 
     # Step 2: Voxel downsampling for uniform spatial density reduction.
@@ -1405,13 +1318,6 @@ def filter_point_cloud(
         pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
         after_count = len(pcd.points)
         print(f"  Voxel downsampling ({voxel_size}m): {original_size} → {after_count} points")
-
-        if viz_enabled and save_dir:
-            visualize_filtering_stage(
-                pcd_before, pcd, "02_voxel_downsampling", save_dir, coloring_mode="depth"
-            )
-            pcd_before = o3d.geometry.PointCloud(pcd)
-
         original_size = after_count
 
     # Step 3: Radius-based outlier removal for residual noise at boundaries.
@@ -1423,11 +1329,6 @@ def filter_point_cloud(
         pcd = pcd.select_by_index(ind)
         after_count = len(pcd.points)
         print(f"  Radius outlier removal: {original_size} → {after_count} points")
-
-        if viz_enabled and save_dir:
-            visualize_filtering_stage(
-                pcd_before, pcd, "03_radius_outlier_removal", save_dir, coloring_mode="depth"
-            )
 
     print(f"  ✓ Filtering complete: {len(pcd.points)} points retained")
     return pcd

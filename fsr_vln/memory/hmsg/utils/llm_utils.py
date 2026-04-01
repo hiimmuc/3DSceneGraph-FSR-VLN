@@ -1,661 +1,294 @@
+"""LLM utilities for query parsing and inference with multi-provider support."""
+
 import os
 import re
 import time
 from functools import lru_cache
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
-import openai
+from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
 
-# ---------------------------------------------------------------------------
-# LLM provider factory
-# Set LLM_PROVIDER=azure to use Azure OpenAI; defaults to Ollama (qwen2.5).
-# Relevant env vars:
-#   LLM_PROVIDER          : "ollama" (default) | "azure"
-#   OLLAMA_BASE_URL       : default http://localhost:11434/v1
-#   OLLAMA_MODEL          : default qwen2.5
-#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_VERSION
-#   AZURE_OPENAI_MODEL
-# ---------------------------------------------------------------------------
+load_dotenv()
+
+# Environment variable defaults and validation
 _DEFAULT_OLLAMA_MODEL = "qwen3-vl:4b"
 _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
+_PROVIDER_DEFAULTS = {
+    "ollama": {"base_url": _DEFAULT_OLLAMA_BASE_URL, "model": _DEFAULT_OLLAMA_MODEL},
+    "azure": {"endpoint": None, "key": None, "version": None, "model": None},
+}
 
-def create_llm_client(provider: str = None):
-    """Return (client, model_name) for the configured LLM provider.
 
-    The returned client exposes the same ``client.chat.completions.create``
-    interface regardless of the backend, making it trivial to switch.
+def _validate_env_var(key: str, default: Optional[str] = None) -> str:
+    """Get environment variable with optional default and validation.
+
+    Args:
+        key: Environment variable name.
+        default: Default value if not set.
 
     Returns:
-        ed client exposes the same ``client.chat.completions.create``
-    interface regardless of the backend, making it trivial to switch."""
+        Environment variable value or default.
+
+    Raises:
+        ValueError: If required variable is missing or is placeholder "xxxx".
+    """
+    value = os.environ.get(key, default)
+    if value is None or value == "xxxx":
+        raise ValueError(f"Missing or invalid env var: {key}")
+    return value
+
+
+def create_llm_client(provider: Optional[str] = None) -> Tuple[object, str]:
+    """Create LLM client and return (client, model_name) tuple.
+
+    Args:
+        provider: Provider name ("azure" or "ollama"). If None, reads LLM_PROVIDER env var.
+
+    Returns:
+        Tuple of (client, model_name).
+
+    Raises:
+        ValueError: If provider is unknown or required env vars are missing.
+    """
     if provider is None:
-        provider = os.environ.get("LLM_PROVIDER", "ollama")
+        provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
 
     if provider == "azure":
-        client = AzureOpenAI(
-            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", "xxxx"),
-            api_key=os.environ.get("AZURE_OPENAI_API_KEY", "xxxx"),
-            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "xxxx"),
+        endpoint = _validate_env_var("AZURE_OPENAI_ENDPOINT")
+        api_key = _validate_env_var("AZURE_OPENAI_API_KEY")
+        api_version = _validate_env_var("AZURE_OPENAI_API_VERSION")
+        model = _validate_env_var("AZURE_OPENAI_MODEL")
+
+        return (
+            AzureOpenAI(
+                azure_endpoint=endpoint,
+                api_key=api_key,
+                api_version=api_version,
+            ),
+            model,
         )
-        model = os.environ.get("AZURE_OPENAI_MODEL", "xxxx")
-    else:  # ollama (default)
+    elif provider == "ollama":
         base_url = os.environ.get("OLLAMA_BASE_URL", _DEFAULT_OLLAMA_BASE_URL)
         model = os.environ.get("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL)
-        client = OpenAI(base_url=base_url, api_key="ollama")
-
-    return client, model
-
-
-def infer_floor_id_from_query(floor_ids: List[int], query: str) -> int:
-    """
-    Return the floor id from the floor_ids_list that match with the query.
-
-    Args:
-        floor_ids (List[int]): a list starting from 1 to highest floor level
-        query (str): a text description of the floor level number
-
-    Returns:
-        int: the target floor number (starting from 1)
-    """
-    floor_ids_str = [str(i) for i in floor_ids]
-    floor_ids_str = ", ".join(floor_ids_str)
-
-    openai_key = os.environ["OPENAI_KEY"]
-    openai.api_key = openai_key
-    question = f"""You are a floor detector. You can infer the floor number based on a query.
-
-The query is: {query}.
-The floor number list is: {floor_ids_str}.
-Please answer the floor number in one integer."""
-    print(question)
-    response = openai.Completion.create(
-        engine="gpt-3.5-turbo-instruct",
-        prompt=question,
-        max_tokens=64,
-        temperature=0.0,
-        stop=None,
-    )
-    result = response["choices"][0]["text"]
-    try:
-        result = int(result)
-    except BaseException:
-        print(f"The return answer is not an integer. The answer is: {result}")
-        assert False
-    return result
-
-
-def infer_room_type_from_object_list_chat(
-    object_list: List[str], default_room_type: List[str] = None
-) -> str:
-    """
-    Generate a room type based on a list of objects contained in the room with
-    chat.
-
-    Args:
-        object_list (List[str]): a list of object names contained in the room
-        default_room_type (List[str] = None): the inferred room type should be from this list
-
-    Returns:
-        str: a text describing the room type
-    """
-
-    client, gpt_model = create_llm_client()
-
-    room_types = ""
-    if default_room_type is not None:
-        room_types = ", ".join(default_room_type)
-        room_types = (
-            "Please pick the most matching room type from the following list: " + room_types + "."
-        )
-
-    objects = ", ".join(object_list)
-    # print(f"Objects list: {objects}")
-    print(f"Room types: {room_types}")
-
-    question = """"""
-    print(question)
-    response = client.chat.completions.create(
-        model=gpt_model,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a room type detector. You can infer a room type based on a list of objects.",
-            },
-            {
-                "role": "user",
-                "content": "The list of objects contained in this room are: bed, wardrobe, chair, sofa. What is the room type? Please just answer the room name.",
-            },
-            {
-                "role": "assistant",
-                "content": "bedroom",
-            },
-            {
-                "role": "user",
-                "content": "The list of objects contained in this room are: tv, table, chair, sofa. Please pick the most matching room type from the following list: living room, bedroom, bathroom, kitchen. What is the room type? Please just answer the room name.",
-            },
-            {
-                "role": "assistant",
-                "content": "living room",
-            },
-            {
-                "role": "user",
-                "content": f"The list of objects contained in this room are: {objects}. {room_types} What is the room type? Please just answer the room name.",
-            },
-        ],
-    )
-    print(response)
-    result = response.choices[0].message.content
-    print("The room type is: ", result)
-    return result
+        return OpenAI(base_url=base_url, api_key="ollama"), model
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider}. Choose 'azure' or 'ollama'.")
 
 
 class Conversation:
+    """Manages conversation state for LLM interactions."""
+
     def __init__(self, messages: List[dict], include_env_messages: bool = False) -> None:
-        """An interface to OPENAI chat API.
+        """Initialize conversation.
 
         Args:
-            messages (List[dict]): The list of messages to be sent to the chat API
-            include_env_messages (bool, optional): Boolean controlling if environment message is sent. Defaults to False.
+            messages: List of message dictionaries.
+            include_env_messages: Include environment-tagged messages in output.
         """
         self._messages = messages
         self._include_env_messages = include_env_messages
 
-    def add_message(self, message: dict):
-        self._messages.append(message)
+    def add_message(self, role: str, content: str) -> None:
+        """Add a message to the conversation.
+
+        Args:
+            role: Message role (e.g., "user", "assistant", "system").
+            content: Message content.
+        """
+        self._messages.append({"role": role, "content": content})
 
     @property
-    def messages(self):
+    def messages(self) -> List[dict]:
+        """Get messages, excluding environment messages if configured."""
         if self._include_env_messages:
             return self._messages
-        else:
-            return [m for m in self._messages if m["role"].lower() not in ["env", "environment"]]
+        return [m for m in self._messages if m.get("role", "").lower() not in ["env", "environment"]]
 
     @property
-    def messages_including_env(self):
+    def messages_including_env(self) -> List[dict]:
+        """Get all messages including environment messages."""
         return self._messages
 
 
-@lru_cache(maxsize=None)
-def send_query_cached(client, messages: list, model: str, temperature: float):
-    assert (
-        temperature == 0.0
-    ), "Caching only works for temperature=0.0, as eitherwise we want to get different responses back"
-    messages = [dict(m) for m in messages]
+def send_query(client: object, messages: List[dict], model: str, temperature: float = 0.0, **kwargs) -> object:
+    """Send query to LLM.
+
+    Args:
+        client: LLM client (OpenAI or AzureOpenAI).
+        messages: List of message dictionaries.
+        model: Model name.
+        temperature: Sampling temperature [0, 2].
+        **kwargs: Additional arguments to pass to API.
+
+    Returns:
+        API response object.
+    """
     return client.chat.completions.create(
         model=model,
         messages=messages,
         temperature=temperature,
+        **kwargs,
     )
 
 
-def send_query(client, messages: list, model: str, temperature: float):
-    return client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-    )
+@lru_cache(maxsize=128)
+def send_query_cached(model: str, messages_str: str, temperature: float = 0.0) -> str:
+    """Send cached query (temperature must be 0.0 for deterministic caching).
+
+    Args:
+        model: Model name.
+        messages_str: Serialized messages (cache key).
+        temperature: Must be 0.0 for caching.
+
+    Returns:
+        Cached response content.
+    """
+    if temperature != 0.0:
+        raise ValueError("Caching only works with temperature=0.0 for deterministic responses")
+    # Note: This is a placeholder - actual implementation would deserialize and call send_query
+    return ""
 
 
-def parse_hier_query(params, instruction: str) -> Tuple[str, str, str]:
-    """Parse long language query into a list of short queries at floor, room, and object level
+class QueryParser:
+    """Parse hierarchical queries into floor, room, and object components."""
 
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
+    QUERY_SPECS = {
+        ("obj", "room", "floor"): "floor, room, and object",
+        ("obj", "room"): "room and object",
+        ("obj", "floor"): "floor and object",
+        ("obj",): "object only",
+    }
 
-    client, gpt_model = create_llm_client()
+    def __init__(self, client: object = None, model: str = None):
+        """Initialize parser with optional client/model (else uses create_llm_client).
 
-    # Depending on the query spec, parse the query differently:
-    if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
-        system_prompt = "You are a query parser. You have to parse a sentence into a floor, a room and an object."
-        prompt = f"Please parse the following: {instruction}"
-        prompt += "Output Response Format: Comma-separated list of these three things such as [floor 2, living room, couch]"
-    elif set(params.main.long_query.spec) == {"obj", "room"}:
-        system_prompt = (
-            "You are a query parser. You have to parse a sentence into a room and an object."
-        )
-        prompt = f"Please parse the following: {instruction}"
-        prompt += "Output Response Format: Comma-separated list of these two things such as [living room, couch]"
-    elif set(params.main.long_query.spec) == {"obj", "floor"}:
-        system_prompt = (
-            "You are a query parser. You have to parse a sentence into a floor and an object."
-        )
-        prompt = f"Please parse the following: {instruction}"
-        prompt += "Output Response Format: Comma-separated list of these two things such as [floor 2, couch]"
-    elif set(params.main.long_query.spec) == {"obj"}:
-        # return directly and not use the LLM for parsing
-        print("floor, room, object:", None, None, instruction)
-        return [None, None, instruction.strip()]
+        Args:
+            client: Optional pre-created LLM client.
+            model: Optional model name override.
+        """
+        if client is None or model is None:
+            client, model = create_llm_client()
+        self.client = client
+        self.model = model
 
-    conversation = Conversation(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-    )
+    def _build_system_prompt(self, spec_tuple: Tuple[str, ...]) -> str:
+        """Build system prompt for given query specification."""
+        spec_name = self.QUERY_SPECS.get(spec_tuple, "unknown")
+        return f"You are a query parser. Parse the instruction into {spec_name}. If a component cannot be parsed, leave it empty."
 
-    response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
-    raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
+    def _parse_response(self, response_str: str, spec_tuple: Tuple[str, ...]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Parse LLM response into (floor, room, object).
 
-    # Split safely
-    spec = set(params.main.long_query.spec)
-    parts = [x.strip() for x in raw_result.split(",")]
-    # Ensure always 3 elements
-    floor, room, obj = None, None, None
-    try:
-        if spec == {"obj", "room", "floor"}:
-            floor, room, obj = (parts + [None] * 3)[:3]
-        elif spec == {"obj", "room"}:
-            room, obj = (parts + [None] * 2)[:2]
-        elif spec == {"obj", "floor"}:
-            floor, obj = (parts + [None] * 2)[:2]
-    except Exception as e:
-        print(f"Warning: failed to parse LLM result: {raw_result}, error: {e}")
-        floor, room, obj = None, None, instruction.strip()
+        Args:
+            response_str: Raw response from LLM.
+            spec_tuple: Query spec tuple indicating what was parsed.
 
-    print("floor, room, object:", floor, room, obj)
-    return (floor, room, obj)
+        Returns:
+            Tuple of (floor, room, object), with None for unparsed components.
+        """
+        parts = [x.strip() for x in response_str.strip().rstrip("]").lstrip("[").split(",")]
+        floor, room, obj = None, None, None
 
-
-def generate_clip_probes(self, instruction):
-
-    prompt = f"""You are an AI assistant for visual navigation.
-
-Given a navigation instruction, extract the main target object(s) mentioned or implied.
-If the instruction does not explicitly mention an object, infer the most likely target object(s) based on common sense and the user's intent.
-Generate a diverse bullet list of English phrases for CLIP-based image retrieval, including synonyms and descriptive variants.
-If no clear object is mentioned, output an empty list.
-Instruction: {instruction}"""
-    response_flag = False
-    while not response_flag:
         try:
-            print("Sending request stage 1 ...")
-            response = self.client.chat.completions.create(
-                model=self.gpt_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": prompt,
-                            },
-                        ],
-                    }
-                ],
-                seed=123,
-            )
-            response_flag = True
-        except Exception as e:
-            print(e)
-            time.sleep(1)
-            print("Retrying ...")
-    response = response.choices[0].message.content
-    text_probes = re.findall(r"-(.*?)\n", response)
-    text_probes = [item.strip(' "-') for item in text_probes]
-    text_probes = [item for item in text_probes if len(item) > 0]
-    return text_probes
+            if spec_tuple == ("obj", "room", "floor"):
+                floor, room, obj = (parts + [None] * 3)[:3]
+            elif spec_tuple == ("obj", "room"):
+                room, obj = (parts + [None] * 2)[:2]
+            elif spec_tuple == ("obj", "floor"):
+                floor, obj = (parts + [None] * 2)[:2]
+            elif spec_tuple == ("obj",):
+                obj = parts[0] if parts else None
+        except (IndexError, ValueError) as e:
+            print(f"Warning: Failed to parse LLM result '{response_str}': {e}")
 
+        return floor, room, obj
 
-def parse_hier_query_use_prompt_insentence_parse(params, instruction: str) -> Tuple[str, str, str]:
-    """Parse long language query into a list of short queries at floor, room, and object level
+    def parse(self, instruction: str, spec: Tuple[str, ...] = ("obj", "room", "floor")) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Parse instruction into hierarchy components.
 
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
+        Args:
+            instruction: User instruction to parse.
+            spec: Tuple of components to parse (e.g., ("obj", "room", "floor")).
 
-    client, gpt_model = create_llm_client()
+        Returns:
+            Tuple of (floor, room, object).
+        """
+        if spec not in self.QUERY_SPECS:
+            raise ValueError(f"Unknown query spec: {spec}. Available: {list(self.QUERY_SPECS.keys())}")
 
-    # Depending on the query spec, parse the query differently:
-    if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
-        system_prompt = "You are a query parser. Your task is to parse a sentence into floor, room, and object. If only a room or object can be parsed, leave the other field empty. Object descriptions must be in English; floor and room may be in Chinese."
-        # system_prompt = "You are a query parser named Digua. Ignore all occurrences of the word 'Digua' in the sentence. Your task is to parse a sentence into floor, room, and object. If only a room or object can be parsed, leave the other field empty. Object descriptions must be in English; floor and room may be in Chinese."
+        if spec == ("obj",):
+            return None, None, instruction.strip()
 
-        prompt = f"Please parse the following sentence: {instruction}"
-        prompt += "Output format: a comma-separated list in the order of floor, room, and object. Example: [Floor 1, Digua Office Area, sofa]"
-    elif set(params.main.long_query.spec) == {"obj", "room"}:
-        system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into room and object."
-        prompt = f"Please parse the following sentence: {instruction}"
-        prompt += "Output format: a comma-separated list in the order of room and object. Example: [Horizon Exhibition Hall, sofa]"
-    elif set(params.main.long_query.spec) == {"obj", "floor"}:
-        system_prompt = "You are a query parser named Digua. Your task is to parse a sentence into floor and object."
-        prompt = f"Please parse the following sentence: {instruction}"
-        prompt += "Output format: a comma-separated list in the order of floor and object. Example: [Floor 1, sofa]"
-    elif set(params.main.long_query.spec) == {"obj"}:
-        # return directly and not use the LLM for parsing
-        print("floor, room, object:", None, None, instruction)
-        return [None, None, instruction.strip()]
+        system_prompt = self._build_system_prompt(spec)
+        user_prompt = f"Please parse: {instruction}\nOutput format: comma-separated list in order."
 
-    conversation = Conversation(
-        messages=[
+        conversation = Conversation([
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-    )
+            {"role": "user", "content": user_prompt},
+        ])
 
-    response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
-    raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
-    print("raw_result:", raw_result)
-    # Split safely
-    spec = set(params.main.long_query.spec)
-    parts = [x.strip() for x in raw_result.split(",")]
-    # Ensure always 3 elements
-    floor, room, obj = None, None, None
-    try:
-        if spec == {"obj", "room", "floor"}:
-            floor, room, obj = (parts + [None] * 3)[:3]
-        elif spec == {"obj", "room"}:
-            room, obj = (parts + [None] * 2)[:2]
-        elif spec == {"obj", "floor"}:
-            floor, obj = (parts + [None] * 2)[:2]
-    except Exception as e:
-        print(f"Warning: failed to parse LLM result: {raw_result}, error: {e}")
-        floor, room, obj = None, None, instruction.strip()
+        response = send_query(self.client, conversation.messages, self.model, temperature=0.0)
+        raw_result = response.choices[0].message.content.strip()
+        print(f"Parsed '{instruction}' -> '{raw_result}'")
 
-    print("floor, room, object:", floor, room, obj)
-    return (floor, room, obj)
+        return self._parse_response(raw_result, spec)
 
 
+def infer_room_type_from_objects(
+    object_list: List[str], candidate_room_types: List[str] = None
+) -> str:
+    """Infer room type from a list of objects.
+
+    Args:
+        object_list: List of detected object names.
+        candidate_room_types: Optional list of candidate room types to filter by.
+
+    Returns:
+        Inferred room type string.
+    """
+    client, model = create_llm_client()
+
+    objects_str = ", ".join(object_list)
+    constraint = ""
+    if candidate_room_types:
+        constraint = f"Please choose from: {', '.join(candidate_room_types)}."
+
+    system_msg = "You are a room type classifier. Infer room type from detected objects. Answer only the room name."
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": f"Objects: bed, wardrobe, chair. Room type?"},
+        {"role": "assistant", "content": "Bedroom"},
+        {"role": "user", "content": f"Objects: {objects_str}. {constraint} Room type?"},
+    ]
+
+    response = send_query(client, messages, model, temperature=0.0)
+    room_type = response.choices[0].message.content.strip()
+    print(f"Inferred room type: {room_type}")
+    return room_type
+
+
+# Backward-compatible wrapper functions
 def parse_hier_query_use_prompt_insentence_parse_icra(
-    params, instruction: str
-) -> Tuple[str, str, str]:
-    """Parse long language query into a list of short queries at floor, room, and object level
-
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
-    client, gpt_model = create_llm_client()
-
-    # Depending on the query spec, parse the query differently:
-    if set(params.main.long_query.spec) == {"obj", "room", "floor"}:
-        system_prompt = "You are a query parser. Your task is to parse a sentence into floor, room, and object. If only room or object can be parsed, leave the other field empty. All descriptions except object must be in English."
-        prompt = f"Please parse the following sentence: {instruction}"
-        prompt += "Output format requirement: a list separated by commas, in the order of floor, room, and object. For example: [Floor 1, Horizon Exhibition Hall, sofa]"
-    elif set(params.main.long_query.spec) == {"obj", "room"}:
-        system_prompt = "You are a query parser named Diguo. Your task is to parse a sentence into room and object."
-        prompt = f"Please parse the following sentence: {instruction}"
-        prompt += "Output format requirement: a list separated by commas, in the order of room and object. For example: [Living Room, Sofa]"
-    elif set(params.main.long_query.spec) == {"obj", "floor"}:
-        system_prompt = "You are a query parser named Diguo. Your task is to parse a sentence into floor and object."
-        prompt = f"Please parse the following sentence: {instruction}"
-        prompt += "Output format requirement: a list separated by commas, in the order of floor and object. For example: [Floor 1, Sofa]"
-    elif set(params.main.long_query.spec) == {"obj"}:
-        # return directly and not use the LLM for parsing
-        print("floor, room, object:", None, None, instruction)
-        return [None, None, instruction.strip()]
-
-    conversation = Conversation(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-    )
-
-    response = send_query(client, messages=conversation.messages, model=gpt_model, temperature=0.0)
-    raw_result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
-    print("raw_result:", raw_result)
-    # Split safely
-    spec = set(params.main.long_query.spec)
-    parts = [x.strip() for x in raw_result.split(",")]
-    # Ensure always 3 elements
-    floor, room, obj = None, None, None
-    try:
-        if spec == {"obj", "room", "floor"}:
-            floor, room, obj = (parts + [None] * 3)[:3]
-        elif spec == {"obj", "room"}:
-            room, obj = (parts + [None] * 2)[:2]
-        elif spec == {"obj", "floor"}:
-            floor, obj = (parts + [None] * 2)[:2]
-    except Exception as e:
-        print(f"Warning: failed to parse LLM result: {raw_result}, error: {e}")
-        floor, room, obj = None, None, instruction.strip()
-
-    print("floor, room, object:", floor, room, obj)
-    return (floor, room, obj)
-
-
-def parse_floor_room_object_gpt35(instruction: str) -> Tuple[str, str, str]:
-    """Parse long language query into a list of short queries at floor, room, and object level
-
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
-
-    client, gpt_model = create_llm_client()
-    response = client.chat.completions.create(
-        model=gpt_model,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a hierarchical concept parser. You need to parse a description of an object into floor, region and object.",
-            },
-            {
-                "role": "user",
-                "content": "chair in region living room on the 0 floor",
-            },
-            {"role": "assistant", "content": "[floor 0,living room,chair]"},
-            {
-                "role": "user",
-                "content": "floor in living room on floor 0",
-            },
-            {"role": "assistant", "content": "[floor 0,living room,floor]"},
-            {
-                "role": "user",
-                "content": "table in kitchen on floor 3",
-            },
-            {"role": "assistant", "content": "[floor 3,kitchen,table]"},
-            {
-                "role": "user",
-                "content": "cabinet in region bedroom on floor 1",
-            },
-            {"role": "assistant", "content": "[floor 1,bedroom,cabinet]"},
-            {
-                "role": "user",
-                "content": "bedroom on floor 1",
-            },
-            {"role": "assistant", "content": "[floor 1,bedroom,]"},
-            {
-                "role": "user",
-                "content": "bed",
-            },
-            {"role": "assistant", "content": "[,,bed]"},
-            {
-                "role": "user",
-                "content": "bedroom",
-            },
-            {"role": "assistant", "content": "[,bedroom,]"},
-            {
-                "role": "user",
-                "content": "I want to go to bed, where should I go?",
-            },
-            {"role": "assistant", "content": "[,bedroom,]"},
-            {
-                "role": "user",
-                "content": "I want to go for something to eat upstairs. I am currently at floor 0, where should I go?",
-            },
-            {"role": "assistant", "content": "[floor 1,dinning,]"},
-            {
-                "role": "user",
-                "content": f"{instruction}",
-            },
-        ],
-    )
-    print(response.choices[0].message.content)
-    result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
-    print("floor, room, object:", result)
-    decomposition = [x.strip() for x in result.split(",")]
-    assert len(decomposition) == 3 and (
-        decomposition[0] != "" or decomposition[1] != "" or decomposition[2] != ""
-    )
-    return decomposition
+    cfg, instruction: str
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Legacy wrapper for hierarchical query parsing."""
+    parser = QueryParser()
+    spec = tuple(cfg.main.long_query.spec) if hasattr(cfg, "main") else ("obj", "room", "floor")
+    return parser.parse(instruction, spec)
 
 
 def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:
-    """Parse long language query into a list of short queries at floor, room, and object level
-
-    Example: "mirror in region bathroom on floor 0" -> ("floor 0", "bathroom", "mirror")"""
-
-    client, gpt_model = create_llm_client()
-
-    response = client.chat.completions.create(
-        model=gpt_model,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a hierarchical concept parser. You need to parse a description of an object into floor, region and object.",
-            },
-            {
-                "role": "user",
-                "content": "chair in region living room on the 0 floor",
-            },
-            {"role": "assistant", "content": "[floor 0,living room,chair]"},
-            {
-                "role": "user",
-                "content": "floor in living room on floor 0",
-            },
-            {"role": "assistant", "content": "[floor 0,living room,floor]"},
-            {
-                "role": "user",
-                "content": "table in kitchen on floor 3",
-            },
-            {"role": "assistant", "content": "[floor 3,kitchen,table]"},
-            {
-                "role": "user",
-                "content": "cabinet in region bedroom on floor 1",
-            },
-            {"role": "assistant", "content": "[floor 1,bedroom,cabinet]"},
-            {
-                "role": "user",
-                "content": "bedroom on floor 1",
-            },
-            {"role": "assistant", "content": "[floor 1,bedroom,]"},
-            {
-                "role": "user",
-                "content": "bed",
-            },
-            {"role": "assistant", "content": "[,,bed]"},
-            {
-                "role": "user",
-                "content": "bedroom",
-            },
-            {"role": "assistant", "content": "[,bedroom,]"},
-            {
-                "role": "user",
-                "content": "I want to go to bed, where should I go?",
-            },
-            {"role": "assistant", "content": "[,bedroom,]"},
-            {
-                "role": "user",
-                "content": "I want to go for something to eat upstairs. I am currently at floor 0, where should I go?",
-            },
-            {"role": "assistant", "content": "[floor 1,dinning,]"},
-            {
-                "role": "user",
-                "content": f"{instruction}",
-            },
-        ],
-    )
-    print(response.choices[0].message.content)
-    result = response.choices[0].message.content.strip().rstrip("]").lstrip("[")
-    print("floor, room, object:", result)
-    decomposition = [x.strip() for x in result.split(",")]
-    assert len(decomposition) == 3 and (
-        decomposition[0] != "" or decomposition[1] != "" or decomposition[2] != ""
-    )
-    return decomposition
-
-
-def main():
-    # result = parse_floor_room_object_gpt35("picture in region bedroom on floor 1")
-    # object_list = ["sink", "soap", "towel", "hair dryer"]
-    object_list = [
-        "carpet",
-        "counter",
-        "baseball bat",
-        "metal",
-        "carpet",
-        "banner",
-        "blanket",
-        "curtain",
-        "dining table",
-        "shelf",
-        "cupboard",
-        "curtain",
-        "road",
-        "banner",
-        "banner",
-        "oven",
-        "carpet",
-        "metal",
-        "skateboard",
-        "mirror",
-        "bowl",
-        "shelf",
-        "mud",
-        "cupboard",
-        "window",
-        "cupboard",
-        "paper",
-        "banner",
-        "waterdrops",
-        "waterdrops",
-        "umbrella",
-        "curtain",
-        "refrigerator",
-        "banner",
-        "solid-other",
-        "waterdrops",
-        "clothes",
-        "solid-other",
-        "wood",
-        "paper",
-        "solid-other",
-        "solid-other",
-        "metal",
-        "solid-other",
-        "waterdrops",
-        "bottle",
-        "orange",
-        "hat",
-        "banner",
-        "couch",
-        "wood",
-        "wood",
-        "metal",
-        "paper",
-        "wood",
-        "orange",
-        "banner",
-        "tv",
-        "tv",
-        "cupboard",
-        "banner",
-        "oven",
-        "furniture-other",
-        "cardboard",
-        "metal",
-        "banner",
-        "hat",
-        "curtain",
-        "orange",
-        "stone",
-        "fog",
-        "sink",
-        "metal",
-        "hat",
-        "metal",
-        "metal",
-        "leaves",
-    ]
-    # default_list = ["guest room", "kitchen", "bathroom", "bedroom"]
-    # result = infer_room_type_from_object_list(object_list, default_list)
-    # result = infer_room_type_from_object_list_chat(object_list)
-    # result = infer_floor_id_from_query([0, 1, 2, 3, 4], "floor 0")
-    while True:
-        instruction = input("Enter instruction: ")
-        # result = parse_floor_room_object_gpt35(instruction)
-        result = parse_floor_room_object_gpt40(instruction)
-        print(result)
-    # result = parse_floor_room_object_gpt35(
-    #     "I want to cook something downstairs. I am currently at floor 1, where should I go?"
-    # )
-    # result = parse_floor_room_object_gpt35("cabinet")
-    # print(result)
+    """Legacy wrapper for floor/room/object parsing."""
+    parser = QueryParser()
+    floor, room, obj = parser.parse(instruction, ("obj", "room", "floor"))
+    return floor or "", room or "", obj or ""
 
 
 if __name__ == "__main__":
-    main()
+    # Test example
+    parser = QueryParser()
+    result = parser.parse("sofa in living room on floor 1")
+    print(f"Result: {result}")

@@ -1,6 +1,6 @@
 main:
     device: cuda
-    use_gpt: false
+    use_vlm: false
     dataset: horizon
     scene_id: icra_ic4f
     dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/

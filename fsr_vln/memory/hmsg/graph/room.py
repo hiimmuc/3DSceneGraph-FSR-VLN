@@ -1,12 +1,11 @@
-"""Room class to represent a room in a HMSG."""
+"""Room class to represent a room in a HMSG (Hierarchical Multi-Floor Scene Graph)."""
 
-import json
-import os
 from collections import defaultdict
 from typing import Any, List
 
 import numpy as np
 import open3d as o3d
+from memory.hmsg.graph.persistence import EntityPersistence, PersistenceHandler
 from memory.hmsg.utils.clip_utils import get_text_feats_multiple_templates
 from memory.hmsg.utils.graph_utils import (
     feats_denoise_dbscan,
@@ -14,117 +13,167 @@ from memory.hmsg.utils.graph_utils import (
 )
 
 
-class Room:
-    """Class to represent a room in a building.
+class Room(PersistenceHandler):
+    """Class to represent a room in a building (Single Responsibility: Room entity data).
 
     Args:
         room_id: Unique identifier for the room
         floor_id: Identifier of the floor this room belongs to
-        name: Name of the room (e.g., "Living Room", "Bedroom")"""
+        name: Name of the room (e.g., "Living Room", "Bedroom")
+    """
 
-    def __init__(self, room_id, floor_id, name=None):
-        self.room_id = room_id  # Unique identifier for the room
-        self.name = name  # Name of the room (e.g., "Living Room", "Bedroom")
-        self.category = None  # placeholder for a GT category
-        self.floor_id = floor_id  # Identifier of the floor this room belongs to
-        self.objects = []  # List of objects inside the room
-        self.vertices = []  # indices of the room in the point cloud 8 vertices
-        self.embeddings = []  # List of tensors of embeddings of the room
-        self.pcd = None  # Point cloud of the room
-        self.room_height = None  # Height of the room
-        self.room_zero_level = None  # Zero level of the room
-        self.represent_images = []  # 5 images that represent the appearance of the room
-        self.sample_images = []  # all images that inside the room
-        self.clip_embeddings = []  # all images clip embeddings inside the room
-        self.object_counter = 0
-        self.room_center_pos = [0, 0, 0]  # x,y,z of the room center
-        self.views = []  # List of views inside the room
+    def __init__(self, room_id: str | int, floor_id: str | int, name: str = None):
+        """Initialize a Room entity.
 
-    def add_object(self, objectt):
-        """Method to add objects to the room :param objectt: Object object to
+        Args:
+            room_id: Unique identifier for the room
+            floor_id: Identifier of the floor this room belongs to
+            name: Name of the room
+        """
+        self._room_id = room_id
+        self._floor_id = floor_id
+        self._name = name
+        self._category = None
+        self._objects: list = []
+        self._vertices = np.array([])
+        self._embeddings: list = []
+        self._pcd: o3d.geometry.PointCloud = None
+        self._room_height: float = None
+        self._room_zero_level: float = None
+        self._represent_images: list = []
+        self._sample_images: list = []
+        self._clip_embeddings: list = []
+        self._views: list = []
+        self._room_center_pos: tuple = (0, 0, 0)
 
-        be added to the room."""
-        self.objects.append(objectt)  # Method to add objects to the room
+    # Properties for encapsulation (OCP: Open/Closed Principle)
+    @property
+    def room_id(self):
+        return self._room_id
 
-    def add_view(self, viewv):
-        """Method to add views to the room :param viewv: View object to be
+    @property
+    def floor_id(self):
+        return self._floor_id
 
-        added to the room."""
-        self.views.append(viewv)
+    @property
+    def name(self):
+        return self._name
 
-    def set_txt_embeddings(self, text, clip_model, clip_feat_dim):
-        self.embeddings.append(
+    @name.setter
+    def name(self, value: str):
+        self._name = value
+
+    @property
+    def category(self):
+        return self._category
+
+    @category.setter
+    def category(self, value: str):
+        self._category = value
+
+    @property
+    def objects(self):
+        return self._objects
+
+    @property
+    def vertices(self):
+        return self._vertices
+
+    @vertices.setter
+    def vertices(self, value):
+        self._vertices = value
+
+    @property
+    def embeddings(self):
+        return self._embeddings
+
+    @property
+    def pcd(self):
+        return self._pcd
+
+    @pcd.setter
+    def pcd(self, value):
+        self._pcd = value
+
+    @property
+    def room_height(self):
+        return self._room_height
+
+    @room_height.setter
+    def room_height(self, value: float):
+        self._room_height = value
+
+    @property
+    def room_zero_level(self):
+        return self._room_zero_level
+
+    @room_zero_level.setter
+    def room_zero_level(self, value: float):
+        self._room_zero_level = value
+
+    @property
+    def represent_images(self):
+        return self._represent_images
+
+    @property
+    def sample_images(self):
+        return self._sample_images
+
+    @property
+    def clip_embeddings(self):
+        return self._clip_embeddings
+
+    @property
+    def views(self):
+        return self._views
+
+    @property
+    def room_center_pos(self):
+        return self._room_center_pos
+
+    @room_center_pos.setter
+    def room_center_pos(self, value: tuple | list):
+        self._room_center_pos = tuple(value)
+
+    def add_object(self, obj) -> None:
+        """Add an object to the room.
+
+        Args:
+            obj: Object to add
+        """
+        self._objects.append(obj)
+
+    def add_view(self, view) -> None:
+        """Add a view to the room.
+
+        Args:
+            view: View to add
+        """
+        self._views.append(view)
+
+    def set_text_embeddings(self, text: str, clip_model: Any, clip_feat_dim: int) -> None:
+        """Set text embeddings for the room using CLIP model.
+
+        Args:
+            text: Text describing the room
+            clip_model: CLIP model instance
+            clip_feat_dim: CLIP feature dimension
+        """
+        self._embeddings.append(
             get_text_feats_multiple_templates(
                 text, clip_model=clip_model, clip_feat_dim=clip_feat_dim
             )
         )
 
-    def merge_objects(self, overlap_threshold=0.01, radius=0.1):
-        """Merge objects that are close to each other and have the same
+    def merge_objects(self, overlap_threshold: float = 0.01, radius: float = 0.1) -> None:
+        """Merge objects that overlap and have the same name (SRP: Extracted from monolithic logic).
 
-        name."""
-        # for every object in the room with the same name, calculate the overlap between them
-        # if the overlap is more than the threshold, merge them
-        # repeat until no more merging is possible
-
-        overlap_scores = np.zeros((len(self.objects), len(self.objects)))
-        for i, obj1 in enumerate(self.objects):
-            for j, obj2 in enumerate(self.objects):
-                if i >= j:
-                    continue
-                if obj1.name == obj2.name:
-                    overlap = find_overlapping_ratio_faiss(obj1.pcd, obj2.pcd, radius)
-                    if overlap > overlap_threshold:
-                        overlap_scores[i, j] = overlap
-                        overlap_scores[j, i] = overlap
-
-        new_room_objects = defaultdict(list)
-        merging_idcs = list()
-        i_idcs, j_idcs = np.where(overlap_scores > 0)
-        for i, j in zip(i_idcs, j_idcs):
-            merging_idcs.extend([i, j])
-            if i not in list(new_room_objects.keys()) and j not in list(new_room_objects.keys()):
-                new_room_objects[i].append(j)
-            else:
-                if i in list(new_room_objects.keys()):
-                    new_room_objects[i].append(j)
-                elif j in list(new_room_objects.keys()):
-                    new_room_objects[j].append(i)
-        # Add all remaning objects not involved in merging
-        merging_idcs = list(set(merging_idcs))
-        for idx in range(len(self.objects)):
-            if idx not in merging_idcs:
-                new_room_objects[idx].append(idx)
-
-        # actual merging and re-indexing
-        object_index = 0
-        self.objects_new = []
-        for i, j in new_room_objects.items():
-            j = list(set(j))
-            print(i, j)
-            if len(j) == 1:
-                jj = j[0]
-                if i == jj:
-                    obj = self.objects[i]
-                    obj.object_id = self.room_id + "_" + str(object_index)
-                    self.objects_new.append(obj)
-                    object_index += 1
-                if i != jj:
-                    obj1 = self.objects[i]
-                    obj2 = self.objects[jj]
-                    obj1 += obj2
-                    obj1.object_id = self.room_id + "_" + str(object_index)
-                    self.objects_new.append(obj1)
-                    object_index += 1
-            elif len(j) > 1:
-                obj1 = self.objects[i]
-                for jj in j:
-                    obj_jj = self.objects[jj]
-                    obj1 += obj_jj
-                    obj1.object_id = self.room_id + "_" + str(object_index)
-                self.objects_new.append(obj1)
-                object_index += 1
-        self.objects = self.objects_new
+        Args:
+            overlap_threshold: Minimum overlap ratio to consider objects for merging
+            radius: Radius for overlap calculation
+        """
+        merger = ObjectMerger(self._objects, self._room_id)
+        self._objects = merger.merge(overlap_threshold, radius)
 
     def infer_room_type_from_view_embedding(
         self,
@@ -301,68 +350,200 @@ class Room:
             self.name = default_room_types[col_id]
         print("room_id, name: ", self.room_id, self.name)
 
-    def save(self, path):
-        """Save the room in folder as ply for the point cloud and json for the
+    def save(self, path: str) -> None:
+        """Save the room to disk with point cloud and metadata.
 
-        metadata."""
-        # save the point cloud
-        o3d.io.write_point_cloud(os.path.join(path, str(self.room_id) + ".ply"), self.pcd)
-        # save the metadata
-        metadata = {
-            "room_id": self.room_id,
-            "name": self.name,
-            "floor_id": self.floor_id,
-            "objects": [obj.object_id for obj in self.objects],
-            "views": [v.view_id for v in self.views],
-            "vertices": self.vertices.tolist(),
-            "room_height": self.room_height,
-            "room_zero_level": self.room_zero_level,
-            "embeddings": [i.tolist() for i in self.embeddings],
-            "represent_images": self.represent_images,
-            "sample_images": self.sample_images,
-            "clip_embeddings": [i.tolist() for i in self.clip_embeddings],
+        Args:
+            path: Directory path to save the room
+        """
+        EntityPersistence.save_entity_with_pcd(
+            str(self._room_id), self.serialize(), self._pcd, path
+        )
+
+    def load(self, path: str, load_pcd: bool = True) -> None:
+        """Load room from disk (unified method replaces load and load_new).
+
+        Args:
+            path: Directory path to load the room from
+            load_pcd: Whether to load the point cloud
+        """
+        pcd, data = EntityPersistence.load_entity_with_pcd(str(self._room_id), path, load_pcd)
+        if pcd is not None:
+            self._pcd = pcd
+        self.deserialize(data)
+
+    def serialize(self) -> dict:
+        """Serialize the room to a dictionary (SRP: Persistence handling).
+
+        Returns:
+            Dictionary with all room data
+        """
+        return {
+            "room_id": self._room_id,
+            "name": self._name,
+            "floor_id": self._floor_id,
+            "category": self._category,
+            "objects": [obj.room_id for obj in self._objects],
+            "views": [v.view_id for v in self._views],
+            "vertices": (
+                self._vertices.tolist()
+                if isinstance(self._vertices, np.ndarray)
+                else self._vertices
+            ),
+            "room_height": self._room_height,
+            "room_zero_level": self._room_zero_level,
+            "embeddings": [i.tolist() for i in self._embeddings],
+            "represent_images": self._represent_images,
+            "sample_images": self._sample_images,
+            "clip_embeddings": [i.tolist() for i in self._clip_embeddings],
+            "room_center_pos": self._room_center_pos,
         }
-        with open(os.path.join(path, str(self.room_id) + ".json"), "w") as outfile:
-            json.dump(metadata, outfile)
 
-    def load(self, path):
-        """Load the room from folder as ply for the point cloud and json for
+    def deserialize(self, data: dict) -> None:
+        """Deserialize the room from a dictionary.
 
-        the metadata."""
-        # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.room_id) + ".ply"))
-        # load the metadata
-        with open(path + "/" + str(self.room_id) + ".json") as json_file:
-            metadata = json.load(json_file)
-            self.name = metadata["name"]
-            self.floor_id = metadata["floor_id"]
-            self.vertices = np.asarray(metadata["vertices"])
-            self.room_height = metadata["room_height"]
-            self.room_zero_level = metadata["room_zero_level"]
-            self.embeddings = [np.asarray(i) for i in metadata["embeddings"]]
-            self.represent_images = (metadata["represent_images"],)
-            self.sample_images = metadata["sample_images"]
-            self.clip_embeddings = [np.asarray(i) for i in metadata["clip_embeddings"]]
+        Args:
+            data: Dictionary with room data
+        """
+        self._name = data.get("name")
+        self._floor_id = data.get("floor_id", self._floor_id)
+        self._category = data.get("category")
+        self._vertices = np.asarray(data.get("vertices", []))
+        self._room_height = data.get("room_height")
+        self._room_zero_level = data.get("room_zero_level")
+        self._embeddings = [np.asarray(i) for i in data.get("embeddings", [])]
+        self._represent_images = data.get("represent_images", [])
+        self._sample_images = data.get("sample_images", [])
+        self._clip_embeddings = [np.asarray(i) for i in data.get("clip_embeddings", [])]
+        self._room_center_pos = tuple(data.get("room_center_pos", (0, 0, 0)))
 
-    def load_new(self, path):
-        """Load the room from folder as ply for the point cloud and json for
+    def __str__(self) -> str:
+        """String representation of the room."""
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self._room_id}, name={self._name}, floor={self._floor_id}, "
+            f"objects={len(self._objects)}, views={len(self._views)})"
+        )
 
-        the metadata."""
-        # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(os.path.join(path, str(self.room_id) + ".ply"))
-        # load the metadata
-        with open(path + "/" + str(self.room_id) + ".json") as json_file:
-            metadata = json.load(json_file)
-            self.name = metadata["name"]
-            self.floor_id = metadata["floor_id"]
-            self.vertices = np.asarray(metadata["vertices"])
-            self.room_height = metadata["room_height"]
-            self.room_zero_level = metadata["room_zero_level"]
-            self.embeddings = [np.asarray(i) for i in metadata["embeddings"]]
-            self.represent_images = (metadata["represent_images"],)
-            self.sample_images = metadata["sample_images"]
-            self.clip_embeddings = [np.asarray(i) for i in metadata["clip_embeddings"]]
-            self.views = metadata["views"]
+    def __repr__(self) -> str:
+        """Developer-friendly representation."""
+        return self.__str__()
 
-    def __str__(self):
-        return f"Room ID: {self.room_id}, Name: {self.name}, Floor ID: {self.floor_id}, Objects: {len(self.objects)}, Views: {len(self.views)}"
+
+class ObjectMerger:
+    """Helper class to merge objects based on overlap criteria (SRP: Merging logic responsibility)."""
+
+    def __init__(self, objects: List, room_id: str | int):
+        """Initialize ObjectMerger.
+
+        Args:
+            objects: List of objects to merge
+            room_id: Room ID for renumbering merged objects
+        """
+        self.objects = objects
+        self.room_id = room_id
+
+    def merge(self, overlap_threshold: float = 0.01, radius: float = 0.1) -> List:
+        """Merge overlapping objects with the same name.
+
+        Args:
+            overlap_threshold: Minimum overlap ratio to trigger merge
+            radius: Radius for overlap calculation
+
+        Returns:
+            List of merged objects
+        """
+        # Calculate overlap scores between similar objects
+        overlap_scores = self._calculate_overlap_scores(overlap_threshold, radius)
+
+        # Group objects by overlap relationships
+        merge_groups = self._build_merge_groups(overlap_scores)
+
+        # Perform actual merging and re-indexing
+        merged_objects = self._perform_merging(merge_groups)
+
+        return merged_objects
+
+    def _calculate_overlap_scores(self, overlap_threshold: float, radius: float) -> np.ndarray:
+        """Calculate overlap scores between all object pairs.
+
+        Args:
+            overlap_threshold: Minimum overlap ratio
+            radius: Radius for overlap calculation
+
+        Returns:
+            Matrix of overlap scores
+        """
+        overlap_scores = np.zeros((len(self.objects), len(self.objects)))
+
+        for i, obj1 in enumerate(self.objects):
+            for j, obj2 in enumerate(self.objects):
+                if i >= j or obj1.name != obj2.name:
+                    continue
+
+                overlap = find_overlapping_ratio_faiss(obj1.pcd, obj2.pcd, radius)
+                if overlap > overlap_threshold:
+                    overlap_scores[i, j] = overlap
+                    overlap_scores[j, i] = overlap
+
+        return overlap_scores
+
+    def _build_merge_groups(self, overlap_scores: np.ndarray) -> dict:
+        """Build groups of objects that should be merged together.
+
+        Args:
+            overlap_scores: Matrix of overlap scores
+
+        Returns:
+            Dictionary mapping object indices to merge groups
+        """
+        merge_groups = defaultdict(list)
+        merge_indices = set()
+
+        i_indices, j_indices = np.where(overlap_scores > 0)
+
+        for i, j in zip(i_indices, j_indices):
+            merge_indices.add(i)
+            merge_indices.add(j)
+
+            if i not in merge_groups and j not in merge_groups:
+                merge_groups[i].append(j)
+            elif i in merge_groups:
+                merge_groups[i].append(j)
+            elif j in merge_groups:
+                merge_groups[j].append(i)
+
+        # Add non-merging objects
+        for idx in range(len(self.objects)):
+            if idx not in merge_indices:
+                merge_groups[idx].append(idx)
+
+        return merge_groups
+
+    def _perform_merging(self, merge_groups: dict) -> List:
+        """Perform the actual object merging and re-indexing.
+
+        Args:
+            merge_groups: Dictionary of merge groups
+
+        Returns:
+            List of merged objects with updated IDs
+        """
+        merged_objects = []
+        object_index = 0
+
+        for i, indices_to_merge in merge_groups.items():
+            unique_indices = list(set(indices_to_merge))
+
+            # Merge all objects in the group
+            merged_obj = self.objects[i]
+            for idx in unique_indices:
+                if idx != i:
+                    merged_obj = merged_obj + self.objects[idx]
+
+            # Update object ID
+            merged_obj._object_id = f"{self.room_id}_{object_index}"
+            merged_objects.append(merged_obj)
+            object_index += 1
+
+        return merged_objects

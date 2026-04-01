@@ -1,67 +1,157 @@
-"""Class to represent a floor in a HMSG graph."""
-
-import json
-import os
+"""Floor class to represent a floor in a HMSG (Hierarchical Multi-Floor Scene Graph)."""
 
 import numpy as np
 import open3d as o3d
+from memory.hmsg.graph.persistence import EntityPersistence, PersistenceHandler
 
 
-class Floor:
-    """Class to represent a floor in a building.
+class Floor(PersistenceHandler):
+    """Class to represent a floor in a building (Single Responsibility: Floor entity data).
 
     Args:
         floor_id: Unique identifier for the floor
-        name: Name of the floor (e.g., "First", "Second")"""
+        name: Name of the floor (e.g., "First", "Second")
+    """
 
-    def __init__(self, floor_id, name=None):
-        self.floor_id = floor_id  # Unique identifier for the floor
-        self.name = name  # Name of the floor (e.g., "First", "Second")
-        self.rooms = []  # List of rooms in the floor
-        self.txt_embeddings = []  # List of tensors of text embeddings of the floor
-        self.pcd = None  # Point cloud of the floor
-        self.vertices = []  # indices of the floor in the point cloud 8 vertices
-        self.floor_height = None  # Height of the floor
-        self.floor_zero_level = None  # Zero level of the floor
+    def __init__(self, floor_id: str | int, name: str = None):
+        """Initialize a Floor entity.
 
-    def add_room(self, room):
-        """Method to add rooms to the floor :param room: Room object to be
+        Args:
+            floor_id: Unique identifier for the floor
+            name: Name of the floor
+        """
+        self._floor_id = floor_id
+        self._name = name
+        self._rooms: list = []
+        self._txt_embeddings: list = []
+        self._pcd: o3d.geometry.PointCloud = None
+        self._vertices = np.array([])
+        self._floor_height: float = None
+        self._floor_zero_level: float = None
 
-        added to the floor."""
-        self.rooms.append(room)  # Method to add rooms to the floor
+    # Properties for encapsulation (OCP: Open/Closed Principle)
+    @property
+    def floor_id(self):
+        return self._floor_id
 
-    def save(self, path):
-        """Save the floor in folder as ply for the point cloud and json for the
+    @property
+    def name(self):
+        return self._name
 
-        metadata."""
-        # save the point cloud
-        o3d.io.write_point_cloud(os.path.join(path, str(self.floor_id) + ".ply"), self.pcd)
-        # save the metadata
-        metadata = {
-            "floor_id": self.floor_id,
-            "name": self.name,
-            "rooms": [room.room_id for room in self.rooms],
-            "vertices": self.vertices.tolist(),
-            "floor_height": self.floor_height,
-            "floor_zero_level": self.floor_zero_level,
+    @name.setter
+    def name(self, value: str):
+        self._name = value
+
+    @property
+    def rooms(self):
+        return self._rooms
+
+    @property
+    def txt_embeddings(self):
+        return self._txt_embeddings
+
+    @property
+    def pcd(self):
+        return self._pcd
+
+    @pcd.setter
+    def pcd(self, value):
+        self._pcd = value
+
+    @property
+    def vertices(self):
+        return self._vertices
+
+    @vertices.setter
+    def vertices(self, value):
+        self._vertices = value
+
+    @property
+    def floor_height(self):
+        return self._floor_height
+
+    @floor_height.setter
+    def floor_height(self, value: float):
+        self._floor_height = value
+
+    @property
+    def floor_zero_level(self):
+        return self._floor_zero_level
+
+    @floor_zero_level.setter
+    def floor_zero_level(self, value: float):
+        self._floor_zero_level = value
+
+    def add_room(self, room) -> None:
+        """Add a room to the floor.
+
+        Args:
+            room: Room to add
+        """
+        self._rooms.append(room)
+
+    def serialize(self) -> dict:
+        """Serialize the floor to a dictionary (SRP: Persistence handling).
+
+        Returns:
+            Dictionary with all floor data
+        """
+        return {
+            "floor_id": self._floor_id,
+            "name": self._name,
+            "rooms": [room.room_id for room in self._rooms],
+            "vertices": (
+                self._vertices.tolist()
+                if isinstance(self._vertices, np.ndarray)
+                else self._vertices
+            ),
+            "floor_height": self._floor_height,
+            "floor_zero_level": self._floor_zero_level,
+            "txt_embeddings": [e.tolist() for e in self._txt_embeddings],
         }
-        with open(os.path.join(path, str(self.floor_id) + ".json"), "w") as outfile:
-            json.dump(metadata, outfile)
 
-    def load(self, path):
-        """Load the floor from folder as ply for the point cloud and json for
+    def deserialize(self, data: dict) -> None:
+        """Deserialize the floor from a dictionary.
 
-        the metadata."""
-        # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(path + "/" + str(self.floor_id) + ".ply")
-        # load the metadata
-        with open(path + "/" + str(self.floor_id) + ".json") as json_file:
-            metadata = json.load(json_file)
-            self.name = metadata["name"]
-            self.rooms = metadata["rooms"]
-            self.vertices = np.asarray(metadata["vertices"])
-            self.floor_height = metadata["floor_height"]
-            self.floor_zero_level = metadata["floor_zero_level"]
+        Args:
+            data: Dictionary with floor data
+        """
+        self._name = data.get("name")
+        self._vertices = np.asarray(data.get("vertices", []))
+        self._floor_height = data.get("floor_height")
+        self._floor_zero_level = data.get("floor_zero_level")
+        self._txt_embeddings = [np.asarray(e) for e in data.get("txt_embeddings", [])]
 
-    def __str__(self):
-        return f"Floor ID: {self.floor_id}, Name: {self.name}, Rooms: {len(self.rooms)}"
+    def save(self, path: str) -> None:
+        """Save the floor to disk with point cloud and metadata.
+
+        Args:
+            path: Directory path to save the floor
+        """
+        EntityPersistence.save_entity_with_pcd(
+            str(self._floor_id), self.serialize(), self._pcd, path
+        )
+
+    def load(self, path: str, load_pcd: bool = True) -> None:
+        """Load floor from disk (unified method replaces duplicate load methods).
+
+        Args:
+            path: Directory path to load the floor from
+            load_pcd: Whether to load the point cloud
+        """
+        pcd, data = EntityPersistence.load_entity_with_pcd(str(self._floor_id), path, load_pcd)
+        if pcd is not None:
+            self._pcd = pcd
+        self.deserialize(data)
+
+    def __str__(self) -> str:
+        """String representation of the floor."""
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self._floor_id}, name={self._name}, "
+            f"rooms={len(self._rooms)})"
+        )
+
+    def __repr__(self) -> str:
+        """Developer-friendly representation."""
+        return self.__str__()

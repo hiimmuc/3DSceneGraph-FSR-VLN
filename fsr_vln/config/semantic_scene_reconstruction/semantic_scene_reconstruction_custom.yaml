@@ -1,6 +1,6 @@
 main:
     device: cuda
-    use_gpt: false
+    use_vlm: false
     dataset: horizon
     scene_id: LivingRoomDataset_20260330
     dataset_path: /home/namdp15/Workspace/VMO/vm_scene_graph/vmo_scene_graph/3DSG_gen/data/HoloAgent
@@ -54,10 +54,9 @@ pipeline:
     # Search radius (meters)
     radius_distance: 1.0
 
-    # Visualization of filtering stages (shows before/after for each step)
-    visualize_filtering: true
-    # Coloring mode for visualization: 'depth' (blue=near, yellow=far), 'clusters' (each cluster different color), 'uniform' (red=before, green=after)
-    coloring_mode: depth # options: depth, clusters, uniform
+    # Visualization of the final full point cloud after filtering (cluster-colored, saved to save_path)
+    # coloring_mode: 'depth' (blue=near, yellow=far), 'clusters' (each cluster different color), 'uniform' (red=before, green=after)
+    coloring_mode: clusters # options: depth, clusters, uniform
 
     # Processes every Nth frame — higher = faster but may miss objects / should be match with skip + 1 in convert.yaml
     skip_frames: 5

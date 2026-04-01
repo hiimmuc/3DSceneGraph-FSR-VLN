@@ -184,12 +184,12 @@ final_instruction_telepalte = instruction_templelate_sh3f_autoregion
 def main(params: DictConfig):
     # Load graph
     scene_id = params.main.scene_id
-    use_gpt = params.main.use_gpt
+    use_vlm = params.main.use_vlm
     # "autoregion"  # "none" # "human_assign" #
     spatial_reasoning_method = params.main.spatial_reasoning_method
     fast_slow_method = params.main.fast_slow_method
     if fast_slow_method == "fast_match":
-        use_gpt = False
+        use_vlm = False
     # Create save directory
     params.main.dataset_path = os.path.join(
         params.main.dataset_path, scene_id
@@ -257,7 +257,7 @@ def main(params: DictConfig):
         start_time = time.time()
 
         floor, room, obj, res_dict = hmsg.query_hierarchy_protected_icra(
-            query_instruction, top_k=5, use_gpt=use_gpt
+            query_instruction, top_k=5, use_vlm=use_vlm
         )
         end_time = time.time()
         query_time = end_time - start_time
