@@ -1,5 +1,7 @@
 """Floor class to represent a floor in a HMSG (Hierarchical Multi-Floor Scene Graph)."""
 
+from typing import Union
+
 import numpy as np
 import open3d as o3d
 from memory.hmsg.graph.persistence import EntityPersistence, PersistenceHandler
@@ -13,7 +15,7 @@ class Floor(PersistenceHandler):
         name: Name of the floor (e.g., "First", "Second")
     """
 
-    def __init__(self, floor_id: str | int, name: str = None):
+    def __init__(self, floor_id: Union[str, int], name: str = None):
         """Initialize a Floor entity.
 
         Args:

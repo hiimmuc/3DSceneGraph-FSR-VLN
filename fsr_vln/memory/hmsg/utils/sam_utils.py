@@ -205,3 +205,33 @@ def crop_masks_to_bboxes(
         crop = cv2.resize(crop, target_size)
         crops.append(crop)
     return crops
+
+
+def crop_all_bounding_boxs(
+    image: np.ndarray,
+    masks: List[MaskDict],
+    block_background: bool = False,
+    bbox_margin: int = 0,
+) -> List[np.ndarray]:
+    """Crop image regions for each SAM mask bounding box.
+
+    Args:
+        image: Input image (H x W x 3).
+        masks: List of SAM mask dictionaries with 'segmentation' and 'bbox' keys.
+        block_background: If True, apply mask to zero out background before cropping.
+                          If False, crop the raw image region.
+        bbox_margin: Margin in pixels to expand each bounding box.
+
+    Returns:
+        List of cropped image patches, one per mask.
+    """
+    crops = []
+    for mask in masks:
+        if block_background:
+            crop = BBoxProcessor.crop_by_mask(
+                image, mask["segmentation"], mask["bbox"], bbox_margin
+            )
+        else:
+            crop = BBoxProcessor.crop_by_bbox(image, mask["bbox"], bbox_margin)
+        crops.append(crop)
+    return crops

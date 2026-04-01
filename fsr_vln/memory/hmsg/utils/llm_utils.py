@@ -1,8 +1,6 @@
 """LLM utilities for query parsing and inference with multi-provider support."""
 
 import os
-import re
-import time
 from functools import lru_cache
 from typing import List, Optional, Tuple
 
@@ -14,11 +12,6 @@ load_dotenv()
 # Environment variable defaults and validation
 _DEFAULT_OLLAMA_MODEL = "qwen3-vl:4b"
 _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
-
-_PROVIDER_DEFAULTS = {
-    "ollama": {"base_url": _DEFAULT_OLLAMA_BASE_URL, "model": _DEFAULT_OLLAMA_MODEL},
-    "azure": {"endpoint": None, "key": None, "version": None, "model": None},
-}
 
 
 def _validate_env_var(key: str, default: Optional[str] = None) -> str:
@@ -104,7 +97,9 @@ class Conversation:
         """Get messages, excluding environment messages if configured."""
         if self._include_env_messages:
             return self._messages
-        return [m for m in self._messages if m.get("role", "").lower() not in ["env", "environment"]]
+        return [
+            m for m in self._messages if m.get("role", "").lower() not in ["env", "environment"]
+        ]
 
     @property
     def messages_including_env(self) -> List[dict]:
@@ -112,7 +107,9 @@ class Conversation:
         return self._messages
 
 
-def send_query(client: object, messages: List[dict], model: str, temperature: float = 0.0, **kwargs) -> object:
+def send_query(
+    client: object, messages: List[dict], model: str, temperature: float = 0.0, **kwargs
+) -> object:
     """Send query to LLM.
 
     Args:
@@ -178,7 +175,9 @@ class QueryParser:
         spec_name = self.QUERY_SPECS.get(spec_tuple, "unknown")
         return f"You are a query parser. Parse the instruction into {spec_name}. If a component cannot be parsed, leave it empty."
 
-    def _parse_response(self, response_str: str, spec_tuple: Tuple[str, ...]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def _parse_response(
+        self, response_str: str, spec_tuple: Tuple[str, ...]
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Parse LLM response into (floor, room, object).
 
         Args:
@@ -205,7 +204,9 @@ class QueryParser:
 
         return floor, room, obj
 
-    def parse(self, instruction: str, spec: Tuple[str, ...] = ("obj", "room", "floor")) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def parse(
+        self, instruction: str, spec: Tuple[str, ...] = ("obj", "room", "floor")
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Parse instruction into hierarchy components.
 
         Args:
@@ -216,7 +217,9 @@ class QueryParser:
             Tuple of (floor, room, object).
         """
         if spec not in self.QUERY_SPECS:
-            raise ValueError(f"Unknown query spec: {spec}. Available: {list(self.QUERY_SPECS.keys())}")
+            raise ValueError(
+                f"Unknown query spec: {spec}. Available: {list(self.QUERY_SPECS.keys())}"
+            )
 
         if spec == ("obj",):
             return None, None, instruction.strip()
@@ -224,10 +227,12 @@ class QueryParser:
         system_prompt = self._build_system_prompt(spec)
         user_prompt = f"Please parse: {instruction}\nOutput format: comma-separated list in order."
 
-        conversation = Conversation([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ])
+        conversation = Conversation(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
 
         response = send_query(self.client, conversation.messages, self.model, temperature=0.0)
         raw_result = response.choices[0].message.content.strip()
@@ -259,7 +264,7 @@ def infer_room_type_from_objects(
 
     messages = [
         {"role": "system", "content": system_msg},
-        {"role": "user", "content": f"Objects: bed, wardrobe, chair. Room type?"},
+        {"role": "user", "content": "Objects: bed, wardrobe, chair. Room type?"},
         {"role": "assistant", "content": "Bedroom"},
         {"role": "user", "content": f"Objects: {objects_str}. {constraint} Room type?"},
     ]
@@ -271,6 +276,47 @@ def infer_room_type_from_objects(
 
 
 # Backward-compatible wrapper functions
+def infer_floor_id_from_query(floor_ids_list: List[int], query: str) -> int:
+    """Infer floor ID from a natural-language query using LLM.
+
+    Args:
+        floor_ids_list: List of valid floor IDs (e.g., [1, 2, 3]).
+        query: User query string containing floor reference.
+
+    Returns:
+        Matched floor ID from floor_ids_list, or first ID if inference fails.
+    """
+    client, model = create_llm_client()
+
+    floors_str = ", ".join(str(f) for f in floor_ids_list)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a floor identifier. Given a query, return only the floor number "
+                "(integer) from the available floors. Answer with just the number."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Available floors: {floors_str}. Query: {query}. Which floor?",
+        },
+    ]
+
+    response = send_query(client, messages, model, temperature=0.0)
+    result = response.choices[0].message.content.strip()
+
+    try:
+        floor_id = int(result)
+        if floor_id in floor_ids_list:
+            return floor_id
+    except ValueError:
+        pass
+
+    # Default to first floor if parsing fails
+    return floor_ids_list[0] if floor_ids_list else 1
+
+
 def parse_hier_query_use_prompt_insentence_parse_icra(
     cfg, instruction: str
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:

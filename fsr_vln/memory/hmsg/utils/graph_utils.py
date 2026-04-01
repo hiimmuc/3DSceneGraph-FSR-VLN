@@ -789,6 +789,32 @@ def _visualize_point_clusters(
     return colors
 
 
+def visualize_pcd_clusters(
+    pcd: o3d.geometry.PointCloud,
+    save_dir: str = None,
+    dbscan_eps: float = 0.02,
+    dbscan_min_points: int = 10,
+) -> None:
+    """Run DBSCAN clustering on a point cloud and save a colored visualization.
+
+    Args:
+        pcd: Input Open3D point cloud.
+        save_dir: Directory to save the colored .ply file. If None, skips saving.
+        dbscan_eps: DBSCAN epsilon radius.
+        dbscan_min_points: Minimum neighbors to form a cluster.
+    """
+    labels = np.array(pcd.cluster_dbscan(eps=dbscan_eps, min_points=dbscan_min_points))
+    points = np.asarray(pcd.points)
+    colors = _visualize_point_clusters(points, labels)
+
+    colored_pcd = o3d.geometry.PointCloud(pcd)
+    colored_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        o3d.io.write_point_cloud(os.path.join(save_dir, "pcd_clusters.ply"), colored_pcd)
+
+
 # =========================================================================
 # Point Cloud Denoising & Filtering (DBSCAN, statistical, voxel, radius)
 # =========================================================================

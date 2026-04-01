@@ -1,5 +1,7 @@
 """Class to represent a view in a HMSG."""
 
+from typing import Union
+
 from memory.hmsg.graph.persistence import EntityPersistence, PersistenceHandler
 
 
@@ -13,7 +15,9 @@ class View(PersistenceHandler):
         name: Name of the view (optional)
     """
 
-    def __init__(self, view_id: str | int, room_id: str | int, img_id: int, name: str = None):
+    def __init__(
+        self, view_id: Union[str, int], room_id: Union[str, int], img_id: int, name: str = None
+    ):
         """Initialize a View entity.
 
         Args:
@@ -76,7 +80,7 @@ class View(PersistenceHandler):
     def text_descriptions(self):
         return self._text_descriptions
 
-    def add_object_id(self, object_id: int | str) -> None:
+    def add_object_id(self, object_id: Union[int, str]) -> None:
         """Add an object ID to this view.
 
         Args:

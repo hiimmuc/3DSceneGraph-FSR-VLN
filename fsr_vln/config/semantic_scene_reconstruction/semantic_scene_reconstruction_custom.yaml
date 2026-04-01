@@ -3,7 +3,7 @@ main:
     use_vlm: false
     dataset: horizon
     scene_id: LivingRoomDataset_20260330
-    dataset_path: /home/namdp15/Workspace/VMO/vm_scene_graph/vmo_scene_graph/3DSG_gen/data/HoloAgent
+    dataset_path: ../../data/HoloAgent
     # Depth threshold in meters — pixels/points beyond this distance are discarded; lower = only close objects reconstructed, depends on how far the camera to the objects
     depth_cut: 6.0
     save_path: outputs/built_graphs

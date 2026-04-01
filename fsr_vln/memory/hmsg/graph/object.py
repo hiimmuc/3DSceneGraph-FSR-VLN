@@ -1,5 +1,7 @@
 """This file contains the class definition for the Object in HMSG."""
 
+from typing import Union
+
 import numpy as np
 from memory.hmsg.graph.persistence import EntityPersistence, PersistenceHandler
 
@@ -13,7 +15,7 @@ class Object(PersistenceHandler):
         name: Name of the object (e.g., "Chair", "Table")
     """
 
-    def __init__(self, object_id: str | int, room_id: str | int, name: str = None):
+    def __init__(self, object_id: Union[str, int], room_id: Union[str, int], name: str = None):
         """Initialize an Object entity.
 
         Args:
@@ -92,7 +94,7 @@ class Object(PersistenceHandler):
     def view_ids(self):
         return self._view_ids
 
-    def add_view(self, view_id: int | str) -> None:
+    def add_view(self, view_id: Union[int, str]) -> None:
         """Add a view ID to the object's list of views.
 
         Args:

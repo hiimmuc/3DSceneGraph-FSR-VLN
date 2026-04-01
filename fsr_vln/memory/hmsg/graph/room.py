@@ -1,7 +1,7 @@
 """Room class to represent a room in a HMSG (Hierarchical Multi-Floor Scene Graph)."""
 
 from collections import defaultdict
-from typing import Any, List
+from typing import Any, List, Union
 
 import numpy as np
 import open3d as o3d
@@ -22,7 +22,7 @@ class Room(PersistenceHandler):
         name: Name of the room (e.g., "Living Room", "Bedroom")
     """
 
-    def __init__(self, room_id: str | int, floor_id: str | int, name: str = None):
+    def __init__(self, room_id: Union[str, int], floor_id: Union[str, int], name: str = None):
         """Initialize a Room entity.
 
         Args:
@@ -132,7 +132,7 @@ class Room(PersistenceHandler):
         return self._room_center_pos
 
     @room_center_pos.setter
-    def room_center_pos(self, value: tuple | list):
+    def room_center_pos(self, value: Union[tuple, list]):
         self._room_center_pos = tuple(value)
 
     def add_object(self, obj) -> None:
@@ -433,7 +433,7 @@ class Room(PersistenceHandler):
 class ObjectMerger:
     """Helper class to merge objects based on overlap criteria (SRP: Merging logic responsibility)."""
 
-    def __init__(self, objects: List, room_id: str | int):
+    def __init__(self, objects: List, room_id: Union[str, int]):
         """Initialize ObjectMerger.
 
         Args:

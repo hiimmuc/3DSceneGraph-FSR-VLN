@@ -15,31 +15,75 @@ class CLIPExtractor:
 
     # Template variations for improved feature diversity and robustness
     EXTENDED_TEMPLATES = [
-        "{}", "a photo of {}", "a photo of the {}", "a photo of one {}",
-        "I took a picture of {}.", "I took a picture of my {}.", "I took a picture of the {}.",
-        "a photo of my {}", "a photo of many {}", "a good photo of {}",
-        "a good photo of the {}", "a bad photo of {}", "a bad photo of the {}",
-        "a photo of a nice {}", "a photo of the nice {}", "a photo of a cool {}",
-        "a photo of the cool {}", "a photo of a weird {}", "a photo of the weird {}",
-        "a photo of a small {}", "a photo of the small {}", "a photo of a large {}",
-        "a photo of the large {}", "a photo of a clean {}", "a photo of the clean {}",
-        "a photo of a dirty {}", "a photo of the dirty {}", "a bright photo of {}",
-        "a bright photo of the {}", "a dark photo of {}", "a dark photo of the {}",
-        "a photo of a hard to see {}", "a photo of the hard to see {}", "a low resolution photo of {}",
-        "a low resolution photo of the {}", "a cropped photo of {}", "a cropped photo of the {}",
-        "a close-up photo of {}", "a close-up photo of the {}", "a jpeg corrupted photo of {}",
-        "a jpeg corrupted photo of the {}", "a blurry photo of {}", "a blurry photo of the {}",
-        "a pixelated photo of {}", "a pixelated photo of the {}", "a black and white photo of the {}",
-        "a black and white photo of {}", "a plastic {}", "the plastic {}", "a toy {}",
-        "the toy {}", "a plushie {}", "the plushie {}", "a cartoon {}", "the cartoon {}",
-        "an embroidered {}", "the embroidered {}", "a painting of the {}", "a painting of a {}",
+        "{}",
+        "a photo of {}",
+        "a photo of the {}",
+        "a photo of one {}",
+        "I took a picture of {}.",
+        "I took a picture of my {}.",
+        "I took a picture of the {}.",
+        "a photo of my {}",
+        "a photo of many {}",
+        "a good photo of {}",
+        "a good photo of the {}",
+        "a bad photo of {}",
+        "a bad photo of the {}",
+        "a photo of a nice {}",
+        "a photo of the nice {}",
+        "a photo of a cool {}",
+        "a photo of the cool {}",
+        "a photo of a weird {}",
+        "a photo of the weird {}",
+        "a photo of a small {}",
+        "a photo of the small {}",
+        "a photo of a large {}",
+        "a photo of the large {}",
+        "a photo of a clean {}",
+        "a photo of the clean {}",
+        "a photo of a dirty {}",
+        "a photo of the dirty {}",
+        "a bright photo of {}",
+        "a bright photo of the {}",
+        "a dark photo of {}",
+        "a dark photo of the {}",
+        "a photo of a hard to see {}",
+        "a photo of the hard to see {}",
+        "a low resolution photo of {}",
+        "a low resolution photo of the {}",
+        "a cropped photo of {}",
+        "a cropped photo of the {}",
+        "a close-up photo of {}",
+        "a close-up photo of the {}",
+        "a jpeg corrupted photo of {}",
+        "a jpeg corrupted photo of the {}",
+        "a blurry photo of {}",
+        "a blurry photo of the {}",
+        "a pixelated photo of {}",
+        "a pixelated photo of the {}",
+        "a black and white photo of the {}",
+        "a black and white photo of {}",
+        "a plastic {}",
+        "the plastic {}",
+        "a toy {}",
+        "the toy {}",
+        "a plushie {}",
+        "the plushie {}",
+        "a cartoon {}",
+        "the cartoon {}",
+        "an embroidered {}",
+        "the embroidered {}",
+        "a painting of the {}",
+        "a painting of a {}",
     ]
 
     SIMPLE_TEMPLATES = [
-        "{}", "a photo of {} in the scene.",
+        "{}",
+        "a photo of {} in the scene.",
     ]
 
-    def __init__(self, clip_model: torch.nn.Module, preprocess, feat_dim: int, device: str = "cuda"):
+    def __init__(
+        self, clip_model: torch.nn.Module, preprocess, feat_dim: int, device: str = "cuda"
+    ):
         """Initialize with a CLIP model.
 
         Args:
@@ -98,8 +142,7 @@ class CLIPExtractor:
 
             # Handle empty images
             batch_imgs = [
-                np.zeros((1, 1, 3), dtype=np.uint8) if img.size == 0 else img
-                for img in batch_imgs
+                np.zeros((1, 1, 3), dtype=np.uint8) if img.size == 0 else img for img in batch_imgs
             ]
 
             pil_imgs = [self._to_pil(img) for img in batch_imgs]
@@ -189,9 +232,64 @@ class CLIPExtractor:
         return top_indices, top_images, top_scores
 
 
-# Legacy function wrappers for backward compatibility
+def get_img_feats(
+    image: np.ndarray, preprocess, clip_model: torch.nn.Module, device: str = "cuda"
+) -> np.ndarray:
+    """Get features for a single image (legacy wrapper).
+
+    Args:
+        image: RGB image as np.ndarray (H x W x 3).
+        preprocess: CLIP image preprocessing function.
+        clip_model: CLIP model instance.
+        device: Device to run on ("cuda" or "cpu").
+
+    Returns:
+        Feature vector (feat_dim,) as np.float32.
+    """
+    img_pil = Image.fromarray(np.uint8(image))
+    img_tensor = preprocess(img_pil)[None, ...].to(device)
+    with torch.no_grad():
+        feats = clip_model.encode_image(img_tensor).float()
+    feats = feats / feats.norm(dim=-1, keepdim=True)
+    return np.float32(feats.cpu().detach()).squeeze(0)
+
+
+def get_img_feats_batch(
+    images: List[np.ndarray],
+    preprocess,
+    clip_model: torch.nn.Module,
+    device: str = "cuda",
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> np.ndarray:
+    """Get features for a list of images (legacy wrapper).
+
+    Args:
+        images: List of RGB images as np.ndarray (H x W x 3).
+        preprocess: CLIP image preprocessing function.
+        clip_model: CLIP model instance.
+        device: Device to run on ("cuda" or "cpu").
+        batch_size: Number of images to process per batch.
+
+    Returns:
+        Feature matrix (N x feat_dim) as np.float32.
+    """
+    all_feats = []
+    for start in range(0, len(images), batch_size):
+        batch = images[start : start + batch_size]
+        pil_imgs = [Image.fromarray(np.uint8(img)) for img in batch]
+        img_tensors = torch.stack([preprocess(img) for img in pil_imgs]).to(device)
+        with torch.no_grad():
+            feats = clip_model.encode_image(img_tensors).float()
+        feats = feats / feats.norm(dim=-1, keepdim=True)
+        all_feats.append(np.float32(feats.cpu().detach()))
+    return np.concatenate(all_feats, axis=0) if all_feats else np.array([])
+
+
 def get_text_feats(
-    texts: List[str], clip_model: torch.nn.Module, feat_dim: int, batch_size: int = DEFAULT_BATCH_SIZE
+    texts: List[str],
+    clip_model: torch.nn.Module,
+    feat_dim: int,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> np.ndarray:
     """Get text features (legacy wrapper)."""
     extractor = CLIPExtractor(clip_model, None, feat_dim)
@@ -199,7 +297,10 @@ def get_text_feats(
 
 
 def get_text_feats_62_templates(
-    texts: List[str], clip_model: torch.nn.Module, feat_dim: int, batch_size: int = DEFAULT_BATCH_SIZE
+    texts: List[str],
+    clip_model: torch.nn.Module,
+    feat_dim: int,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> np.ndarray:
     """Get text features with extended templates (legacy wrapper)."""
     extractor = CLIPExtractor(clip_model, None, feat_dim)
@@ -207,7 +308,10 @@ def get_text_feats_62_templates(
 
 
 def get_text_feats_multiple_templates(
-    texts: List[str], clip_model: torch.nn.Module, feat_dim: int, batch_size: int = DEFAULT_BATCH_SIZE
+    texts: List[str],
+    clip_model: torch.nn.Module,
+    feat_dim: int,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> np.ndarray:
     """Get text features with simple templates (legacy wrapper)."""
     extractor = CLIPExtractor(clip_model, None, feat_dim)

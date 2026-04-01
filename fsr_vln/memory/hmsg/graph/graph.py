@@ -19,6 +19,7 @@ import open3d as o3d
 import open3d.utility as utility
 import open_clip
 import torch
+from application.download_checkpoints import ensure_checkpoints
 from memory.hmsg.dataloader.horizon import HorizonDataset
 from memory.hmsg.graph.floor import Floor
 from memory.hmsg.graph.navigation_graph import NavigationGraph
@@ -110,6 +111,7 @@ class Graph:
         """Load and configure the CLIP model specified in config."""
         clip_type = self.cfg.models.clip.type
         checkpoint = str(self.cfg.models.clip.checkpoint)
+        ensure_checkpoints([checkpoint])
         _MODEL_MAP = {
             "ViT-L/14": ("ViT-L-14", {}),
             "ViT-H-14": ("ViT-H-14", {}),
@@ -149,7 +151,9 @@ class Graph:
     def _load_sam_model(self) -> None:
         """Load and configure the SAM model specified in config."""
         model_type = self.cfg.models.sam.type
-        self.sam = sam_model_registry[model_type](checkpoint=str(self.cfg.models.sam.checkpoint))
+        checkpoint = str(self.cfg.models.sam.checkpoint)
+        ensure_checkpoints([checkpoint])
+        self.sam = sam_model_registry[model_type](checkpoint=checkpoint)
         self.sam.to(device=self.device)
         self.mask_generator = SamAutomaticMaskGenerator(
             model=self.sam,

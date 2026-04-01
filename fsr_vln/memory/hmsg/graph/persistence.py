@@ -3,7 +3,7 @@
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import open3d as o3d
 
@@ -50,7 +50,7 @@ class EntityPersistence:
     @staticmethod
     def load_entity_with_pcd(
         entity_id: str, path: str, load_pcd: bool = True
-    ) -> tuple[o3d.geometry.PointCloud | None, Dict[str, Any]]:
+    ) -> Tuple[Optional[o3d.geometry.PointCloud], Dict[str, Any]]:
         """Load entity point cloud and metadata from disk.
 
         Args:

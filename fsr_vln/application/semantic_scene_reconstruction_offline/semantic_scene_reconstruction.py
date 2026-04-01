@@ -116,8 +116,8 @@ def run_scene_reconstruction(params: DictConfig):
 def main(params: DictConfig):
     """Main function that loads configuration via Hydra and runs scene reconstruction.
 
-A different config file can be specified via command-line arguments, e.g.:
-python semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_sh3f"""
+    A different config file can be specified via command-line arguments, e.g.:
+    python semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_sh3f"""
     run_scene_reconstruction(params)
 
 
