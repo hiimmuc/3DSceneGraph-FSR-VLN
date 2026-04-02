@@ -406,8 +406,13 @@ def compute_room_embeddings(
 
         repr_img_ids = []
         repr_embs = []
-        room_clip_embeddings = [emb_list[i] for i in img_ids]
-        room_clip_embeddings = np.squeeze(np.array(room_clip_embeddings), axis=1)
+        flat_embeddings = []
+        for i in img_ids:
+            emb = np.asarray(emb_list[i])
+            if emb.ndim > 1:
+                emb = emb.reshape(-1, emb.shape[-1]).mean(axis=0)
+            flat_embeddings.append(emb)
+        room_clip_embeddings = np.array(flat_embeddings)
         room_clip_embeddings_list.append(room_clip_embeddings)
         if len(img_ids) < num_views:
             repr_img_ids_list.append(img_ids)
@@ -803,12 +808,20 @@ def visualize_pcd_clusters(
         dbscan_eps: DBSCAN epsilon radius.
         dbscan_min_points: Minimum neighbors to form a cluster.
     """
-    labels = np.array(pcd.cluster_dbscan(eps=dbscan_eps, min_points=dbscan_min_points))
+
+    print("Running DBSCAN clustering on point cloud...")
+    labels = np.array(
+        pcd.cluster_dbscan(eps=dbscan_eps, min_points=dbscan_min_points, print_progress=True)
+    )
     points = np.asarray(pcd.points)
     colors = _visualize_point_clusters(points, labels)
 
     colored_pcd = o3d.geometry.PointCloud(pcd)
-    colored_pcd.colors = o3d.utility.Vector3dVector(colors)
+    colored_pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
+
+    # Display the colored point cloud
+    print("Visualizing DBSCAN clusters. Close the window to continue...")
+    o3d.visualization.draw_geometries([colored_pcd], window_name="DBSCAN Clustering Visualization")
 
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)

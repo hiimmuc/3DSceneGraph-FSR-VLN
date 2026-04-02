@@ -1,10 +1,9 @@
 """Class to represent the HMSG graph."""
 
-# NOTE: the upload2oss is removed. upload2oss makes local images reachable by the cloud VLM/LLM by uploading them to Aliyun OSS and producing public HTTPS URLs
-
 import json
 import os
 import re
+import shutil
 import time
 from copy import deepcopy
 from datetime import datetime
@@ -45,7 +44,7 @@ from memory.hmsg.utils.graph_utils import (
     visualize_pcd_clusters,
     visualize_pcd_on_image,
 )
-from memory.hmsg.utils.label_feats import get_label_feats
+from memory.hmsg.utils.label_feats import CSV_LABEL_REGISTRY, get_label_feats
 from memory.hmsg.utils.llm_utils import (
     create_llm_client,
     infer_floor_id_from_query,
@@ -71,11 +70,26 @@ matplotlib.use("Agg")  # Use non-GUI backend
 
 
 class Graph:
-    """Class to represent the HMSG graph :param cfg: Config file :param
+    """Hierarchical Multi-modal Scene Graph representation and querying.
 
-    inf_params: Inference parameters."""
+    Manages RGB-D data processing, CLIP feature extraction, object/room segmentation,
+    and spatial reasoning for navigation tasks.
+
+    Attributes:
+        cfg: Configuration object from Hydra/OmegaConf
+        device: Compute device ('cuda' or 'cpu')
+        full_pcd: Complete point cloud from all frames
+        objects: List of detected objects
+        rooms: List of segmented rooms
+        floors: List of floor levels
+    """
 
     def __init__(self, cfg: DictConfig):
+        """Initialize the Graph and load models.
+
+        Args:
+            cfg: Hydra configuration object containing model, dataset, and pipeline settings.
+        """
         self.cfg = cfg
         self._init_state()
         self._load_clip_model()
@@ -134,8 +148,27 @@ class Graph:
         os.makedirs(self.vln_result_dir, exist_ok=True)
         self.curr_query_save_dir = self.vln_result_dir
 
+        self._get_label_csv()
+
+    def _get_label_csv(self):
+        # Copy the label CSV file for the configured obj_labels to save_path
+        if hasattr(self.cfg, "pipeline"):
+            obj_labels = self.cfg.pipeline.obj_labels
+            if obj_labels in CSV_LABEL_REGISTRY:
+                csv_filename, _ = CSV_LABEL_REGISTRY[obj_labels]
+                labels_src_dir = os.path.normpath(
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "labels")
+                )
+                src = os.path.join(labels_src_dir, csv_filename)
+                dst = os.path.join(self.cfg.main.save_path, csv_filename)
+                if os.path.isfile(src) and not os.path.exists(dst):
+                    shutil.copy2(src, dst)
+
     def _load_dataset(self) -> None:
-        """Load the HorizonDataset from config."""
+        """Load RGB-D dataset from configuration.
+
+        Creates HorizonDataset instance with paths and settings from config.
+        """
         dataset_cfg = {
             "root_dir": self.cfg.main.dataset_path,
             "transforms": None,
@@ -144,12 +177,18 @@ class Graph:
         self.dataset = HorizonDataset(dataset_cfg)
 
     def _init_vlm_client(self) -> None:
-        """Initialize the VLM client (Azure OpenAI or local Qwen) from .env."""
+        """Initialize VLM client for semantic reasoning.
+
+        Connects to Azure OpenAI or Qwen based on environment configuration.
+        """
         self.graph_path = self.cfg.main.graph_path
         self.client, self.vlm_model = create_llm_client()
 
     def _load_sam_model(self) -> None:
-        """Load and configure the SAM model specified in config."""
+        """Load Segment Anything Model for instance segmentation.
+
+        Initializes SAM and creates automatic mask generator with configured thresholds.
+        """
         model_type = self.cfg.models.sam.type
         checkpoint = str(self.cfg.models.sam.checkpoint)
         ensure_checkpoints([checkpoint])
@@ -166,7 +205,18 @@ class Graph:
         )
         self.sam.eval()
 
-    def generate_object_queries(self, instruction):
+    def generate_object_queries(self, instruction: str) -> List[str]:
+        """Extract object queries from navigation instruction using VLM.
+
+        Uses LLM to parse instruction and generate diverse search phrases for CLIP retrieval.
+
+        Args:
+            instruction: Navigation instruction string.
+
+        Returns:
+            List of search phrases for object retrieval.
+        """
+
         prompt = f"""
 You are an AI assistant for visual navigation, and your name is **Motion**. Please ignore all occurrences of the word Motion in the input instructions, as they do not represent navigation targets.
 
@@ -206,15 +256,18 @@ Instruction: {instruction}"""
         text_probes = [item for item in text_probes if len(item) > 0]
         return text_probes
 
-    def create_feature_map(self):
-        """Create hierarchical multi-modal scene graph feature maps.
+    def create_feature_map(self) -> None:
+        """Build hierarchical multi-modal scene graph with per-point CLIP features.
 
-        Generates per-point CLIP features for the full point cloud and per-mask
-        aggregated features. Implements a 3-stage pipeline:
-        1. Build full RGB-D point cloud from dataset frames
-        2. Extract per-pixel CLIP features and project to 3D
-        3. Merge overlapping 3D masks and aggregate mask-level features
+        3-stage pipeline:
+            1. Accumulate RGB-D point cloud from dataset frames
+            2. Extract per-pixel CLIP features and project to 3D space
+            3. Merge overlapping masks and aggregate mask-level features
+
+        Raises:
+            ValueError: If dataset not loaded.
         """
+
         if self.dataset is None:
             raise ValueError("No dataset loaded. Call load_dataset() first.")
 
@@ -276,7 +329,7 @@ Instruction: {instruction}"""
                 self.preprocess,
                 clip_feat_dim=self.clip_feat_dim,
                 bbox_margin=self.cfg.pipeline.clip_bbox_margin,
-                maskedd_weight=self.cfg.pipeline.clip_masked_weight,
+                masked_weight=self.cfg.pipeline.clip_masked_weight,
             )
             F_2D = F_2D.cpu()
 
@@ -317,15 +370,15 @@ Instruction: {instruction}"""
         self._merge_masks(frames_pcd)
         self._aggregate_mask_features(tree_pcd)
 
-    def _merge_masks(self, frames_pcd: List[List[o3d.geometry.PointCloud]]):
-        """Merge overlapping 3D masks using selected merge strategy.
+    def _merge_masks(self, frames_pcd: List[List[o3d.geometry.PointCloud]]) -> None:
+        """Merge overlapping 3D masks across frames.
+
+        Applies hierarchical or sequential merging strategy based on configuration.
 
         Args:
-            frames_pcd: List of per-frame mask point clouds.
-
-        Raises:
-            ValueError: If merge_type config is invalid.
+            frames_pcd: List of point clouds for each frame's detected masks.
         """
+
         merge_type = self.cfg.pipeline.merge_type.lower()
 
         if merge_type == "hierarchical":
@@ -363,15 +416,16 @@ Instruction: {instruction}"""
         if removed_count > 0:
             print(f"   Filtered {removed_count} masks below {min_points_threshold} points")
 
-    def _aggregate_mask_features(self, tree_pcd: cKDTree):
-        """Aggregate full-cloud features into per-mask features.
+    def _aggregate_mask_features(self, tree_pcd: cKDTree) -> None:
+        """Aggregate CLIP features for each merged mask.
 
         Uses batched KDTree queries for efficiency. Removes points with
         poor reconstruction quality (distance > threshold).
 
         Args:
-            tree_pcd: KDTree over full point cloud for nearest-neighbor queries.
+            tree_pcd: KD-tree of full point cloud for spatial queries.
         """
+
         masks_feats = []
         voxel_size = self.cfg.pipeline.voxel_size
         dist_threshold = self.cfg.pipeline.get("mask_feature_dist_threshold", 0.8)
@@ -428,10 +482,17 @@ Instruction: {instruction}"""
         print(f"   Created {len(self.mask_feats)} mask features from {len(self.mask_pcds)} masks")
         assert len(self.mask_pcds) == len(self.mask_feats), "Mask-feature mismatch!"
 
-    def segment_floors_manually(self, path, flip_zy=False, mid_points=[]):
-        """Segment the floors from the full point cloud :param path: str, The
+    def segment_floors_manually(
+        self, path: str, flip_zy: bool = False, mid_points: List = []
+    ) -> None:
+        """Manually segment point cloud into floors.
 
-        path to save the intermediate results."""
+        Args:
+            path: Path to save segmented floor point clouds.
+            flip_zy: Whether to flip Z-Y axes (coordinate system conversion).
+            mid_points: Y-axis values marking floor boundaries.
+        """
+
         # downsample the point cloud
         downpcd = self.full_pcd.voxel_down_sample(voxel_size=0.05)
         # flip the z and y axis
@@ -488,39 +549,39 @@ Instruction: {instruction}"""
             plt.savefig(os.path.join(self.graph_tmp_folder, "floor_histogram_cluster.png"))
 
         # for each cluster find the top 2 peaks
-        clustred_peaks = []
+        clustered_peaks = []
         for i in range(len(np.unique(labels))):
             # for first and last cluster, find the top 1 peak
             if i == 0 or i == len(np.unique(labels)) - 1:
                 p = peaks[labels == i]
                 top_p = p[np.argsort(z_hist_smooth[p])[-1:]].tolist()
                 top_p = [z_hist[1][p] for p in top_p]
-                clustred_peaks.append(top_p)
+                clustered_peaks.append(top_p)
                 continue
             p = peaks[labels == i]
             top_p = p[np.argsort(z_hist_smooth[p])[-2:]].tolist()
             top_p = [z_hist[1][p] for p in top_p]
-            clustred_peaks.append(top_p)
-        clustred_peaks = [item for sublist in clustred_peaks for item in sublist]
-        clustred_peaks = np.sort(clustred_peaks)
-        print("clustred_peaks", clustred_peaks)
+            clustered_peaks.append(top_p)
+        clustered_peaks = [item for sublist in clustered_peaks for item in sublist]
+        clustered_peaks = np.sort(clustered_peaks)
+        print("clustered_peaks", clustered_peaks)
 
         # Check if the distance between adjacent peaks exceeds or equals 2.5m
         adjusted_peaks = []
-        for i in range(len(clustred_peaks) - 1):
-            adjusted_peaks.append(clustred_peaks[i])
-            if clustred_peaks[i + 1] - clustred_peaks[i] >= 2.5:
+        for i in range(len(clustered_peaks) - 1):
+            adjusted_peaks.append(clustered_peaks[i])
+            if clustered_peaks[i + 1] - clustered_peaks[i] >= 2.5:
                 # Insert a virtual boundary between the two peaks
-                mid_point = clustred_peaks[i + 1] - 0.2
+                mid_point = clustered_peaks[i + 1] - 0.2
                 adjusted_peaks.append(mid_point)
-        adjusted_peaks.append(clustred_peaks[-1])
+        adjusted_peaks.append(clustered_peaks[-1])
 
-        clustred_peaks = np.array(adjusted_peaks)
-        print("adjusted_peaks", clustred_peaks)
+        clustered_peaks = np.array(adjusted_peaks)
+        print("adjusted_peaks", clustered_peaks)
         floors = []
         # Generate floor ranges based on the adjusted peaks
-        for i in range(len(clustred_peaks) - 1):
-            floors.append([clustred_peaks[i], clustred_peaks[i + 1]])
+        for i in range(len(clustered_peaks) - 1):
+            floors.append([clustered_peaks[i], clustered_peaks[i + 1]])
         print("computed floors: ", floors)
 
         if not floors:
@@ -531,8 +592,8 @@ Instruction: {instruction}"""
         floors[0][0] = (floors[0][0] + np.min(downpcd[:, 1])) / 2
         floors[-1][1] = np.max(downpcd[:, 1])
 
-        print("Original clustred_peaks:", clustred_peaks)
-        print("Adjusted clustred_peaks after inserting virtual boundaries:", adjusted_peaks)
+        print("Original clustered_peaks:", clustered_peaks)
+        print("Adjusted clustered_peaks after inserting virtual boundaries:", adjusted_peaks)
         print("Generated floor ranges:", floors)
         print("Total number of floors detected:", len(floors))
 
@@ -553,14 +614,15 @@ Instruction: {instruction}"""
         print("final floors: ", floors)
         return floors
 
-    def segment_hmsg_room(self, floor: Floor, path):
-        """Segment the rooms from the floor point cloud :param floor: Floor,
+    def segment_hmsg_room(self, floor: Floor, path: str) -> None:
+        """Segment a floor into rooms with semantic embeddings.
 
-        The floor object
+        Uses 2D projection, connected components analysis, and CLIP embeddings.
 
         Args:
-            path: str, The path to save the intermediate
-        results."""
+            floor: Floor object containing point cloud and frames.
+            path: Directory to save room segmentation results.
+        """
 
         tmp_floor_path = os.path.join(self.graph_tmp_folder, floor.floor_id)
         if not os.path.exists(tmp_floor_path):
@@ -602,7 +664,7 @@ Instruction: {instruction}"""
             plt.colorbar()
             plt.savefig(os.path.join(tmp_floor_path, "2D_histogram.png"))
 
-        # applythresholding
+        # apply threshold
         hist = cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         hist = cv2.GaussianBlur(hist, (5, 5), 1)
         hist_threshold = 0.25 * np.max(hist)
@@ -614,8 +676,8 @@ Instruction: {instruction}"""
         )
 
         # apply closing to the walls skeleton
-        kernal = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-        walls_skeleton = cv2.morphologyEx(walls_skeleton, cv2.MORPH_CLOSE, kernal, iterations=1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+        walls_skeleton = cv2.morphologyEx(walls_skeleton, cv2.MORPH_CLOSE, kernel, iterations=1)
 
         # extract outside boundary from histogram of xyz_full
         hist_full, _, _ = np.histogram2d(xyz_full[:, 1], xyz_full[:, 0], bins=num_bins)
@@ -629,9 +691,9 @@ Instruction: {instruction}"""
         )
 
         # apply closing to the outside boundary
-        kernal = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         outside_boundary = cv2.morphologyEx(
-            outside_boundary, cv2.MORPH_CLOSE, kernal, iterations=3
+            outside_boundary, cv2.MORPH_CLOSE, kernel, iterations=3
         )
 
         # extract the outside contour from the outside boundary
@@ -655,8 +717,8 @@ Instruction: {instruction}"""
         full_map = cv2.bitwise_or(walls_skeleton, cv2.bitwise_not(outside_boundary))
 
         # apply closing to the full map
-        kernal = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        full_map = cv2.morphologyEx(full_map, cv2.MORPH_CLOSE, kernal, iterations=2)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        full_map = cv2.morphologyEx(full_map, cv2.MORPH_CLOSE, kernel, iterations=2)
 
         if self.cfg.pipeline.save_intermediate_results:
             # plot the full map
@@ -777,29 +839,33 @@ Instruction: {instruction}"""
                 view_index += 1
                 floor.rooms[room_id].views.append(view)
 
-    def identify_object(self, object_feat, text_feats, classes):
-        """Identify the object class by computing the similarity between the
-
-        object feature and the text features we use COCO-Stuff dataset classes
-        as the text features (183) class.
+    def identify_object(
+        self, object_feat: np.ndarray, text_feats: np.ndarray, classes: List[str]
+    ) -> str:
+        """Classify object using CLIP similarity to text embeddings.
 
         Args:
-            object_feat: np.ndarray, The object feature
-            text_feats: np.ndarray, The text features
-            classes: List, The list of classes
+            object_feat: CLIP feature vector of object.
+            text_feats: CLIP feature vectors of class labels.
+            classes: List of class names.
 
         Returns:
-            str, The object class"""
+            Best matching class name.
+        """
+
         similarity = np.dot(object_feat.reshape(1, -1), text_feats.T)
         # find the class with the highest similarity
         return classes[np.argmax(similarity)]
 
-    def segment_hmsg_objects(self, save_dir: str = None):
-        """Per floor, assign each object to the room with the highest overlap.
+    def segment_hmsg_objects(self, save_dir: str = None) -> None:
+        """Detect and segment objects in all rooms.
+
+        Processes masks through VLM ranking and stores Object instances.
 
         Args:
-            save_dir: str, optional, The path to save the intermediate
-        results"""
+            save_dir: Directory to save object segmentation results.
+        """
+
         for i, pcd in enumerate(self.mask_pcds):
             self.mask_pcds[i] = pcd_denoise(
                 pcd, method="dbscan", viz=False, eps=0.05, min_points=10
@@ -808,7 +874,7 @@ Instruction: {instruction}"""
             self.clip_model,
             self.clip_feat_dim,
             self.cfg.pipeline.obj_labels,
-            self.cfg.main.save_path,
+            self.cfg.main.save_path,  # should be "./memory/hmsg/labels/",
         )
 
         pbar = tqdm(enumerate(self.floors), total=len(self.floors), desc="Floor: ")
@@ -922,7 +988,7 @@ Instruction: {instruction}"""
                     if obj_in_view:
                         object.view_ids.append(view.view_id)
                         view.object_ids.append(object.object_id)
-                        view.text_discription.append(object.name)
+                        view.text_descriptions.append(object.name)
                         # Find the best viewpoint (minimum average depth)
                         if mean_depth < best_depth:
                             best_depth = mean_depth
@@ -931,8 +997,9 @@ Instruction: {instruction}"""
                 floor.rooms[closest_room_idx].add_object(object)
                 self.objects.append(object)
 
-    def create_graph(self):
-        """Create the full HMSG graph as a networkx graph."""
+    def create_graph(self) -> None:
+        """Build graph structure connecting building, floors, rooms, and objects."""
+
         # add nodes to the graph
         for floor in self.floors:
             self.graph.add_node(floor, name="floor", type="floor")
@@ -955,8 +1022,13 @@ Instruction: {instruction}"""
                 if obj.object_id in view.object_ids:
                     self.graph.add_edge(view, obj)
 
-    def save_hmsg_graph(self, path):
-        """Save the HMSG graph :param path: str, The path to save the graph."""
+    def save_hmsg_graph(self, path: str) -> None:
+        """Serialize graph to disk.
+
+        Args:
+            path: Directory to save graph files.
+        """
+
         # create a folder for the graph
         if not os.path.exists(path):
             os.makedirs(path)
@@ -980,8 +1052,13 @@ Instruction: {instruction}"""
             elif isinstance(topo_obj, View):
                 topo_obj.save(os.path.join(path, "views"))
 
-    def load_hmsg_graph(self, path):
-        """Load the HMSG graph :param path: str, The path to load the graph."""
+    def load_hmsg_graph(self, path: str) -> None:
+        """Load graph from disk.
+
+        Args:
+            path: Directory containing saved graph files.
+        """
+
         print(".. loading predicted graph")
         self.graph_path = path
         # load floors
@@ -1051,13 +1128,13 @@ Instruction: {instruction}"""
 
         print("-------------------")
 
-    def build_hier_multimodal_scene_graph(self, save_path=None):
-        """Build the HMSG, by segmenting the floors, rooms, views and objects and
-
-        creating the graph.
+    def build_hier_multimodal_scene_graph(self, save_path: str = None) -> None:
+        """Build complete hierarchical scene graph from raw data.
 
         Args:
-            save_path: str, The path to save the intermediate results"""
+            save_path: Path to save intermediate and final results.
+        """
+
         print("segmenting floors...")
         self.segment_floors_manually(save_path)
 
@@ -1094,10 +1171,9 @@ Instruction: {instruction}"""
         print("# objects: ", len(self.objects))
         print("--> HMSG representation successfully built")
 
-    def create_nav_graph(self):
-        """Create the navigation graph for each floor and connect the floors
+    def create_nav_graph(self) -> None:
+        """Create navigation graph from room topology."""
 
-        together."""
         last_nav_graph = None
         global_voronoi = None
 
@@ -1140,11 +1216,13 @@ Instruction: {instruction}"""
 
         NavigationGraph.save_voronoi_graph(global_voronoi, nav_dir, "global_nav_graph")
 
-    def set_room_names(self, room_names: List[str]):
-        """Set the name for each room node.
+    def set_room_names(self, room_names: List[str]) -> None:
+        """Set semantic names for rooms.
 
         Args:
-            room_names (List[str]): a list of room names with the same length as self.rooms"""
+            room_names: List of room type names (bedroom, kitchen, etc.).
+        """
+
         assert len(room_names) == len(
             self.rooms
         ), "The length of room_names should be the same as the number of rooms in the graph"
@@ -1158,18 +1236,14 @@ Instruction: {instruction}"""
         self,
         generate_method: str = "label",
         default_room_types: List[str] = None,
-    ):
-        """Generate a name for each room node based on children nodes' embedding.
+    ) -> None:
+        """Generate semantic names for rooms.
 
         Args:
-            generate_method (str): "label" or "obj_embedding" or "view_embedding"
-            default_room_types (List[str]): optionally provide a list of default room types so that the
-            room names can only be one of the provided options. When the
-            generate_method is set to "embedding", this list is mandatory.
-            clip_model (Any): when the generate_method is set to "embedding", a clip model needs to be
-            provided to the method.
-            clip_feat_dim (int): when the generate_method is set to "embedding", the clip features dimension
-            needs to be provided to this method"""
+            generate_method: Method to generate names ('label' or 'llm').
+            default_room_types: List of candidate room types.
+        """
+
         for i in range(len(self.rooms)):
             if generate_method in ["obj_embedding", "view_embedding"]:
                 assert (
@@ -1194,8 +1268,16 @@ Instruction: {instruction}"""
             else:
                 return NotImplementedError
 
-    def query_graph(self, query):
-        """Search in graph of the openmap with a text query."""
+    def query_graph(self, query: str) -> Tuple[Floor, Room, List[Object]]:
+        """Query graph for objects matching description.
+
+        Args:
+            query: Natural language query string.
+
+        Returns:
+            Tuple of (best_floor, best_room, list_of_objects).
+        """
+
         text_feats = get_text_feats_multiple_templates(
             [query], self.clip_model, self.clip_feat_dim
         )
@@ -1219,18 +1301,16 @@ Instruction: {instruction}"""
         return self.objects[top_index[0]]
 
     def query_floor(self, query: str, query_method: str = "clip") -> int:
-        """
-        Search a floor based on the number of the text query.
+        """Find best matching floor for query.
 
         Args:
-            query (str): a number in text format
-            query_method (str): "clip" match the clip embeddings of the query text and the text description of all floors.
-                                "vlm" provide the floor ids in the graph and the text query to a vlm agent, and ask for the
-                                matching floor id.
+            query: Natural language query.
+            query_method: Retrieval method ('clip' or 'llm').
 
         Returns:
-            int: The target floor id in self.floors
+            Best floor ID.
         """
+
         # TODO: assume that the self.floors are ordered according to the floor level in ascending order. Check again.
         zero_levels_list = [x.floor_zero_level for x in self.floors]
         zero_level_order_ids = np.argsort(zero_levels_list)
@@ -1256,10 +1336,18 @@ Instruction: {instruction}"""
                 floor_id = infer_floor_id_from_query(floor_ids_list, query)
                 return zero_level_order_ids[floor_id - 1]
 
-    def vlm_choose(self, video_image_local_paths: list, instruction: str):
-        system_prompt = """You are a robot operating in an indoor environment and your task is to respond to the user command about going
+    def vlm_choose(self, video_image_local_paths: List[str], instruction: str) -> int:
+        """Select best frame using VLM for given instruction.
 
-to a specific location by finding the closest frame in the provided locations to navigate to."""
+        Args:
+            video_image_local_paths: List of frame image paths.
+            instruction: Navigation instruction.
+
+        Returns:
+            Index of best matching frame.
+        """
+
+        system_prompt = """You are a robot operating in an indoor environment and your task is to respond to the user command about going to a specific location by finding the closest frame in the provided locations to navigate to."""
 
         # self.upload2oss(video_image_local_paths)
 
@@ -1268,8 +1356,7 @@ to a specific location by finding the closest frame in the provided locations to
             video_prompt.append({"type": "text", "text": f"Frame:{i}"})
             video_prompt.append({"type": "image_url", "image_url": {"url": img_path}})
         instruction_prompt = f"User says: {instruction}. Can you find the closet frame in the provided locations to navigate to?"
-        rules_prompt = """
-Rules to follow:
+        rules_prompt = """Rules to follow:
 1. Output the frame id (integer) wrapped in the <frame_id> tag.
 2. Carefully compare the candidate locations with the user instruction and select the closest one.  Describe the image you choose in detail to justify your choice after you respond the frame_id."""
 
@@ -1312,17 +1399,18 @@ Rules to follow:
 
     def detect_and_select_best_vlm(
         self, imglist: List[str], query: str, score_threshold: float = 0.5
-    ):
-        """
-        Use VLM Vision to detect whether an object appears in each image and return the best matching image.
+    ) -> int:
+        """Detect and rank objects in images using VLM.
+
         Args:
-            imglist: list of image paths or URLs
-            query: target object to query
-            score_threshold: score threshold below which detection is considered False
+            imglist: List of image file paths.
+            query: Object query string.
+            score_threshold: Minimum confidence threshold.
+
         Returns:
-            results: List[bool], whether each image contains the object
-            best_image: str, the image best matching the query (None if not found)
+            Index of image with highest confidence detection.
         """
+
         # self.upload2oss(imglist)
 
         results, scores = [], []
@@ -1403,6 +1491,17 @@ Rules to follow:
     def detect_object_in_image(
         self, img_path: str, query: str, score_threshold: float = 0.3
     ) -> bool:
+        """Check if object matching query is visible in image.
+
+        Args:
+            img_path: Path to image file.
+            query: Object query string.
+            score_threshold: Minimum confidence threshold.
+
+        Returns:
+            True if object detected with sufficient confidence.
+        """
+
         # self.upload2oss([img_path])
         img_url = img_path
         prompt = (
@@ -1442,12 +1541,21 @@ Rules to follow:
 
     def visualize_goal_images(
         self,
-        mean_depth,
-        goal_image_path_online,
-        goal_image_path_by_clip,
-        goal_image_path_by_vlm,
-        save_name="goal_compare.png",
-    ):
+        mean_depth: np.ndarray,
+        goal_image_path_online: str,
+        goal_image_path_by_clip: str,
+        goal_image_path_by_vlm: str,
+        save_name: str = "goal_compare.png",
+    ) -> None:
+        """Visualize goal image candidates from different retrieval methods.
+
+        Args:
+            mean_depth: Mean depth image.
+            goal_image_path_online: Image path from online retrieval.
+            goal_image_path_by_clip: Image path from CLIP retrieval.
+            goal_image_path_by_vlm: Image path from VLM retrieval.
+            save_name: Output visualization filename.
+        """
         # Read the images
         img_online = cv2.imread(goal_image_path_online)
         img_vlm_best = cv2.imread(goal_image_path_by_clip)
@@ -1494,7 +1602,15 @@ Rules to follow:
         cv2.waitKey(1)
         cv2.destroyAllWindows()
 
-    def get_object_info(self, target_obj_id):
+    def get_object_info(self, target_obj_id: int) -> Object:
+        """Get object by ID.
+
+        Args:
+            target_obj_id: Object ID.
+
+        Returns:
+            Object instance.
+        """
         target_object = self.objects[target_obj_id]
         target_object_id = target_object.object_id
         target_object_best_view_id = target_object.best_view_id
@@ -1508,7 +1624,15 @@ Rules to follow:
         best_view_img_id = best_view.img_id
         return best_view_image_path, best_view_img_id, target_object_id
 
-    def get_object_best_view(self, target_object):
+    def get_object_best_view(self, target_object: Object) -> str:
+        """Get image path with best view of object.
+
+        Args:
+            target_object: Object instance.
+
+        Returns:
+            Path to image with best object visibility.
+        """
         # target_object_id = target_object.object_id
         target_object_best_view_id = target_object.best_view_id
         best_view = None
@@ -1522,13 +1646,29 @@ Rules to follow:
         best_view_image_path = best_view.img_path
         return best_view_image_path
 
-    def find_view_by_imgpath(self, img_path):
+    def find_view_by_imgpath(self, img_path: str) -> View:
+        """Get View object by image path.
+
+        Args:
+            img_path: Image file path.
+
+        Returns:
+            View instance.
+        """
         for view in self.views:
             if view.img_path == img_path:
                 return view, view.img_id
         return None, None
 
-    def find_object_by_object_id(self, object_id):
+    def find_object_by_object_id(self, object_id: int) -> Object:
+        """Find object by ID.
+
+        Args:
+            object_id: Object ID.
+
+        Returns:
+            Object instance.
+        """
         for obj in self.objects:
             if obj.object_id == object_id:
                 return obj
@@ -1536,16 +1676,31 @@ Rules to follow:
 
     def query_room_obj_slow_reasoning(
         self,
-        instruction,
-        room_query,
-        object_query,
-        negative_prompt,
+        instruction: str,
+        room_query: str,
+        object_query: str,
+        negative_prompt: str,
         floor_id: int = -1,
-        room_query_method="label",
-        object_query_method="clip",
-        update_flag=True,
-    ):
-        """Query the graph with text input for room and object."""
+        room_query_method: str = "label",
+        object_query_method: str = "clip",
+        update_flag: bool = True,
+    ) -> Tuple[Room, List[Object]]:
+        """Query rooms and objects with multi-modal reasoning.
+
+        Args:
+            instruction: Original navigation instruction.
+            room_query: Room type query.
+            object_query: Object query.
+            negative_prompt: Negative instances to exclude.
+            floor_id: Floor to search (-1 for all).
+            room_query_method: Room retrieval method.
+            object_query_method: Object retrieval method.
+            update_flag: Whether to update visualization.
+
+        Returns:
+            Tuple of (best_room, list_of_objects).
+        """
+
         print("process object query use vlm....")
         query_time_consumer = dict()
         query_time_consumer["room_query"] = room_query
@@ -1930,22 +2085,22 @@ Rules to follow:
         top_k: int = 1,
         negative_prompt: List[str] = [],
         return_scores: bool = False,
-    ) -> Tuple[List[int], List[int]]:
-        """Search an object with a text query.
+    ) -> Tuple[List[int], List[float]]:
+        """Retrieve objects matching query within spatial constraints.
 
         Args:
-            query: Text description of the target object.
-            floor_id: -1 for global search; 0-(max_floor-1) restricts to a floor.
-            room_ids: Restrict search to these room indices. Empty = search all rooms.
-            query_method: "clip" uses CLIP embedding similarity.
-            top_k: Number of top results to return.
-            negative_prompt: Category names used as contrastive negatives.
-            return_scores: When True, also returns per-object similarity scores as a
-                           third element of the tuple.
+            query: Object query string.
+            floor_id: Restrict to floor (-1 for all).
+            room_ids: Restrict to rooms ([] for all).
+            query_method: Retrieval method ('clip' or 'llm').
+            top_k: Number of results to return.
+            negative_prompt: Objects to exclude.
+            return_scores: Return similarity scores.
 
         Returns:
-            (object_ids, room_ids) — or (object_ids, room_ids, scores) if return_scores=True.
+            Tuple of (object_ids, scores_if_requested).
         """
+
         if query in negative_prompt:
             query_id = negative_prompt.index(query)
         else:
@@ -2021,18 +2176,18 @@ Rules to follow:
         query_method: str = "view_embedding",
         top_k: int = 3,
     ) -> List[int]:
-        """Search a room node with a text query.
+        """Retrieve rooms matching query.
 
         Args:
-            query: Text describing the target room.
-            floor_id: -1 for global search; 0-(max_floor-1) to restrict to a floor.
-            query_method: "label" matches against stored room name embeddings;
-                          "view_embedding" scores rooms by their best-matching view.
-            top_k: Maximum number of candidate room indices to return (view_embedding only).
+            query: Room query string.
+            floor_id: Restrict to floor (-1 for all).
+            query_method: Retrieval method ('view_embedding' or 'llm').
+            top_k: Number of results to return.
 
         Returns:
-            List of room indices into self.rooms (or floor's room list) ranked by relevance.
+            List of room IDs.
         """
+
         is_room_text_valid = query is not None and query != "" and "unknown" not in query.lower()
         query_text_feats = get_text_feats_multiple_templates(
             [query], self.clip_model, self.clip_feat_dim
@@ -2074,16 +2229,17 @@ Rules to follow:
     def query_hierarchy_protected_icra(
         self, query_instruction: str, top_k: int = 1, use_vlm: bool = False
     ) -> Tuple[Floor, Room, List[Object]]:
-        """
-        Return the target floor, room, object.
+        """Query graph with hierarchical reasoning (ICRA method).
 
         Args:
-            query (str): the long query like "object X in room Y on floor Z"
-            top_k (int, optional): The number of top results to return. Default to 1.
+            query_instruction: Natural language instruction.
+            top_k: Number of object results to return.
+            use_vlm: Whether to use VLM for ranking.
 
         Returns:
-            Tuple[Floor, List[Room], List[Object]]: return a floor object, a room object and a list of object objects
+            Tuple of (floor, room, objects).
         """
+
         negative_labels = ["background"]
         start_time = time.time()
         floor_query, room_query, object_query = parse_hier_query_use_prompt_insentence_parse_icra(
@@ -2178,10 +2334,14 @@ Rules to follow:
             res_dict,
         )
 
-    def save_full_pcd(self, path, visualize_clusters=True) -> None:
-        """Save the full pcd to disk :param path: str, The path to save the
+    def save_full_pcd(self, path: str, visualize_clusters: bool = True) -> None:
+        """Save point cloud to disk with optional visualization.
 
-        full pcd."""
+        Args:
+            path: Directory to save PCD files.
+            visualize_clusters: Whether to visualize point clusters.
+        """
+
         if not os.path.exists(path):
             os.makedirs(path)
         o3d.io.write_point_cloud(os.path.join(path, "full_pcd.ply"), self.full_pcd)
@@ -2208,10 +2368,13 @@ Rules to follow:
 
         return None
 
-    def load_full_pcd(self, path):
-        """Load the full pcd from disk :param path: str, The path to load the
+    def load_full_pcd(self, path: str) -> None:
+        """Load point cloud from disk.
 
-        full pcd."""
+        Args:
+            path: Directory containing PCD files.
+        """
+
         if not os.path.exists(path):
             print("full pcd not found in {}".format(path))
             return None
@@ -2223,10 +2386,13 @@ Rules to follow:
         )
         return self.full_pcd
 
-    def save_full_pcd_feats(self, path):
-        """Save the full pcd with feats to disk :param path: str, The path to
+    def save_full_pcd_feats(self, path: str) -> None:
+        """Save per-point CLIP feature vectors.
 
-        save the full pcd feats."""
+        Args:
+            path: Directory to save feature files.
+        """
+
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -2241,9 +2407,6 @@ Rules to follow:
         self.mask_pcds = valid_mask_pcds
         self.mask_feats = valid_mask_feats
 
-        for i, feat in enumerate(self.mask_feats):
-            print(f"mask_feat[{i}] shape: {np.array(feat).shape}")
-
         # check if the full pcd feats is empty list
         if len(self.mask_feats) != 0:
             self.mask_feats = np.array(self.mask_feats)
@@ -2256,19 +2419,21 @@ Rules to follow:
         print("full pcd feats saved to disk in {}".format(path))
         return None
 
-    def load_full_pcd_feats(self, path, full_feats=False, normalize=True):
-        """Load the full pcd with feats from disk :param path: str, The path to
-
-        load the full pcd feats
+    def load_full_pcd_feats(
+        self, path: str, full_feats: bool = False, normalize: bool = True
+    ) -> None:
+        """Load per-point CLIP feature vectors.
 
         Args:
-            full_feats: bool, Whether to load the
-        full feats or the mask feats
-            normalize: bool, Whether to
-        normalize the feats."""
+            path: Directory containing feature files.
+            full_feats: Whether to load all features.
+            normalize: Whether to normalize features.
+        """
+
         if not os.path.exists(path):
             print("full pcd feats not found in {}".format(path))
             return None
+
         if full_feats:
             self.full_feats_array = torch.load(os.path.join(path, "full_feats.pt")).float()
             if normalize:
@@ -2292,17 +2457,20 @@ Rules to follow:
             print("full pcd feats loaded from disk with shape {}".format(self.mask_feats.shape))
             return self.mask_feats
 
-    def print_details(self):
-        """Print the details of the graph."""
+    def print_details(self) -> None:
         print("number of floors: ", len(self.floors))
         print("number of rooms: ", len(self.rooms))
         print("number of objects: ", len(self.objects))
         return None
 
-    def save_masked_pcds(self, path, state="both"):
-        """Save the masked pcds to disk :params state: str 'both' or 'objects'
+    def save_masked_pcds(self, path: str, state: str = "both") -> None:
+        """Save segmented object/room point clouds.
 
-        or 'full' to save the full masked pcds or only the objects."""
+        Args:
+            path: Directory to save PCD files.
+            state: Which masks to save ('objects', 'rooms', or 'both').
+        """
+
         tqdm.write("-- removing small and empty masks --")
         for i, pcd in reversed(list(enumerate(self.mask_pcds))):
             if len(pcd.points) < 10:
@@ -2349,8 +2517,13 @@ Rules to follow:
             o3d.io.write_point_cloud(os.path.join(path, "masked_pcd.ply"), masked_pcd)
             print("masked pcds saved to disk in {}".format(path))
 
-    def load_masked_pcds(self, path):
-        """Load the masked pcds from disk."""
+    def load_masked_pcds(self, path: str) -> None:
+        """Load segmented object/room point clouds.
+
+        Args:
+            path: Directory containing PCD files.
+        """
+
         # make sure that self.mask_feats is already loaded
         if len(self.mask_feats) == 0:
             print("load full pcd feats first")
@@ -2379,17 +2552,21 @@ Rules to follow:
             print("masked pcds for objects not found in {}".format(path))
             return None
 
-    def transform(self, transform):
-        """Transform the openmap full pcd and masked pcds :param transform:
+    def transform(self, transform: np.ndarray) -> None:
+        """Apply rigid transformation to entire graph.
 
-        np.ndarray, The transformation matrix."""
+        Args:
+            transform: 4x4 transformation matrix.
+        """
+
         self.full_pcd.transform(transform)
         for i, pcd in enumerate(self.mask_pcds):
             self.mask_pcds[i].transform(transform)
         return None
 
-    def visualize_instances(self):
-        """Visualize the instance of obejcts in the graph."""
+    def visualize_instances(self) -> None:
+        """Visualize all segmented objects and rooms."""
+
         all_objects_pcd = o3d.geometry.PointCloud()
         number_of_objects = 0
         for i, node in enumerate(self.graph.nodes):

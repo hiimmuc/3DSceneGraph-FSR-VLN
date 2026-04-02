@@ -45,6 +45,7 @@ class Room(PersistenceHandler):
         self._clip_embeddings: list = []
         self._views: list = []
         self._room_center_pos: tuple = (0, 0, 0)
+        self.object_counter: int = 0
 
     # Properties for encapsulation (OCP: Open/Closed Principle)
     @property
@@ -87,6 +88,10 @@ class Room(PersistenceHandler):
     def embeddings(self):
         return self._embeddings
 
+    @embeddings.setter
+    def embeddings(self, value):
+        self._embeddings = value
+
     @property
     def pcd(self):
         return self._pcd
@@ -115,13 +120,25 @@ class Room(PersistenceHandler):
     def represent_images(self):
         return self._represent_images
 
+    @represent_images.setter
+    def represent_images(self, value):
+        self._represent_images = value
+
     @property
     def sample_images(self):
         return self._sample_images
 
+    @sample_images.setter
+    def sample_images(self, value):
+        self._sample_images = value
+
     @property
     def clip_embeddings(self):
         return self._clip_embeddings
+
+    @clip_embeddings.setter
+    def clip_embeddings(self, value):
+        self._clip_embeddings = value
 
     @property
     def views(self):
