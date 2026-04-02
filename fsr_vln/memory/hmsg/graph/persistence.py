@@ -5,7 +5,21 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 
+import numpy as np
 import open3d as o3d
+
+
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy scalar and array types."""
+
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 class PersistenceHandler(ABC):
@@ -45,7 +59,7 @@ class EntityPersistence:
 
         # Save metadata
         with open(os.path.join(path, f"{entity_id}.json"), "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+            json.dump(metadata, f, indent=2, cls=_NumpyEncoder)
 
     @staticmethod
     def load_entity_with_pcd(
@@ -84,7 +98,7 @@ class EntityPersistence:
         """
         os.makedirs(path, exist_ok=True)
         with open(os.path.join(path, f"{entity_id}.json"), "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+            json.dump(metadata, f, indent=2, cls=_NumpyEncoder)
 
     @staticmethod
     def load_entity_metadata_only(entity_id: str, path: str) -> Dict[str, Any]:
