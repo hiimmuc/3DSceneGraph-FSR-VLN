@@ -10,7 +10,7 @@ from openai import AzureOpenAI, OpenAI
 load_dotenv()
 
 # Environment variable defaults and validation
-_DEFAULT_OLLAMA_MODEL = "qwen3-vl:4b"
+_DEFAULT_OLLAMA_MODEL = "qwen3.5:latest"
 _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 

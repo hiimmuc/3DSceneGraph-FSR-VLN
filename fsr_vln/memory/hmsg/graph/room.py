@@ -255,7 +255,7 @@ class Room(PersistenceHandler):
             "name" : infer room type from the name of objects in the room
             "llm" : use LLM to compare room_text with default_room_types text similarity to infer room type
         """
-        from memory.hmsg.utils.llm_utils import infer_room_type_from_object_list_chat
+        from memory.hmsg.utils.llm_utils import infer_room_type_from_objects
 
         # use similarity of object text feature and room text feature
         if infer_method == "llm":
@@ -275,8 +275,8 @@ class Room(PersistenceHandler):
                     ]
                 ):
                     objects_list.append(obj.name)
-            room_type = infer_room_type_from_object_list_chat(
-                objects_list, default_room_type=default_room_types
+            room_type = infer_room_type_from_objects(
+                objects_list, candidate_room_types=default_room_types
             )
             self.name = room_type
 
@@ -324,7 +324,7 @@ class Room(PersistenceHandler):
             "label" : infer room type from the name of objects in the room
             "obj_embedding" : infer room type from the embeddings of objects in the room
         """
-        from memory.hmsg.utils.llm_utils import infer_room_type_from_object_list_chat
+        from memory.hmsg.utils.llm_utils import infer_room_type_from_objects
 
         # use similarity of object text feature and room text feature
         if infer_method == "label":
@@ -344,8 +344,8 @@ class Room(PersistenceHandler):
                     ]
                 ):
                     objects_list.append(obj.name)
-            room_type = infer_room_type_from_object_list_chat(
-                objects_list, default_room_type=default_room_types
+            room_type = infer_room_type_from_objects(
+                objects_list, candidate_room_types=default_room_types
             )
             self.name = room_type
 

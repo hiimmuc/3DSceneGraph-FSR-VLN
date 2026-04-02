@@ -1059,7 +1059,7 @@ Instruction: {instruction}"""
             path: Directory containing saved graph files.
         """
 
-        print(".. loading predicted graph")
+        print("... loading predicted graph")
         self.graph_path = path
         # load floors
         floor_files = sorted(os.listdir(os.path.join(path, "floors")))
@@ -1078,12 +1078,10 @@ Instruction: {instruction}"""
         for room_file in room_files:
             room_file = room_file.split(".")[0]
             room = Room(str(room_file), room_file.split("_")[0])
-            room.load_new(os.path.join(path, "rooms"))
+            room.load(os.path.join(path, "rooms"))
             self.rooms.append(room)
             self.graph.add_node(room, name="room_" + str(room_file), type="room")
             self.graph.add_edge(self.floors[int(room_file.split("_")[0])], room)
-            if isinstance(self.floors[int(room.floor_id)].rooms[0], str):
-                self.floors[int(room.floor_id)].rooms = []
             self.floors[int(room.floor_id)].rooms.append(room)
         print("# pred rooms: ", len(self.rooms))
         # load objects
@@ -1099,8 +1097,7 @@ Instruction: {instruction}"""
                     break
             assert parent_room is not None, f"Couldn't find the room with room id {room_id}"
             objectt = Object(str(object_file), room_id, name="object_" + str(object_file))
-            objectt.load_new(os.path.join(path, "objects"))
-            objectt.room_id = room_id  # object_file.split("_")[1]
+            objectt.load(os.path.join(path, "objects"))
             self.objects.append(objectt)
             self.graph.add_node(objectt, name="object_" + str(object_file), type="object")
             self.graph.add_edge(parent_room, objectt)
@@ -1121,7 +1118,6 @@ Instruction: {instruction}"""
             assert parent_room is not None, f"Couldn't find the room with room id {room_id}"
             vieww = View(str(view_file), room_id, img_id=None, name="view_" + str(view_file))
             vieww.load(os.path.join(path, "views"))
-            vieww.room_id = room_id
             self.views.append(vieww)
             self.graph.add_node(vieww, name="view_" + str(view_file), type="view")
             self.graph.add_edge(parent_room, vieww)
