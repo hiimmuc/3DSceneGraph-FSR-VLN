@@ -504,15 +504,15 @@ Instruction: {instruction}"""
         print("downpcd", downpcd.shape)
 
         # divide z axis range into 0.01m bin
-        reselotion = 0.01
-        bins = np.abs(np.max(downpcd[:, 1]) - np.min(downpcd[:, 1])) / reselotion
+        resolution = 0.01
+        bins = np.abs(np.max(downpcd[:, 1]) - np.min(downpcd[:, 1])) / resolution
         print("min, max", np.min(downpcd[:, 1]), np.max(downpcd[:, 1]))
         print("bins", bins)
         z_hist = np.histogram(downpcd[:, 1], bins=int(bins))
         # smooth the histogram
         z_hist_smooth = gaussian_filter1d(z_hist[0], sigma=2)
         # Find the peaks in this histogram.
-        distance = 0.2 / reselotion
+        distance = 0.2 / resolution
         print("distance", distance)
         # set the min peak height based on the histogram
         print(np.mean(z_hist_smooth))
