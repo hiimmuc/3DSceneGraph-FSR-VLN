@@ -1,0 +1,22 @@
+defaults:
+    - profiles: custom # override with: profiles=ic3f | ic4f | ic7f | sh3f | custom
+
+main:
+    device: cuda
+    use_vlm: false
+    spatial_reasoning_method: auto_region # auto_region | human_assign | none
+    fast_slow_method: fast_match # fast_match | slow_reasoning
+
+models:
+    clip:
+        type: ViT-L/14
+        checkpoint: checkpoints/open_clip_pytorch_model.bin
+    sam:
+        type: vit_h
+        checkpoint: checkpoints/sam_vit_h_4b8939.pth
+        points_per_side: 12
+        pred_iou_thresh: 0.88
+        points_per_batch: 144
+        stability_score_thresh: 0.95
+        crop_n_layers: 0
+        min_mask_region_area: 100

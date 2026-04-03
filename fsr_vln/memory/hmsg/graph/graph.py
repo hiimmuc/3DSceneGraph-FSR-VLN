@@ -48,7 +48,7 @@ from memory.hmsg.utils.label_feats import CSV_LABEL_REGISTRY, get_label_feats
 from memory.hmsg.utils.llm_utils import (
     create_llm_client,
     infer_floor_id_from_query,
-    parse_hier_query_use_prompt_insentence_parse_icra,
+    parse_hierarchy_query,
 )
 from omegaconf import DictConfig
 from perception.models.sam_clip_feats_extractor import extract_feats_per_pixel
@@ -97,6 +97,11 @@ class Graph:
 
         if not hasattr(self.cfg, "pipeline"):
             print("-- entering querying and evaluation mode")
+            # Pre-create the QueryParser singleton so the LLM client is
+            # initialized once and reused across all queries.
+            from memory.hmsg.utils.llm_utils import QueryParser
+
+            self._query_parser = QueryParser()
             return
 
         self._load_dataset()
@@ -2222,10 +2227,10 @@ Instruction: {instruction}"""
             limit = top_k if is_room_text_valid else top_k * 2
             return sorted_ids[: min(len(sorted_ids), limit)]
 
-    def query_hierarchy_protected_icra(
+    def query_hierarchy(
         self, query_instruction: str, top_k: int = 1, use_vlm: bool = False
     ) -> Tuple[Floor, Room, List[Object]]:
-        """Query graph with hierarchical reasoning (ICRA method).
+        """Query graph with hierarchical reasoning.
 
         Args:
             query_instruction: Natural language instruction.
@@ -2233,24 +2238,24 @@ Instruction: {instruction}"""
             use_vlm: Whether to use VLM for ranking.
 
         Returns:
-            Tuple of (floor, room, objects).
+            Tuple of (floor, room, objects, res_dict).
         """
 
         negative_labels = ["background"]
         start_time = time.time()
-        floor_query, room_query, object_query = parse_hier_query_use_prompt_insentence_parse_icra(
-            self.cfg, query_instruction
+        floor_query, room_query, object_query = parse_hierarchy_query(
+            self.cfg, query_instruction, parser=getattr(self, "_query_parser", None)
         )
         llm_parse_time = time.time() - start_time
         print("llm_parse_time: ", llm_parse_time)
 
-        if "Exhibition" in room_query:
+        if room_query and "Exhibition" in room_query:
             negative_labels = ["wall"]
 
         floor_id = self.query_floor(floor_query) if floor_query is not None else -1
         print(f"floor id: {floor_id}")
 
-        is_dectect_room = "unknown" not in room_query.lower()
+        is_dectect_room = bool(room_query) and "unknown" not in room_query.lower()
         if room_query is None or room_query == "":
             is_dectect_room = False
 
@@ -2317,8 +2322,9 @@ Instruction: {instruction}"""
         res_dict["VLM_Rethinking"] = 0.0
         res_dict["Re_Matching"] = 0.0
         res_dict["Total_Time"] = 0.0
+        res_dict["object_scores"] = object_scores
 
-        print("query_hierarchy_protected_icra fun cost: ", time.time() - start_time)
+        print("query_hierarchy fun cost: ", time.time() - start_time)
         return (
             self.floors[floor_id] if floor_id != -1 else None,
             (
@@ -2329,6 +2335,9 @@ Instruction: {instruction}"""
             [self.objects[i] for i in object_ids],
             res_dict,
         )
+
+    # Backward-compatible alias
+    query_hierarchy_protected_icra = query_hierarchy
 
     def save_full_pcd(self, path: str, visualize_clusters: bool = True) -> None:
         """Save point cloud to disk with optional visualization.

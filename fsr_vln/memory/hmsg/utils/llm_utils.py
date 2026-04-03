@@ -130,22 +130,38 @@ def send_query(
     )
 
 
+# Module-level cached LLM client (created once, reused for all queries)
+_cached_client: Optional[object] = None
+_cached_model: Optional[str] = None
+
+
+def _get_cached_client() -> Tuple[object, str]:
+    """Return a module-level singleton LLM client to avoid per-query reconnects."""
+    global _cached_client, _cached_model
+    if _cached_client is None:
+        _cached_client, _cached_model = create_llm_client()
+    return _cached_client, _cached_model
+
+
 @lru_cache(maxsize=128)
 def send_query_cached(model: str, messages_str: str, temperature: float = 0.0) -> str:
-    """Send cached query (temperature must be 0.0 for deterministic caching).
+    """Send cached query to avoid redundant LLM calls for identical inputs.
 
     Args:
         model: Model name.
-        messages_str: Serialized messages (cache key).
-        temperature: Must be 0.0 for caching.
+        messages_str: JSON-serialized messages list (used as cache key).
+        temperature: Must be 0.0 for deterministic caching.
 
     Returns:
-        Cached response content.
+        Cached or freshly fetched response content string.
     """
     if temperature != 0.0:
         raise ValueError("Caching only works with temperature=0.0 for deterministic responses")
-    # Note: This is a placeholder - actual implementation would deserialize and call send_query
-    return ""
+    import json as _json
+    messages = _json.loads(messages_str)
+    client, _ = _get_cached_client()
+    response = send_query(client, messages, model, temperature=temperature)
+    return response.choices[0].message.content.strip()
 
 
 class QueryParser:
@@ -159,14 +175,14 @@ class QueryParser:
     }
 
     def __init__(self, client: object = None, model: str = None):
-        """Initialize parser with optional client/model (else uses create_llm_client).
+        """Initialize parser with optional client/model (else uses cached singleton).
 
         Args:
             client: Optional pre-created LLM client.
             model: Optional model name override.
         """
         if client is None or model is None:
-            client, model = create_llm_client()
+            client, model = _get_cached_client()
         self.client = client
         self.model = model
 
@@ -204,10 +220,25 @@ class QueryParser:
 
         return floor, room, obj
 
+    # Keywords that suggest a room or floor component is present in the query
+    _SPATIAL_HINTS = frozenset([
+        "room", "floor", "level", "upstairs", "downstairs", "kitchen", "bedroom",
+        "bathroom", "office", "living", "dining", "hallway", "garage", "basement",
+        "corridor", "lobby", "entrance", "storage",
+    ])
+
+    def _has_spatial_hints(self, instruction: str) -> bool:
+        words = set(instruction.lower().split())
+        return bool(words & self._SPATIAL_HINTS)
+
     def parse(
         self, instruction: str, spec: Tuple[str, ...] = ("obj", "room", "floor")
     ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Parse instruction into hierarchy components.
+
+        Fast-path: if spec is obj-only or no spatial hints are found in the
+        instruction, skip the LLM and return the full instruction as the
+        object query (avoiding ~8s Ollama round-trip).
 
         Args:
             instruction: User instruction to parse.
@@ -224,18 +255,30 @@ class QueryParser:
         if spec == ("obj",):
             return None, None, instruction.strip()
 
+        # Fast-path: no room/floor hints → treat full instruction as object query
+        if not self._has_spatial_hints(instruction):
+            # Strip common prefixes like "Find me the", "Where is the", etc.
+            import re as _re
+            obj = _re.sub(
+                r"^(?:find(?:\s+me)?|where(?:'s|\s+is)|locate|show(?:\s+me)?)[\s,]+(?:the\s+)?",
+                "",
+                instruction.strip(),
+                flags=_re.IGNORECASE,
+            ).strip() or instruction.strip()
+            print(f"Fast-path parsed '{instruction}' -> obj='{obj}'")
+            return None, None, obj
+
         system_prompt = self._build_system_prompt(spec)
         user_prompt = f"Please parse: {instruction}\nOutput format: comma-separated list in order."
 
-        conversation = Conversation(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
+        import json as _json
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        raw_result = send_query_cached(
+            self.model, _json.dumps(messages, ensure_ascii=False), temperature=0.0
         )
-
-        response = send_query(self.client, conversation.messages, self.model, temperature=0.0)
-        raw_result = response.choices[0].message.content.strip()
         print(f"Parsed '{instruction}' -> '{raw_result}'")
 
         return self._parse_response(raw_result, spec)
@@ -317,13 +360,18 @@ def infer_floor_id_from_query(floor_ids_list: List[int], query: str) -> int:
     return floor_ids_list[0] if floor_ids_list else 1
 
 
-def parse_hier_query_use_prompt_insentence_parse_icra(
-    cfg, instruction: str
+def parse_hierarchy_query(
+    cfg, instruction: str, parser: "QueryParser" = None
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Legacy wrapper for hierarchical query parsing."""
-    parser = QueryParser()
+    """Parse a natural language instruction into (floor, room, object) components."""
+    if parser is None:
+        parser = QueryParser()
     spec = tuple(cfg.main.long_query.spec) if hasattr(cfg, "main") else ("obj", "room", "floor")
     return parser.parse(instruction, spec)
+
+
+# Backward-compatible alias
+parse_hier_query_use_prompt_insentence_parse_icra = parse_hierarchy_query
 
 
 def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:

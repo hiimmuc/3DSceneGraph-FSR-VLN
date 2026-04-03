@@ -1,0 +1,23 @@
+# @package main
+scene_id: icra_ic3f
+dataset: horizon
+depth_cut: 6.0
+dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
+graph_path: /mnt/holoagent/fsrvln/scene_graphs_opensource/horizon/icra_ic3f/graph_20250906174017
+save_path: /mnt/holoagent/fsrvln/scene_graphs_opensource
+room_generation_method: view_embedding
+room_types:
+    - Hallway
+    - Exhibition Hall
+    - none
+    - Elevator Lobby Reception Area
+room_names_human_assign:
+    - none
+    - none
+    - Exhibition Hall
+    - none
+    - Corner Hallway
+    - HallWay
+    - Elevator Lobby Reception Area
+long_query:
+    spec: [obj, room, floor]

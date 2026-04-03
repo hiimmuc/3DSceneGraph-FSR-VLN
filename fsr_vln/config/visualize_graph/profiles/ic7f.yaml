@@ -1,0 +1,25 @@
+# @package main
+scene_id: icra_ic7f
+dataset: horizon
+depth_cut: 6.0
+dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
+graph_path: /mnt/holoagent/fsrvln/scene_graphs_opensource/horizon/icra_ic7f/graph_20250906060234
+save_path: /mnt/holoagent/fsrvln/scene_graphs_opensource
+room_generation_method: obj_embedding
+room_types:
+    - Hallway
+    - Pantry
+    - Office
+    - Cafeteria
+room_names_human_assign:
+    - west pantry
+    - hallway
+    - hallway
+    - cafeteria
+    - west mixed-use space
+    - cafeteria
+    - elevator lobby
+    - hallway office
+    - east mixed-use space
+long_query:
+    spec: [obj, room, floor]

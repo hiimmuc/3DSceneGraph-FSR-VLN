@@ -1,0 +1,18 @@
+# @package main
+scene_id: icra_ic4f
+dataset: horizon
+depth_cut: 10.0
+dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
+graph_path: /mnt/holoagent/fsrvln/scene_graphs_opensource/horizon/icra_ic4f/graph_20260106201111
+save_path: /mnt/holoagent/fsrvln/scene_graphs_opensource
+room_generation_method: label
+room_types:
+    - Hallway
+    - Pantry
+    - Office
+room_names_human_assign:
+    - Pantry
+    - Office
+    - Hallway
+long_query:
+    spec: [obj, room, floor]

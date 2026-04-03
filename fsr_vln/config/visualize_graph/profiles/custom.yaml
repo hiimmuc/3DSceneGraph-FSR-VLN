@@ -1,0 +1,21 @@
+# @package main
+# Custom profile — fill in your scene-specific values below, or override via CLI:
+#   python visualize_query_graph.py profiles=custom main.graph_path=/path/to/graph
+scene_id: custom
+dataset: horizon
+depth_cut: 6.0
+dataset_path: ../../../data/HoloAgent/LivingRoomDataset_20260330/
+graph_path: outputs/built_graphs/horizon/LivingRoomDataset_20260330/graph_20260402163619/
+save_path: outputs/built_graphs
+room_generation_method: obj_embedding # label | obj_embedding | view_embedding
+room_types:
+    - living room
+    - bedroom
+    - kitchen
+    - bathroom
+    - dining room
+    - office
+    - storage room
+room_names_human_assign: []
+long_query:
+    spec: [obj, room, floor]

@@ -19,19 +19,21 @@ maintainers accept no liability for any license violations arising from such
 use."""
 
 # pylint: disable=E,W,R,F
-"""semantic_scene_reconstruction_unified.
+"""semantic_scene_reconstruction.
 
 Performs semantic scene reconstruction and builds a Hierarchical Multimodal Scene Graph (HMSG)
 for different scenes based on the provided configuration.
+
 The script loads configuration via Hydra, creates a `Graph` instance,
 generates and saves the feature map, point cloud, masked point clouds, and feature files,
 then calls the graph construction pipeline to write results to disk.
+
 Notes
 -----
-- Depends on `hmsg.graph.graph.Graph` and the corresponding configuration files under `config/`.
+- Depends on `hmsg.graph.graph.Graph` and config files under `config/semantic_scene_reconstruction/`.
 - Creates and writes to the output directory on disk at runtime (has side effects).
-- A different configuration file can be specified via command-line arguments, e.g.:
-python semantic_scene_reconstruction_unified.py --config-name=semantic_scene_reconstruction_ic3f"""
+- Select a scene profile via Hydra override, e.g.:
+    python semantic_scene_reconstruction.py profiles=ic3f"""
 
 
 import os
@@ -111,13 +113,18 @@ def run_scene_reconstruction(params: DictConfig):
 @hydra.main(
     version_base=None,
     config_path="../../config/semantic_scene_reconstruction",
-    config_name="semantic_scene_reconstruction_ic4f",
-)  # Default: use ic4f config
+    config_name="semantic_scene_reconstruction",
+)
 def main(params: DictConfig):
     """Main function that loads configuration via Hydra and runs scene reconstruction.
 
-    A different config file can be specified via command-line arguments, e.g.:
-    python semantic_scene_reconstruction.py --config-name=semantic_scene_reconstruction_sh3f"""
+    Profile selection (via Hydra override):
+        python semantic_scene_reconstruction.py profiles=ic3f
+        python semantic_scene_reconstruction.py profiles=ic4f
+        python semantic_scene_reconstruction.py profiles=ic7f
+        python semantic_scene_reconstruction.py profiles=sh3f
+        python semantic_scene_reconstruction.py profiles=custom main.scene_id=MyScene main.dataset_path=/path/to/data
+    """
     run_scene_reconstruction(params)
 
 

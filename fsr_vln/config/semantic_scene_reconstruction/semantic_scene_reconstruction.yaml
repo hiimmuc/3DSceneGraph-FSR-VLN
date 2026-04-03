@@ -1,0 +1,76 @@
+# Base configuration for semantic scene reconstruction.
+# Scene-specific overrides are in profiles/ — select with: profiles=<name>
+#
+# Usage:
+#   python semantic_scene_reconstruction.py profiles=ic3f
+#   python semantic_scene_reconstruction.py profiles=custom main.scene_id=MyScene main.dataset_path=/path/to/data
+defaults:
+    - profiles: custom # override with: profiles=ic3f | ic4f | ic7f | sh3f | custom
+
+main:
+    device: cuda
+    use_vlm: false
+    dataset: horizon
+
+models:
+    clip:
+        type: ViT-L/14
+        checkpoint: checkpoints/open_clip_pytorch_model.bin
+    sam:
+        checkpoint: checkpoints/sam_vit_h_4b8939.pth
+        type: vit_h
+        # Grid density for automatic mask generation — higher = more candidate masks, more compute
+        points_per_side: 12
+        # Minimum predicted IoU quality for a mask to be kept — higher = fewer but more confident masks
+        pred_iou_thresh: 0.88
+        points_per_batch: 144
+        # Number of hierarchical crop layers — 0 disables cropping, higher captures small objects better
+        crop_n_layers: 0
+        # Filters unstable masks — higher = stricter, fewer masks
+        stability_score_thresh: 0.95
+        # Minimum pixel area for a mask — filters out tiny noise masks
+        min_mask_region_area: 100
+
+pipeline:
+    # 3D spatial resolution in meters — smaller = finer detail but more memory/time
+    voxel_size: 0.05
+
+    # ========== Point Cloud Filtering Pipeline ==========
+    # Multi-stage noise reduction for real RGB-D sensor data
+    # Pipeline order: DBSCAN → Voxel downsample → Radius outlier removal
+    enable_pcd_filtering: false
+    enable_dbscan_filtering: false
+    dbscan_eps: 0.02
+    dbscan_min_points: 5
+    enable_voxel_downsampling: false
+    enable_radius_outlier_filtering: false
+    radius_nb_points: 1000
+    radius_distance: 1.0
+    # coloring_mode: depth (blue=near, yellow=far) | clusters | uniform
+    coloring_mode: clusters
+
+    # Processes every Nth frame — higher = faster but may miss objects
+    skip_frames: 8
+
+    # ========== Mask Merging and Feature Extraction ==========
+    init_overlap_thresh: 0.75
+    overlap_thresh_factor: 0.025
+    # Minimum 2D mask overlap to consider two detections as the same object
+    iou_thresh: 0.05
+    # Blend weight between masked-object and full-image CLIP features
+    clip_masked_weight: 0.4418
+    # Pixel padding around bounding boxes before CLIP encoding
+    clip_bbox_margin: 50
+    feature_dbscan_eps: 0.01
+    # Maximum 3D distance (meters) between masks to consider association
+    max_mask_distance: 10000
+    min_pcd_points: 100
+    depth_weighting: false
+    grid_resolution: 0.05
+    # sequential: frame-by-frame merging; hierarchical: multi-level (more thorough, slower)
+    merge_type: sequential
+    save_intermediate_results: true
+    mask_feature_dist_threshold: 0.9
+    obj_labels: SCANNET200
+    # When true, post-processes the graph to further merge duplicate object nodes
+    merge_objects_graph: false
