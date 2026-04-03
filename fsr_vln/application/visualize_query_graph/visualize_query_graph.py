@@ -131,6 +131,53 @@ def visualize_and_save(
     vis.destroy_window()
 
 
+def _print_result_tree(
+    hmsg: Graph,
+    objects: list,
+    rooms: list,
+    scores: list,
+) -> None:
+    """Print query results as a floor → room → object tree."""
+    # Build ordered groups: floor_label -> room_label -> [(obj_name, score)]
+    from collections import OrderedDict
+
+    tree: "OrderedDict[str, OrderedDict[str, list]]" = OrderedDict()
+
+    for i, (obj, room) in enumerate(zip(objects, rooms)):
+        score = float(scores[i]) if i < len(scores) else None
+
+        # Floor label
+        obj_id_parts = str(obj.object_id).split("_")
+        floor_idx = int(obj_id_parts[0]) if obj_id_parts else -1
+        if 0 <= floor_idx < len(hmsg.floors):
+            fl = hmsg.floors[floor_idx]
+            floor_label = fl.name if fl.name else f"Floor {floor_idx}"
+        else:
+            floor_label = f"Floor {floor_idx}"
+
+        # Room label
+        room_label = room.name if room.name else room.room_id
+
+        tree.setdefault(floor_label, OrderedDict()).setdefault(room_label, []).append(
+            (obj.name, score)
+        )
+
+    print("\nQuery Graph Result:")
+    for floor_label, room_map in tree.items():
+        print(f"[{floor_label}]")
+        room_items = list(room_map.items())
+        for r_idx, (room_label, obj_list) in enumerate(room_items):
+            is_last_room = r_idx == len(room_items) - 1
+            room_prefix = "└── " if is_last_room else "├── "
+            print(f"  {room_prefix}[{room_label}]")
+            obj_indent = "      " if is_last_room else "  │   "
+            for o_idx, (obj_name, score) in enumerate(obj_list):
+                is_last_obj = o_idx == len(obj_list) - 1
+                obj_prefix = "└── " if is_last_obj else "├── "
+                score_str = f" ({score:.4f})" if score is not None else ""
+                print(f"{obj_indent}{obj_prefix}{obj_name}{score_str}")
+
+
 # ---------------------------------------------------------------------------
 # Query loop
 # ---------------------------------------------------------------------------
@@ -158,9 +205,10 @@ def run_query_loop(
     }
 
     for query in queries:
-        print(f"\n[Query] {query}")
+        print("=" * 80)
+        print(f"[Query] {query}")
 
-        query_save_dir = os.path.join(run_dir)
+        query_save_dir = os.path.join(run_dir, "query_session_logs")
         os.makedirs(query_save_dir, exist_ok=True)
         hmsg.curr_query_save_dir = query_save_dir
 
@@ -170,11 +218,9 @@ def run_query_loop(
 
         print(f"Elapsed: {query_time:.4f}s")
         floor_id_val = floor.floor_id if floor is not None else -1
-        print(
-            floor_id_val,
-            [(r.room_id, r.name) for r in rooms],
-            [o.object_id for o in objects],
-        )
+
+        scores = res_dict.get("object_scores", [])
+        _print_result_tree(hmsg, objects, rooms, scores)
 
         found = len(objects) > 0
         obj_name = objects[0].name if found else "unknown"
@@ -200,8 +246,9 @@ def run_query_loop(
 
             obj_center = np.array(obj.pcd.get_center())
             obj_center_in_map = (_T_TO_MAP @ np.hstack((obj_center, 1.0)))[:3]
-            print(f"  obj[{i}] '{obj.name}' in scene graph: {obj_center}")
-            print(f"  obj[{i}] in lidar map:   {obj_center_in_map}")
+            print(f"Object {i} - '{obj.name}' position:")
+            print(f"  - scene graph: {obj_center}")
+            print(f"  - lidar map:   {obj_center_in_map}")
 
             sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.15)
             sphere.translate(obj_center)
@@ -210,9 +257,7 @@ def run_query_loop(
             obj_pcds.append(obj_pcd)
             spheres.append(sphere)
 
-            scores = res_dict.get("object_scores", [])
             score_val = float(scores[i]) if i < len(scores) else None
-            # Derive the actual floor from the object ID (format: "<floor>_<room>_<obj>")
             obj_id_parts = str(obj.object_id).split("_")
             actual_floor = int(obj_id_parts[0]) if obj_id_parts else floor_id_val
             result_entries.append(
