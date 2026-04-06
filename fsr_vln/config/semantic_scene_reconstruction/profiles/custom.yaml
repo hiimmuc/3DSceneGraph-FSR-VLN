@@ -2,8 +2,8 @@
 # Custom profile — fill in your scene-specific values, or override via CLI:
 #   python semantic_scene_reconstruction.py profiles=custom main.scene_id=MyScene main.dataset_path=/path/to/data
 main:
-    scene_id: custom
-    dataset_path: ../../../data/HoloAgent/LivingRoomDataset_20260330/
+    scene_id: LivingRoomDataset_20260330
+    dataset_path: ../../../data/HoloAgent/
     save_path: outputs/built_graphs
     depth_cut: 6.0
 

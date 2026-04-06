@@ -2350,7 +2350,7 @@ Instruction: {instruction}"""
         if not os.path.exists(path):
             os.makedirs(path)
         o3d.io.write_point_cloud(os.path.join(path, "full_pcd.ply"), self.full_pcd)
-        print("full pcd saved to disk in {}".format(path))
+        print("[Logging] Full pcd saved in {}".format(path))
 
         if visualize_clusters:
             # Visualize the final full point cloud with cluster coloring
@@ -2421,7 +2421,7 @@ Instruction: {instruction}"""
                 torch.from_numpy(self.full_feats_array),
                 os.path.join(path, "full_feats.pt"),
             )
-        print("full pcd feats saved to disk in {}".format(path))
+        print("[Logging] Full pcd feats saved in {}".format(path))
         return None
 
     def load_full_pcd_feats(
@@ -2503,14 +2503,14 @@ Instruction: {instruction}"""
                 pcd.paint_uniform_color(np.random.rand(3))
                 masked_pcd += pcd
             o3d.io.write_point_cloud(os.path.join(path, "masked_pcd.ply"), masked_pcd)
-            print("masked pcds saved to disk in {}".format(path))
+            print("[Logging] Masked pcds saved in {}".format(path))
 
         elif state == "objects":
             if not os.path.exists(path):
                 os.makedirs(path)
             for i, pcd in enumerate(self.mask_pcds):
                 o3d.io.write_point_cloud(os.path.join(objects_path, "pcd_{}.ply".format(i)), pcd)
-            print("masked pcds saved to disk in {}".format(path))
+            print("[Logging] Masked pcds saved in {}".format(path))
 
         elif state == "full":
             if not os.path.exists(path):
@@ -2520,7 +2520,7 @@ Instruction: {instruction}"""
                 pcd.paint_uniform_color(np.random.rand(3))
                 masked_pcd += pcd
             o3d.io.write_point_cloud(os.path.join(path, "masked_pcd.ply"), masked_pcd)
-            print("masked pcds saved to disk in {}".format(path))
+            print("[Logging] Masked pcds saved in {}".format(path))
 
     def load_masked_pcds(self, path: str) -> None:
         """Load segmented object/room point clouds.

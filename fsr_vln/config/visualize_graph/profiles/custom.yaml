@@ -5,7 +5,7 @@ scene_id: custom
 dataset: horizon
 depth_cut: 6.0
 dataset_path: ../../../data/HoloAgent/LivingRoomDataset_20260330/
-graph_path: outputs/built_graphs/horizon/LivingRoomDataset_20260330/graph_20260402163619/
+graph_path: outputs/built_graphs/horizon/LivingRoomDataset_20260330/graph_20260406170322/
 save_path: outputs/built_graphs
 room_generation_method: obj_embedding # label | obj_embedding | view_embedding
 room_types:

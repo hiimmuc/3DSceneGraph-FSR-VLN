@@ -281,7 +281,7 @@ def _merge_configs(config_dict: DictConfig, cli_args: Dict) -> VisualizationConf
 
 
 @hydra.main(
-    version_base=None, config_path="../config/visualize_graph", config_name="visualize_graph"
+    version_base=None, config_path="../config/visualize_graph", config_name="visualize_query_graph"
 )
 def main(params: DictConfig) -> None:
     """Main visualization function with CLI argument support."""

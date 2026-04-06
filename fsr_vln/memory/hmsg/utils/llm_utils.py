@@ -1,8 +1,10 @@
 """LLM utilities for query parsing and inference with multi-provider support."""
 
+import json
 import os
+import socket
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
@@ -379,6 +381,447 @@ def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:
     parser = QueryParser()
     floor, room, obj = parser.parse(instruction, ("obj", "room", "floor"))
     return floor or "", room or "", obj or ""
+
+
+# ---------------------------------------------------------------------------
+# MotionAgent — conversational robot assistant
+# ---------------------------------------------------------------------------
+
+# Implicit object mapping: lifestyle keywords → object categories
+_IMPLICIT_OBJECT_MAP = {
+    "sleepy": "bed",
+    "tired": "bed",
+    "sleep": "bed",
+    "rest": "bed",
+    "nap": "bed",
+    "bored": "entertainment",
+    "boring": "entertainment",
+    "entertain": "TV",
+    "entertainment": "TV",
+    "watch": "TV",
+    "movie": "TV",
+    "movies": "TV",
+    "film": "TV",
+    "show": "TV",
+    "music": "radio",
+    "hungry": "kitchen",
+    "eat": "kitchen",
+    "food": "kitchen",
+    "thirsty": "kitchen",
+    "drink": "kitchen",
+    "work": "desk",
+    "study": "desk",
+    "read": "bookshelf",
+    "book": "bookshelf",
+    "sit": "chair",
+    "relax": "sofa",
+}
+
+# Navigation dialogue states
+_NAV_STATE_INFER = "INFER"
+_NAV_STATE_CLARIFY = "CLARIFY"
+_NAV_STATE_CONFIRM = "CONFIRM"
+_NAV_STATE_DONE = "DONE"
+
+
+def publish_navigation_goal(
+    goal: Dict[str, Any],
+    host: str = "127.0.0.1",
+    port: int = 5005,
+) -> bool:
+    """Send a navigation goal to the ROS2 goal bridge via UDP.
+
+    Args:
+        goal: Dict with keys ``name``, ``x``, ``y``, ``z``.
+        host: UDP host (default ``127.0.0.1``).
+        port: UDP port (default ``5005`` — matches ros2_goal_bridge.py).
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(json.dumps(goal).encode("utf-8"), (host, port))
+        sock.close()
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("publish_navigation_goal failed: %s", e)
+        return False
+
+
+class MotionAgent:
+    """Conversational robot assistant named 'Motion'.
+
+    Classifies user intent as general conversation or navigation request and
+    handles multi-turn clarification dialogues to resolve the navigation target
+    before publishing a ROS2 goal position.
+
+    Usage::
+
+        agent = MotionAgent(scene_graph=graph_instance)
+        response, action = agent.process_message(user_text, history, nav_state)
+        if action:
+            publish_navigation_goal(action)
+
+    The ``nav_state`` dict is mutated in-place across turns to track the
+    navigation dialogue state machine (``INFER → CLARIFY → CONFIRM → DONE``).
+    Pass ``{}`` initially and persist it in Streamlit ``session_state``.
+    """
+
+    _SYSTEM_PROMPT = (
+        "You are Motion, a friendly and helpful robot assistant. "
+        "You live in a smart building and can guide people to any object or location. "
+        "Keep responses concise and warm. "
+        "When someone mentions a need or feeling, infer what they might need "
+        "(e.g. 'sleepy' → bed, 'bored' → TV or radio, 'hungry' → kitchen). "
+        "Always speak as Motion."
+    )
+
+    _INTENT_PROMPT = (
+        "Classify the user's last message as either 'general' or 'navigation'.\n"
+        "'navigation' means the user wants to go somewhere, find an object, "
+        "or you infer they need something physical (e.g. bed, TV, kitchen).\n"
+        "'general' means casual conversation with no navigation need.\n"
+        "Reply with exactly one word: general  or  navigation."
+    )
+
+    def __init__(
+        self,
+        scene_graph: Optional[Any] = None,
+        client: Optional[Any] = None,
+        model: Optional[str] = None,
+    ) -> None:
+        """Initialize MotionAgent.
+
+        Args:
+            scene_graph: Loaded ``Graph`` instance for scene queries (optional).
+            client: Pre-created LLM client (optional — uses cached singleton).
+            model: Model name override (optional).
+        """
+        if client is None or model is None:
+            self._client, self._model = _get_cached_client()
+        else:
+            self._client = client
+            self._model = model
+        self.scene_graph = scene_graph
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def process_message(
+        self,
+        user_message: str,
+        history: List[Dict[str, str]],
+        nav_state: Dict[str, Any],
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Process one user turn and return (response_text, action_or_None).
+
+        Args:
+            user_message: The user's latest message.
+            history: Conversation history as list of ``{role, content}`` dicts
+                (roles: ``"user"`` or ``"assistant"``).  Mutated in-place.
+            nav_state: Navigation state dict (mutated in-place).  Pass ``{}``
+                for the first message.
+
+        Returns:
+            Tuple of:
+            - ``response_text``: Motion's reply to display/speak.
+            - ``action``: ``{name, x, y, z}`` dict when a navigation target is
+              resolved and should be published, else ``None``.
+        """
+        # If we're in the middle of a navigation dialogue, continue it
+        if nav_state.get("state") in (_NAV_STATE_CLARIFY, _NAV_STATE_CONFIRM):
+            return self._continue_navigation(user_message, history, nav_state)
+
+        intent = self._classify_intent(user_message, history)
+
+        if intent == "navigation":
+            return self._start_navigation(user_message, history, nav_state)
+        else:
+            response = self._general_chat(user_message, history)
+            return response, None
+
+    # ------------------------------------------------------------------
+    # Intent classification
+    # ------------------------------------------------------------------
+
+    def _classify_intent(self, message: str, history: List[Dict]) -> str:
+        """Return 'navigation' or 'general' for the given message."""
+        # Fast-path: keyword check for implicit object mapping
+        words = set(message.lower().split())
+        if words & set(_IMPLICIT_OBJECT_MAP.keys()):
+            return "navigation"
+
+        # Ask LLM
+        messages = [{"role": "system", "content": self._INTENT_PROMPT}]
+        # Include last 4 turns for context
+        for turn in history[-4:]:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": message})
+
+        try:
+            response = send_query(self._client, messages, self._model, temperature=0.0)
+            result = response.choices[0].message.content.strip().lower()
+            return "navigation" if "navigation" in result else "general"
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Intent classification failed: %s", e)
+            return "general"
+
+    # ------------------------------------------------------------------
+    # General conversation
+    # ------------------------------------------------------------------
+
+    def _general_chat(self, message: str, history: List[Dict]) -> str:
+        """Generate a general conversational response."""
+        messages = [{"role": "system", "content": self._SYSTEM_PROMPT}]
+        for turn in history[-10:]:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": message})
+
+        try:
+            response = send_query(self._client, messages, self._model, temperature=0.7)
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("General chat failed: %s", e)
+            return "I'm sorry, I had trouble responding. Could you say that again?"
+
+    # ------------------------------------------------------------------
+    # Navigation dialogue
+    # ------------------------------------------------------------------
+
+    def _infer_object_query(self, message: str, history: List[Dict]) -> str:
+        """Map the user message to an object search query."""
+        words = message.lower().split()
+        for word in words:
+            if word in _IMPLICIT_OBJECT_MAP:
+                return _IMPLICIT_OBJECT_MAP[word]
+
+        # Ask LLM to extract the target object
+        prompt = (
+            "The user wants to navigate to something. "
+            "Extract the most likely physical object or location they need. "
+            "Reply with just the object name (e.g. 'bed', 'TV', 'kitchen'). "
+            f"User said: {message}"
+        )
+        messages = [
+            {"role": "system", "content": self._SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            r = send_query(self._client, messages, self._model, temperature=0.0)
+            return r.choices[0].message.content.strip().lower()
+        except Exception:
+            return message.strip()
+
+    def _query_scene_graph(self, object_query: str, top_k: int = 5) -> List[Dict]:
+        """Query the scene graph and return a list of candidate result dicts."""
+        if self.scene_graph is None:
+            return []
+        try:
+            _floor, rooms, objects, res_dict = self.scene_graph.query_hierarchy(
+                object_query, top_k=top_k
+            )
+            candidates = []
+            _T_SWITCH = __import__("numpy").array(
+                [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]],
+                dtype=float,
+            )
+            _T_TO_MAP = __import__("numpy").linalg.inv(_T_SWITCH)
+            import numpy as np
+
+            for obj, room in zip(objects, rooms):
+                center_sg = np.array(obj.pcd.get_center())
+                center_map = (_T_TO_MAP @ np.hstack((center_sg, 1.0)))[:3]
+                floor_label = "?"
+                obj_id_parts = str(obj.object_id).split("_")
+                if obj_id_parts and self.scene_graph.floors:
+                    idx = int(obj_id_parts[0]) if obj_id_parts[0].isdigit() else -1
+                    if 0 <= idx < len(self.scene_graph.floors):
+                        fl = self.scene_graph.floors[idx]
+                        floor_label = fl.name or f"Floor {idx}"
+                room_label = room.name or room.room_id
+                candidates.append(
+                    {
+                        "name": obj.name,
+                        "room": room_label,
+                        "floor": floor_label,
+                        "x": float(center_map[0]),
+                        "y": float(center_map[1]),
+                        "z": float(center_map[2]),
+                        "object_id": obj.object_id,
+                    }
+                )
+            return candidates
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("Scene graph query failed: %s", e)
+            return []
+
+    def _start_navigation(
+        self,
+        message: str,
+        history: List[Dict],
+        nav_state: Dict,
+    ) -> Tuple[str, Optional[Dict]]:
+        """Begin a navigation dialogue from a fresh user message."""
+        object_query = self._infer_object_query(message, history)
+        nav_state["object_query"] = object_query
+        candidates = self._query_scene_graph(object_query)
+        nav_state["candidates"] = candidates
+
+        if not candidates:
+            nav_state.clear()
+            response = self._general_chat(
+                message
+                + "\n(Note: I couldn't find any matching objects in my scene map. "
+                "Please let the user know gently.)",
+                history,
+            )
+            return response, None
+
+        # Single candidate — ask for confirmation
+        if len(candidates) == 1:
+            c = candidates[0]
+            nav_state["state"] = _NAV_STATE_CONFIRM
+            nav_state["selected"] = c
+            response = (
+                f"I found a {c['name']} in {c['room']}, {c['floor']}. "
+                "Shall I take you there?"
+            )
+            return response, None
+
+        # Check if all candidates are in the same room — skip clarification
+        rooms_seen = {(c["room"], c["floor"]) for c in candidates}
+        if len(rooms_seen) == 1:
+            c = candidates[0]
+            nav_state["state"] = _NAV_STATE_CONFIRM
+            nav_state["selected"] = c
+            response = (
+                f"I found a {c['name']} in {c['room']}, {c['floor']}. "
+                "Shall I take you there?"
+            )
+            return response, None
+
+        # Multiple locations — ask user to pick
+        nav_state["state"] = _NAV_STATE_CLARIFY
+        options_text = "\n".join(
+            f"  {i + 1}. {c['name']} — {c['room']}, {c['floor']}"
+            for i, c in enumerate(candidates)
+        )
+        response = (
+            f"I found {len(candidates)} options:\n{options_text}\n"
+            "Which one would you like to go to? (say the number or describe the location)"
+        )
+        return response, None
+
+    def _continue_navigation(
+        self,
+        message: str,
+        history: List[Dict],
+        nav_state: Dict,
+    ) -> Tuple[str, Optional[Dict]]:
+        """Continue an in-progress navigation clarification dialogue."""
+        state = nav_state.get("state")
+
+        if state == _NAV_STATE_CONFIRM:
+            selected = nav_state.get("selected", {})
+            if self._user_confirmed(message):
+                nav_state["state"] = _NAV_STATE_DONE
+                nav_state.clear()
+                action = {
+                    "name": selected.get("name", "target"),
+                    "x": selected["x"],
+                    "y": selected["y"],
+                    "z": selected["z"],
+                }
+                response = (
+                    f"Great! Let me take you to the {selected.get('name', 'target')} "
+                    f"in {selected.get('room', '')}. I'm on my way!"
+                )
+                return response, action
+            else:
+                nav_state.clear()
+                return "Understood, I won't navigate there. Let me know if you need anything else!", None
+
+        if state == _NAV_STATE_CLARIFY:
+            candidates = nav_state.get("candidates", [])
+            selected = self._resolve_selection(message, candidates)
+            if selected is not None:
+                nav_state["state"] = _NAV_STATE_CONFIRM
+                nav_state["selected"] = selected
+                response = (
+                    f"Got it! Taking you to the {selected['name']} "
+                    f"in {selected['room']}, {selected['floor']}. Shall I confirm?"
+                )
+                return response, None
+            else:
+                options_text = "\n".join(
+                    f"  {i + 1}. {c['name']} — {c['room']}, {c['floor']}"
+                    for i, c in enumerate(candidates)
+                )
+                response = (
+                    "Sorry, I didn't catch that. Please choose a number or describe the location:\n"
+                    + options_text
+                )
+                return response, None
+
+        # Fallback — clear stale state
+        nav_state.clear()
+        return self._general_chat(message, history), None
+
+    def _user_confirmed(self, message: str) -> bool:
+        """Return True if the message is an affirmative response."""
+        affirmatives = {"yes", "yeah", "yep", "sure", "ok", "okay", "please", "go", "do it", "confirm", "y"}
+        msg_lower = message.strip().lower()
+        return any(a in msg_lower for a in affirmatives)
+
+    def _resolve_selection(
+        self, message: str, candidates: List[Dict]
+    ) -> Optional[Dict]:
+        """Try to match user's selection to one of the candidates."""
+        msg_lower = message.strip().lower()
+
+        # Numeric selection
+        for i, c in enumerate(candidates):
+            if str(i + 1) in msg_lower:
+                return c
+
+        # Location-based match
+        for c in candidates:
+            if c["room"].lower() in msg_lower or c["floor"].lower() in msg_lower:
+                return c
+
+        # LLM-assisted disambiguation
+        try:
+            opts = "; ".join(
+                f"{i + 1}: {c['name']} in {c['room']}, {c['floor']}"
+                for i, c in enumerate(candidates)
+            )
+            prompt = (
+                f"The user said: '{message}'. "
+                f"Available options: {opts}. "
+                "Which option number did they choose? Reply with just the number, "
+                "or 'none' if unclear."
+            )
+            r = send_query(
+                self._client,
+                [{"role": "user", "content": prompt}],
+                self._model,
+                temperature=0.0,
+            )
+            result = r.choices[0].message.content.strip()
+            if result.isdigit():
+                idx = int(result) - 1
+                if 0 <= idx < len(candidates):
+                    return candidates[idx]
+        except Exception:
+            pass
+
+        return None
 
 
 if __name__ == "__main__":
