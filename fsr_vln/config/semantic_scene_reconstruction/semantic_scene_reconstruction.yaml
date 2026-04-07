@@ -38,12 +38,12 @@ pipeline:
     # ========== Point Cloud Filtering Pipeline ==========
     # Multi-stage noise reduction for real RGB-D sensor data
     # Pipeline order: DBSCAN → Voxel downsample → Radius outlier removal
-    enable_pcd_filtering: false
-    enable_dbscan_filtering: false
+    enable_pcd_filtering: true
+    enable_dbscan_filtering: true
     dbscan_eps: 0.02
     dbscan_min_points: 5
-    enable_voxel_downsampling: false
-    enable_radius_outlier_filtering: false
+    enable_voxel_downsampling: true
+    enable_radius_outlier_filtering: true
     radius_nb_points: 1000
     radius_distance: 1.0
     # coloring_mode: depth (blue=near, yellow=far) | clusters | uniform
@@ -68,7 +68,7 @@ pipeline:
     depth_weighting: false
     grid_resolution: 0.05
     # sequential: frame-by-frame merging; hierarchical: multi-level (more thorough, slower)
-    merge_type: hierarchical
+    merge_type: sequential
     save_intermediate_results: true
     mask_feature_dist_threshold: 0.9
     obj_labels: FINALLABEL

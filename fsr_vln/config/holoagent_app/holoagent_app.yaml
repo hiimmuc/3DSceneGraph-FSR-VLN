@@ -12,7 +12,7 @@ defaults:
 
 main:
     # Scene graph directory produced by semantic_scene_reconstruction.py
-    graph_path: outputs/built_graphs/horizon/scene/graph_latest/
+    graph_path: outputs/built_graphs/horizon/LivingRoomDataset_20260330/graph_20260402163619/
 
     # ROS2 camera topic for the live stream panel
     camera_topic: /camera/rgb
@@ -22,7 +22,7 @@ main:
         spec: [obj, room, floor]
 
     # Scene graph query: number of top-k candidate objects to retrieve
-    top_k: 5
+    top_k: 3
 
     # Whether to use VLM for re-ranking retrieved objects
     use_vlm: false
@@ -46,8 +46,8 @@ main:
 
     # Save directory for navigation query session logs
     save_path: outputs/holoagent_sessions
-    dataset: custom
-    scene_id: custom
+    dataset: HoloAgent
+    scene_id: LivingRoomDataset_20260330
 
 ui:
     # Streamlit window layout
@@ -65,7 +65,7 @@ audio:
     # STT: faster-whisper model size — tiny | base | small | medium | large-v2
     whisper_model_size: base
     # Device for STT inference: cpu | cuda
-    whisper_device: cpu
+    whisper_device: cuda
     # Compute type: int8 (fast/CPU) | float16 (GPU) | float32
     whisper_compute_type: int8
     # Optional language hint for transcription (e.g. "en"). Empty = auto-detect.
@@ -73,6 +73,6 @@ audio:
 
     # TTS: path to the piper .onnx voice model file
     # Download: python3 -m piper.download_voices en_US-lessac-medium
-    piper_voice_model: ""
+    piper_voice_model: "en_US-lessac-medium"
     # Set to true to use GPU for TTS (requires onnxruntime-gpu)
-    piper_use_cuda: false
+    piper_use_cuda: true

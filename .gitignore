@@ -126,4 +126,5 @@ Thumbs.db # Windows specific
 
 outputs/
 fsr_vln/checkpoints/*
+*.onnx
 

@@ -160,6 +160,7 @@ def send_query_cached(model: str, messages_str: str, temperature: float = 0.0) -
     if temperature != 0.0:
         raise ValueError("Caching only works with temperature=0.0 for deterministic responses")
     import json as _json
+
     messages = _json.loads(messages_str)
     client, _ = _get_cached_client()
     response = send_query(client, messages, model, temperature=temperature)
@@ -223,11 +224,28 @@ class QueryParser:
         return floor, room, obj
 
     # Keywords that suggest a room or floor component is present in the query
-    _SPATIAL_HINTS = frozenset([
-        "room", "floor", "level", "upstairs", "downstairs", "kitchen", "bedroom",
-        "bathroom", "office", "living", "dining", "hallway", "garage", "basement",
-        "corridor", "lobby", "entrance", "storage",
-    ])
+    _SPATIAL_HINTS = frozenset(
+        [
+            "room",
+            "floor",
+            "level",
+            "upstairs",
+            "downstairs",
+            "kitchen",
+            "bedroom",
+            "bathroom",
+            "office",
+            "living",
+            "dining",
+            "hallway",
+            "garage",
+            "basement",
+            "corridor",
+            "lobby",
+            "entrance",
+            "storage",
+        ]
+    )
 
     def _has_spatial_hints(self, instruction: str) -> bool:
         words = set(instruction.lower().split())
@@ -261,12 +279,16 @@ class QueryParser:
         if not self._has_spatial_hints(instruction):
             # Strip common prefixes like "Find me the", "Where is the", etc.
             import re as _re
-            obj = _re.sub(
-                r"^(?:find(?:\s+me)?|where(?:'s|\s+is)|locate|show(?:\s+me)?)[\s,]+(?:the\s+)?",
-                "",
-                instruction.strip(),
-                flags=_re.IGNORECASE,
-            ).strip() or instruction.strip()
+
+            obj = (
+                _re.sub(
+                    r"^(?:find(?:\s+me)?|where(?:'s|\s+is)|locate|show(?:\s+me)?)[\s,]+(?:the\s+)?",
+                    "",
+                    instruction.strip(),
+                    flags=_re.IGNORECASE,
+                ).strip()
+                or instruction.strip()
+            )
             print(f"Fast-path parsed '{instruction}' -> obj='{obj}'")
             return None, None, obj
 
@@ -274,6 +296,7 @@ class QueryParser:
         user_prompt = f"Please parse: {instruction}\nOutput format: comma-separated list in order."
 
         import json as _json
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -446,6 +469,7 @@ def publish_navigation_goal(
         return True
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).error("publish_navigation_goal failed: %s", e)
         return False
 
@@ -567,6 +591,7 @@ class MotionAgent:
             return "navigation" if "navigation" in result else "general"
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning("Intent classification failed: %s", e)
             return "general"
 
@@ -586,6 +611,7 @@ class MotionAgent:
             return response.choices[0].message.content.strip()
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).error("General chat failed: %s", e)
             return "I'm sorry, I had trouble responding. Could you say that again?"
 
@@ -658,6 +684,7 @@ class MotionAgent:
             return candidates
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).error("Scene graph query failed: %s", e)
             return []
 
@@ -676,8 +703,7 @@ class MotionAgent:
         if not candidates:
             nav_state.clear()
             response = self._general_chat(
-                message
-                + "\n(Note: I couldn't find any matching objects in my scene map. "
+                message + "\n(Note: I couldn't find any matching objects in my scene map. "
                 "Please let the user know gently.)",
                 history,
             )
@@ -689,8 +715,7 @@ class MotionAgent:
             nav_state["state"] = _NAV_STATE_CONFIRM
             nav_state["selected"] = c
             response = (
-                f"I found a {c['name']} in {c['room']}, {c['floor']}. "
-                "Shall I take you there?"
+                f"I found a {c['name']} in {c['room']}, {c['floor']}. " "Shall I take you there?"
             )
             return response, None
 
@@ -701,22 +726,62 @@ class MotionAgent:
             nav_state["state"] = _NAV_STATE_CONFIRM
             nav_state["selected"] = c
             response = (
-                f"I found a {c['name']} in {c['room']}, {c['floor']}. "
-                "Shall I take you there?"
+                f"I found a {c['name']} in {c['room']}, {c['floor']}. " "Shall I take you there?"
             )
             return response, None
 
         # Multiple locations — ask user to pick
         nav_state["state"] = _NAV_STATE_CLARIFY
-        options_text = "\n".join(
-            f"  {i + 1}. {c['name']} — {c['room']}, {c['floor']}"
-            for i, c in enumerate(candidates)
-        )
-        response = (
-            f"I found {len(candidates)} options:\n{options_text}\n"
-            "Which one would you like to go to? (say the number or describe the location)"
-        )
+        response = self._rephrase_candidates(candidates)
         return response, None
+
+    def _rephrase_candidates(self, candidates: List[Dict]) -> str:
+        """Ask the LLM to phrase the candidate list as a natural clarification question.
+
+        Falls back to a plain numbered list if the LLM call fails.
+        """
+        # Build a compact structured summary for the LLM
+        groups: dict = {}
+        for c in candidates:
+            key = (c.get("floor", ""), c.get("room", ""))
+            groups.setdefault(key, []).append(c["name"])
+
+        lines = []
+        for (floor, room), names in groups.items():
+            unique = sorted(set(names))
+            label = f"{', '.join(unique)} in {room}, {floor}"
+            lines.append(label)
+        structured = "; ".join(lines)
+
+        prompt = (
+            "You are Motion, a friendly robot assistant. "
+            "You found multiple objects the user might want to navigate to. "
+            "Rephrase the following structured list into a single warm, natural sentence "
+            "that groups objects by location and ends with a polite question asking which one they prefer. "
+            "Do not use bullet points or numbers — write plain prose.\n\n"
+            f"Candidates: {structured}"
+        )
+        try:
+            resp = send_query(
+                self._client,
+                [{"role": "user", "content": prompt}],
+                self._model,
+                temperature=0.7,
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning("_rephrase_candidates LLM call failed: %s", e)
+            # Plain fallback
+            options_text = "\n".join(
+                f"  {i + 1}. {c['name']} — {c['room']}, {c['floor']}"
+                for i, c in enumerate(candidates)
+            )
+            return (
+                f"I found {len(candidates)} options:\n{options_text}\n"
+                "Which one would you like to go to?"
+            )
 
     def _continue_navigation(
         self,
@@ -745,7 +810,10 @@ class MotionAgent:
                 return response, action
             else:
                 nav_state.clear()
-                return "Understood, I won't navigate there. Let me know if you need anything else!", None
+                return (
+                    "Understood, I won't navigate there. Let me know if you need anything else!",
+                    None,
+                )
 
         if state == _NAV_STATE_CLARIFY:
             candidates = nav_state.get("candidates", [])
@@ -775,13 +843,23 @@ class MotionAgent:
 
     def _user_confirmed(self, message: str) -> bool:
         """Return True if the message is an affirmative response."""
-        affirmatives = {"yes", "yeah", "yep", "sure", "ok", "okay", "please", "go", "do it", "confirm", "y"}
+        affirmatives = {
+            "yes",
+            "yeah",
+            "yep",
+            "sure",
+            "ok",
+            "okay",
+            "please",
+            "go",
+            "do it",
+            "confirm",
+            "y",
+        }
         msg_lower = message.strip().lower()
         return any(a in msg_lower for a in affirmatives)
 
-    def _resolve_selection(
-        self, message: str, candidates: List[Dict]
-    ) -> Optional[Dict]:
+    def _resolve_selection(self, message: str, candidates: List[Dict]) -> Optional[Dict]:
         """Try to match user's selection to one of the candidates."""
         msg_lower = message.strip().lower()
 
