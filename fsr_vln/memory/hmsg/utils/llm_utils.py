@@ -168,7 +168,12 @@ def send_query_cached(model: str, messages_str: str, temperature: float = 0.0) -
 
 
 class QueryParser:
-    """Parse hierarchical queries into floor, room, and object components."""
+    """Parse hierarchical queries into floor, room, and object components.
+
+    Uses a structured JSON-output prompt so the LLM response is machine-readable
+    without fragile comma-splitting, and applies synonym normalisation before
+    returning results.
+    """
 
     QUERY_SPECS = {
         ("obj", "room", "floor"): "floor, room, and object",
@@ -176,6 +181,156 @@ class QueryParser:
         ("obj", "floor"): "floor and object",
         ("obj",): "object only",
     }
+
+    # Canonical room-type synonyms: any alias → canonical form sent to the graph
+    _ROOM_SYNONYMS: Dict[str, str] = {
+        "living room": "living room",
+        "lounge": "living room",
+        "family room": "living room",
+        "sitting room": "living room",
+        "bed room": "bedroom",
+        "master bedroom": "bedroom",
+        "guest room": "bedroom",
+        "bath room": "bathroom",
+        "restroom": "bathroom",
+        "toilet": "bathroom",
+        "lavatory": "bathroom",
+        "wc": "bathroom",
+        "study": "office",
+        "work room": "office",
+        "home office": "office",
+        "dining room": "dining room",
+        "dining area": "dining room",
+        "eat-in kitchen": "kitchen",
+        "kitchenette": "kitchen",
+        "pantry": "kitchen",
+        "hallway": "hallway",
+        "hall": "hallway",
+        "corridor": "hallway",
+        "passage": "hallway",
+        "entrance": "entrance",
+        "entryway": "entrance",
+        "foyer": "entrance",
+        "lobby": "entrance",
+        "storage room": "storage",
+        "storeroom": "storage",
+        "closet": "storage",
+        "utility room": "storage",
+        "laundry room": "laundry",
+        "laundry": "laundry",
+        "garage": "garage",
+        "car port": "garage",
+        "basement": "basement",
+        "cellar": "basement",
+        "attic": "attic",
+        "loft": "attic",
+        "balcony": "balcony",
+        "terrace": "balcony",
+        "patio": "balcony",
+    }
+
+    # Keyword → canonical object label
+    _OBJ_SYNONYMS: Dict[str, str] = {
+        "couch": "sofa",
+        "settee": "sofa",
+        "loveseat": "sofa",
+        "telly": "TV",
+        "television": "TV",
+        "monitor": "computer monitor",
+        "screen": "computer monitor",
+        "fridge": "refrigerator",
+        "cooler": "refrigerator",
+        "icebox": "refrigerator",
+        "bin": "trash can",
+        "rubbish bin": "trash can",
+        "garbage can": "trash can",
+        "waste bin": "trash can",
+        "wardrobe": "wardrobe",
+        "closet": "wardrobe",
+        "dresser": "chest of drawers",
+        "chest of drawers": "chest of drawers",
+        "nightstand": "bedside table",
+        "night table": "bedside table",
+        "bedside cabinet": "bedside table",
+        "armchair": "chair",
+        "recliner": "chair",
+        "stool": "chair",
+        "laptop": "laptop computer",
+        "notebook computer": "laptop computer",
+        "tap": "sink",
+        "basin": "sink",
+        "washbasin": "sink",
+        "loo": "toilet",
+        "commode": "toilet",
+        "bookcase": "bookshelf",
+        "book rack": "bookshelf",
+        "desk lamp": "lamp",
+        "floor lamp": "lamp",
+        "table lamp": "lamp",
+        "light": "lamp",
+    }
+
+    # Spatial keywords that hint at a room or floor component
+    _SPATIAL_HINTS = frozenset(
+        [
+            "room", "floor", "level", "upstairs", "downstairs",
+            "kitchen", "bedroom", "bathroom", "office", "living",
+            "dining", "hallway", "garage", "basement", "corridor",
+            "lobby", "entrance", "storage", "laundry", "attic",
+            "balcony", "lounge", "study", "foyer", "cellar", "loft",
+        ]
+    )
+
+    # Regex that strips common navigation prefixes before the object name
+    import re as _re_module
+    _PREFIX_RE = _re_module.compile(
+        r"^(?:"
+        r"find(?:\s+me)?|where(?:'s|\s+is)|locate|show(?:\s+me)?"
+        r"|bring(?:\s+me)?|get(?:\s+me)?|take(?:\s+me\s+to)?"
+        r"|navigate(?:\s+to)?|go(?:\s+to)?|i\s+need"
+        r")[\s,]+(?:the\s+|a\s+|an\s+)?",
+        _re_module.IGNORECASE,
+    )
+
+    _SYSTEM_PROMPT = (
+        "You are a precise indoor-navigation query parser for a robotic assistant.\n"
+        "Given a natural language instruction, extract the most likely navigation target.\n"
+        "\n"
+        "Rules:\n"
+        "  - \"object\": the physical item, furniture, or room the user wants to reach.\n"
+        "      * Use a generic category name (e.g. 'sofa', 'TV', 'bed', 'kitchen').\n"
+        "      * For IMPLICIT intentions, infer the best single object:\n"
+        "          'sleepy/tired/exhausted' → bed\n"
+        "          'bored'                 → TV\n"
+        "          'hungry/starving'       → kitchen\n"
+        "          'thirsty'               → kitchen\n"
+        "          'need to work/study'    → desk\n"
+        "          'want to read'          → bookshelf\n"
+        "          'want to relax'         → sofa\n"
+        "          'need to wash/hygiene'  → sink\n"
+        "  - \"objects_alt\": optional JSON array of 1-3 alternative object categories\n"
+        "      ranked by likelihood (for implicit/ambiguous intents). Omit for explicit queries.\n"
+        "  - \"room\": the room type if mentioned or strongly implied, else null.\n"
+        "  - \"floor\": the floor/level if mentioned or strongly implied, else null.\n"
+        "\n"
+        "Return ONLY a JSON object. Do not add explanation, markdown, or extra keys.\n"
+        "Required keys: \"object\", \"room\", \"floor\".\n"
+        "Optional key:  \"objects_alt\" (array of strings).\n"
+        "\n"
+        "Examples:\n"
+        "  \"Find the sofa in the living room on floor 2\" →\n"
+        "    {\"object\":\"sofa\",\"room\":\"living room\",\"floor\":\"2\"}\n"
+        "  \"Where is the TV?\" →\n"
+        "    {\"object\":\"TV\",\"room\":null,\"floor\":null}\n"
+        "  \"I am so sleepy\" →\n"
+        "    {\"object\":\"bed\",\"objects_alt\":[\"pillow\",\"sofa\"],\"room\":null,\"floor\":null}\n"
+        "  \"I am so bored\" →\n"
+        "    {\"object\":\"TV\",\"objects_alt\":[\"radio\",\"bookshelf\"],\"room\":null,\"floor\":null}\n"
+        "  \"I'm hungry\" →\n"
+        "    {\"object\":\"kitchen\",\"objects_alt\":[\"dining table\",\"refrigerator\"],\"room\":\"kitchen\",\"floor\":null}\n"
+        "  \"laptop upstairs\" →\n"
+        "    {\"object\":\"laptop computer\",\"room\":null,\"floor\":\"upstairs\"}\n"
+    )
 
     def __init__(self, client: object = None, model: str = None):
         """Initialize parser with optional client/model (else uses cached singleton).
@@ -189,83 +344,113 @@ class QueryParser:
         self.client = client
         self.model = model
 
-    def _build_system_prompt(self, spec_tuple: Tuple[str, ...]) -> str:
-        """Build system prompt for given query specification."""
-        spec_name = self.QUERY_SPECS.get(spec_tuple, "unknown")
-        return f"You are a query parser. Parse the instruction into {spec_name}. If a component cannot be parsed, leave it empty."
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-    def _parse_response(
-        self, response_str: str, spec_tuple: Tuple[str, ...]
-    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Parse LLM response into (floor, room, object).
+    def _normalize_room(self, room: Optional[str]) -> Optional[str]:
+        """Map room aliases to canonical room-type strings."""
+        if not room:
+            return None
+        key = room.strip().lower()
+        return self._ROOM_SYNONYMS.get(key, room.strip().lower())
 
-        Args:
-            response_str: Raw response from LLM.
-            spec_tuple: Query spec tuple indicating what was parsed.
+    def _normalize_object(self, obj: Optional[str]) -> Optional[str]:
+        """Map object aliases to canonical object-category strings."""
+        if not obj:
+            return None
+        key = obj.strip().lower()
+        return self._OBJ_SYNONYMS.get(key, obj.strip())
 
-        Returns:
-            Tuple of (floor, room, object), with None for unparsed components.
-        """
-        parts = [x.strip() for x in response_str.strip().rstrip("]").lstrip("[").split(",")]
-        floor, room, obj = None, None, None
-
-        try:
-            if spec_tuple == ("obj", "room", "floor"):
-                floor, room, obj = (parts + [None] * 3)[:3]
-            elif spec_tuple == ("obj", "room"):
-                room, obj = (parts + [None] * 2)[:2]
-            elif spec_tuple == ("obj", "floor"):
-                floor, obj = (parts + [None] * 2)[:2]
-            elif spec_tuple == ("obj",):
-                obj = parts[0] if parts else None
-        except (IndexError, ValueError) as e:
-            print(f"Warning: Failed to parse LLM result '{response_str}': {e}")
-
-        return floor, room, obj
-
-    # Keywords that suggest a room or floor component is present in the query
-    _SPATIAL_HINTS = frozenset(
-        [
-            "room",
-            "floor",
-            "level",
-            "upstairs",
-            "downstairs",
-            "kitchen",
-            "bedroom",
-            "bathroom",
-            "office",
-            "living",
-            "dining",
-            "hallway",
-            "garage",
-            "basement",
-            "corridor",
-            "lobby",
-            "entrance",
-            "storage",
-        ]
-    )
+    def _strip_prefix(self, instruction: str) -> str:
+        """Remove common navigation-verb prefixes from an instruction."""
+        stripped = self._PREFIX_RE.sub("", instruction.strip()).strip()
+        return stripped or instruction.strip()
 
     def _has_spatial_hints(self, instruction: str) -> bool:
         words = set(instruction.lower().split())
         return bool(words & self._SPATIAL_HINTS)
 
+    def _parse_json_response(
+        self, raw: str
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
+        """Extract (floor, room, object, alt_objects) from a JSON string.
+
+        Returns:
+            (floor, room, primary_object, alt_objects_list)
+            Falls back to (None, None, None, []) on any parse error.
+        """
+        import json as _json
+        import re as _re
+
+        # Strip markdown code fences if the model wrapped the JSON
+        cleaned = _re.sub(r"```(?:json)?\s*|\s*```", "", raw.strip())
+        # Extract the first JSON object in the string
+        m = _re.search(r"\{.*\}", cleaned, _re.DOTALL)
+        if not m:
+            print(f"Warning: no JSON object found in LLM response: {raw!r}")
+            return None, None, None, []
+        try:
+            data = _json.loads(m.group())
+        except _json.JSONDecodeError as exc:
+            print(f"Warning: JSON decode error ({exc}) in: {m.group()!r}")
+            return None, None, None, []
+
+        def _clean(v: Any) -> Optional[str]:
+            if v is None:
+                return None
+            s = str(v).strip()
+            return None if s.lower() == "null" or s == "" else s
+
+        floor = _clean(data.get("floor"))
+        room  = _clean(data.get("room"))
+        obj   = _clean(data.get("object"))
+
+        # Optional alternative objects for implicit intents
+        alts_raw = data.get("objects_alt", [])
+        alt_objects: List[str] = []
+        if isinstance(alts_raw, list):
+            for a in alts_raw:
+                cleaned_a = _clean(a)
+                if cleaned_a:
+                    alt_objects.append(cleaned_a)
+
+        return floor, room, obj, alt_objects
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def parse(
         self, instruction: str, spec: Tuple[str, ...] = ("obj", "room", "floor")
     ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Parse instruction into hierarchy components.
+        """Parse instruction into (floor, room, object) hierarchy components.
 
-        Fast-path: if spec is obj-only or no spatial hints are found in the
-        instruction, skip the LLM and return the full instruction as the
-        object query (avoiding ~8s Ollama round-trip).
+        For callers that also need alternative object candidates (implicit intents),
+        use :meth:`parse_with_alts` instead.
+
+        Fast-path: if spec is obj-only or no spatial hints are detected,
+        skip the LLM call and return the stripped instruction as the object
+        query (avoids Ollama round-trip latency).
 
         Args:
             instruction: User instruction to parse.
             spec: Tuple of components to parse (e.g., ("obj", "room", "floor")).
 
         Returns:
-            Tuple of (floor, room, object).
+            Tuple of (floor, room, object) with None for absent components.
+        """
+        floor, room, obj, _alts = self.parse_with_alts(instruction, spec)
+        return floor, room, obj
+
+    def parse_with_alts(
+        self, instruction: str, spec: Tuple[str, ...] = ("obj", "room", "floor")
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
+        """Parse instruction and return (floor, room, primary_object, alt_objects).
+
+        ``alt_objects`` is a ranked list of alternative object categories for
+        implicit-intent queries (e.g. 'I am sleepy' → alts=['pillow', 'sofa']).
+        It is empty for explicit object queries.
         """
         if spec not in self.QUERY_SPECS:
             raise ValueError(
@@ -273,40 +458,49 @@ class QueryParser:
             )
 
         if spec == ("obj",):
-            return None, None, instruction.strip()
+            return None, None, self._normalize_object(self._strip_prefix(instruction)), []
 
-        # Fast-path: no room/floor hints → treat full instruction as object query
+        # Implicit-intent fast-path: check _IMPLICIT_OBJECT_MAP before calling LLM
+        words = instruction.lower().split()
+        for word in words:
+            if word in _IMPLICIT_OBJECT_MAP:
+                candidates = [
+                    self._normalize_object(o) for o in _IMPLICIT_OBJECT_MAP[word]
+                ]
+                primary = candidates[0] if candidates else self._strip_prefix(instruction)
+                alts = candidates[1:] if len(candidates) > 1 else []
+                print(f"Implicit fast-path '{instruction}' [{word}] -> obj='{primary}'  alts={alts}")
+                return None, None, primary, alts
+
+        # Explicit spatial fast-path: no room/floor hints → single object, no alts
         if not self._has_spatial_hints(instruction):
-            # Strip common prefixes like "Find me the", "Where is the", etc.
-            import re as _re
-
-            obj = (
-                _re.sub(
-                    r"^(?:find(?:\s+me)?|where(?:'s|\s+is)|locate|show(?:\s+me)?)[\s,]+(?:the\s+)?",
-                    "",
-                    instruction.strip(),
-                    flags=_re.IGNORECASE,
-                ).strip()
-                or instruction.strip()
-            )
+            obj = self._normalize_object(self._strip_prefix(instruction))
             print(f"Fast-path parsed '{instruction}' -> obj='{obj}'")
-            return None, None, obj
-
-        system_prompt = self._build_system_prompt(spec)
-        user_prompt = f"Please parse: {instruction}\nOutput format: comma-separated list in order."
+            return None, None, obj, []
 
         import json as _json
 
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": self._SYSTEM_PROMPT},
+            {"role": "user", "content": instruction.strip()},
         ]
         raw_result = send_query_cached(
             self.model, _json.dumps(messages, ensure_ascii=False), temperature=0.0
         )
-        print(f"Parsed '{instruction}' -> '{raw_result}'")
+        print(f"LLM parsed '{instruction}' -> '{raw_result}'")
 
-        return self._parse_response(raw_result, spec)
+        floor, room, obj, alt_objects = self._parse_json_response(raw_result)
+
+        # Normalise and fall back to stripped instruction if object is empty
+        floor = floor.strip() if floor else None
+        room = self._normalize_room(room)
+        obj = self._normalize_object(obj) or self._strip_prefix(instruction)
+        alt_objects = [
+            self._normalize_object(a) for a in alt_objects if a
+        ]
+
+        print(f"  -> floor={floor!r}  room={room!r}  obj={obj!r}  alts={alt_objects}")
+        return floor, room, obj, alt_objects
 
 
 def infer_room_type_from_objects(
@@ -410,34 +604,63 @@ def parse_floor_room_object_gpt40(instruction: str) -> Tuple[str, str, str]:
 # MotionAgent — conversational robot assistant
 # ---------------------------------------------------------------------------
 
-# Implicit object mapping: lifestyle keywords → object categories
-_IMPLICIT_OBJECT_MAP = {
-    "sleepy": "bed",
-    "tired": "bed",
-    "sleep": "bed",
-    "rest": "bed",
-    "nap": "bed",
-    "bored": "entertainment",
-    "boring": "entertainment",
-    "entertain": "TV",
-    "entertainment": "TV",
-    "watch": "TV",
-    "movie": "TV",
-    "movies": "TV",
-    "film": "TV",
-    "show": "TV",
-    "music": "radio",
-    "hungry": "kitchen",
-    "eat": "kitchen",
-    "food": "kitchen",
-    "thirsty": "kitchen",
-    "drink": "kitchen",
-    "work": "desk",
-    "study": "desk",
-    "read": "bookshelf",
-    "book": "bookshelf",
-    "sit": "chair",
-    "relax": "sofa",
+# Implicit object mapping: lifestyle keywords → ranked list of candidate object categories.
+# The list is ordered from most to least likely so multi-query scene-graph searches
+# return the best match first.
+_IMPLICIT_OBJECT_MAP: Dict[str, List[str]] = {
+    # Fatigue / sleep
+    "sleepy":      ["bed", "pillow", "sofa", "mattress"],
+    "tired":       ["bed", "sofa", "pillow", "chair"],
+    "exhausted":   ["bed", "sofa", "pillow"],
+    "sleep":       ["bed", "pillow", "mattress"],
+    "rest":        ["bed", "sofa", "chair"],
+    "nap":         ["bed", "sofa", "pillow"],
+    # Boredom / entertainment
+    "bored":       ["TV", "radio", "bookshelf", "sofa"],
+    "boring":      ["TV", "radio", "bookshelf"],
+    "entertain":   ["TV", "radio", "bookshelf"],
+    "entertainment":["TV", "radio", "bookshelf"],
+    "watch":       ["TV"],
+    "movie":       ["TV"],
+    "movies":      ["TV"],
+    "film":        ["TV"],
+    "show":        ["TV"],
+    # Music
+    "music":       ["radio", "TV", "speaker"],
+    "listen":      ["radio", "speaker"],
+    # Hunger / thirst
+    "hungry":      ["kitchen", "dining table", "refrigerator"],
+    "starving":    ["kitchen", "dining table", "refrigerator"],
+    "eat":         ["kitchen", "dining table"],
+    "food":        ["kitchen", "refrigerator", "dining table"],
+    "thirsty":     ["kitchen", "refrigerator"],
+    "drink":       ["kitchen", "refrigerator"],
+    "coffee":      ["kitchen", "coffee machine"],
+    # Work / study
+    "work":        ["desk", "computer monitor", "laptop computer", "chair"],
+    "study":       ["desk", "bookshelf", "laptop computer"],
+    "homework":    ["desk", "bookshelf", "chair"],
+    "type":        ["desk", "laptop computer", "keyboard"],
+    "code":        ["desk", "computer monitor", "laptop computer"],
+    # Reading
+    "read":        ["bookshelf", "desk", "chair", "sofa"],
+    "book":        ["bookshelf"],
+    # Sitting / relaxing
+    "sit":         ["chair", "sofa"],
+    "relax":       ["sofa", "chair", "bed"],
+    "chill":       ["sofa", "TV", "chair"],
+    # Hygiene / health
+    "wash":        ["sink", "bathroom"],
+    "brush":       ["sink", "bathroom"],
+    "shower":      ["bathroom"],
+    "toilet":      ["toilet", "bathroom"],
+    "sick":        ["bed", "sofa"],
+    # Exercise
+    "exercise":    ["gym equipment", "yoga mat", "chair"],
+    "workout":     ["gym equipment", "yoga mat"],
+    # Thinking / writing
+    "write":       ["desk", "chair"],
+    "think":       ["desk", "chair", "sofa"],
 }
 
 # Navigation dialogue states
@@ -619,74 +842,156 @@ class MotionAgent:
     # Navigation dialogue
     # ------------------------------------------------------------------
 
-    def _infer_object_query(self, message: str, history: List[Dict]) -> str:
-        """Map the user message to an object search query."""
+    _INTENT_EXTRACTION_PROMPT = (
+        "You are a robotic assistant helping a user navigate to physical objects.\n"
+        "The user expresses a need, feeling, or activity. Your job is to infer ALL physical\n"
+        "objects or locations they might want to navigate to, ordered from most to least likely.\n"
+        "Rules:\n"
+        "  - Map feelings/needs to objects: \n"
+        "      'sleepy/tired/exhausted' → bed, pillow, sofa\n"
+        "      'bored' → TV, radio, bookshelf, sofa\n"
+        "      'hungry/starving' → kitchen, dining table, refrigerator\n"
+        "      'thirsty' → kitchen, refrigerator\n"
+        "      'need to work/study' → desk, laptop computer, computer monitor\n"
+        "      'want to read' → bookshelf, desk, chair\n"
+        "      'want to relax/chill' → sofa, TV, chair\n"
+        "      'need to wash/hygiene' → sink, bathroom\n"
+        "  - Use generic category names (e.g. 'sofa' not 'large couch').\n"
+        "  - Return a JSON array of strings, most likely first.\n"
+        "  - Maximum 4 items. Minimum 1.\n"
+        "  - Reply ONLY with the JSON array. No explanation.\n"
+        "Examples:\n"
+        "  'I am so sleepy' → [\"bed\", \"pillow\", \"sofa\"]\n"
+        "  'I am bored' → [\"TV\", \"radio\", \"bookshelf\"]\n"
+        "  'I need to eat something' → [\"kitchen\", \"dining table\", \"refrigerator\"]\n"
+        "  'Can you show me the bathroom?' → [\"bathroom\"]\n"
+        "  'I dropped my laptop' → [\"laptop computer\"]\n"
+    )
+
+    def _infer_object_queries(self, message: str, history: List[Dict]) -> List[str]:
+        """Return a ranked list of candidate object queries for the user message.
+
+        Priority:
+        1. Direct keyword match in _IMPLICIT_OBJECT_MAP (returns the pre-defined list).
+        2. QueryParser synonym normalisation for explicit single-object messages.
+        3. LLM extraction via focused JSON-array intent-extraction prompt.
+        """
+        import json as _json
+        import re as _re
+
+        # 1. Keyword fast-path — return the full ranked list for the first matched keyword
         words = message.lower().split()
         for word in words:
             if word in _IMPLICIT_OBJECT_MAP:
-                return _IMPLICIT_OBJECT_MAP[word]
+                raw_list = _IMPLICIT_OBJECT_MAP[word]
+                # Apply synonym normalisation on each item
+                return [
+                    QueryParser._OBJ_SYNONYMS.get(o.lower(), o) for o in raw_list
+                ]
 
-        # Ask LLM to extract the target object
-        prompt = (
-            "The user wants to navigate to something. "
-            "Extract the most likely physical object or location they need. "
-            "Reply with just the object name (e.g. 'bed', 'TV', 'kitchen'). "
-            f"User said: {message}"
-        )
+        # 2. Explicit object after stripping navigation prefix
+        stripped = QueryParser._PREFIX_RE.sub("", message.strip(), count=1).strip().lower()
+        if stripped:
+            canonical = QueryParser._OBJ_SYNONYMS.get(stripped)
+            if canonical:
+                return [canonical]
+
+        # 3. LLM extraction — returns a JSON list
         messages = [
-            {"role": "system", "content": self._SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": self._INTENT_EXTRACTION_PROMPT},
         ]
+        for turn in history[-2:]:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": message})
         try:
             r = send_query(self._client, messages, self._model, temperature=0.0)
-            return r.choices[0].message.content.strip().lower()
-        except Exception:
-            return message.strip()
+            raw = r.choices[0].message.content.strip()
+            # Strip markdown fences
+            raw = _re.sub(r"```(?:json)?\s*|\s*```", "", raw)
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list) and parsed:
+                return [
+                    QueryParser._OBJ_SYNONYMS.get(str(o).lower(), str(o))
+                    for o in parsed
+                    if o
+                ]
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("_infer_object_queries LLM call failed: %s", exc)
 
-    def _query_scene_graph(self, object_query: str, top_k: int = 5) -> List[Dict]:
-        """Query the scene graph and return a list of candidate result dicts."""
+        # Fallback: use the stripped message
+        fallback = stripped or message.strip()
+        return [QueryParser._OBJ_SYNONYMS.get(fallback.lower(), fallback)]
+
+    def _query_scene_graph(
+        self, object_queries: "List[str] | str", top_k: int = 5
+    ) -> List[Dict]:
+        """Query the scene graph for one or more object queries and merge results.
+
+        When multiple queries are given (implicit intent), each is searched in
+        order and results are deduplicated by ``object_id``.  The ranking of the
+        first query is preserved; results from later queries are appended only
+        if their object has not already been retrieved.
+        """
         if self.scene_graph is None:
             return []
-        try:
-            _floor, rooms, objects, res_dict = self.scene_graph.query_hierarchy(
-                object_query, top_k=top_k
-            )
-            candidates = []
-            _T_SWITCH = __import__("numpy").array(
-                [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]],
-                dtype=float,
-            )
-            _T_TO_MAP = __import__("numpy").linalg.inv(_T_SWITCH)
-            import numpy as np
+
+        if isinstance(object_queries, str):
+            object_queries = [object_queries]
+
+        import numpy as np
+        _T_SWITCH = np.array(
+            [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=float
+        )
+        _T_TO_MAP = np.linalg.inv(_T_SWITCH)
+
+        seen_ids: set = set()
+        all_candidates: List[Dict] = []
+
+        for query in object_queries:
+            try:
+                _floor, rooms, objects, _res = self.scene_graph.query_hierarchy(
+                    query, top_k=top_k
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(
+                    "Scene graph query failed for '%s': %s", query, e
+                )
+                continue
 
             for obj, room in zip(objects, rooms):
+                oid = obj.object_id
+                if oid in seen_ids:
+                    continue
+                seen_ids.add(oid)
+
                 center_sg = np.array(obj.pcd.get_center())
                 center_map = (_T_TO_MAP @ np.hstack((center_sg, 1.0)))[:3]
+
                 floor_label = "?"
-                obj_id_parts = str(obj.object_id).split("_")
+                obj_id_parts = str(oid).split("_")
                 if obj_id_parts and self.scene_graph.floors:
                     idx = int(obj_id_parts[0]) if obj_id_parts[0].isdigit() else -1
                     if 0 <= idx < len(self.scene_graph.floors):
                         fl = self.scene_graph.floors[idx]
                         floor_label = fl.name or f"Floor {idx}"
+
                 room_label = room.name or room.room_id
-                candidates.append(
+                all_candidates.append(
                     {
                         "name": obj.name,
+                        "query": query,          # which sub-query found this object
                         "room": room_label,
                         "floor": floor_label,
                         "x": float(center_map[0]),
                         "y": float(center_map[1]),
                         "z": float(center_map[2]),
-                        "object_id": obj.object_id,
+                        "object_id": oid,
                     }
                 )
-            return candidates
-        except Exception as e:
-            import logging
 
-            logging.getLogger(__name__).error("Scene graph query failed: %s", e)
-            return []
+        return all_candidates
 
     def _start_navigation(
         self,
@@ -695,9 +1000,10 @@ class MotionAgent:
         nav_state: Dict,
     ) -> Tuple[str, Optional[Dict]]:
         """Begin a navigation dialogue from a fresh user message."""
-        object_query = self._infer_object_query(message, history)
-        nav_state["object_query"] = object_query
-        candidates = self._query_scene_graph(object_query)
+        object_queries = self._infer_object_queries(message, history)
+        nav_state["object_queries"] = object_queries
+        nav_state["object_query"] = object_queries[0] if object_queries else message.strip()
+        candidates = self._query_scene_graph(object_queries)
         nav_state["candidates"] = candidates
 
         if not candidates:
@@ -715,7 +1021,7 @@ class MotionAgent:
             nav_state["state"] = _NAV_STATE_CONFIRM
             nav_state["selected"] = c
             response = (
-                f"I found a {c['name']} in {c['room']}, {c['floor']}. " "Shall I take you there?"
+                f"I found a {c['name']} in {c['room']}, {c['floor']}. Shall I take you there?"
             )
             return response, None
 
@@ -726,7 +1032,7 @@ class MotionAgent:
             nav_state["state"] = _NAV_STATE_CONFIRM
             nav_state["selected"] = c
             response = (
-                f"I found a {c['name']} in {c['room']}, {c['floor']}. " "Shall I take you there?"
+                f"I found a {c['name']} in {c['room']}, {c['floor']}. Shall I take you there?"
             )
             return response, None
 

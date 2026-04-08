@@ -1,0 +1,35 @@
+{
+	plugins: {
+		ros2dds: {
+			domain: 0,
+
+			ros_automatic_discovery_range: "SUBNET",
+
+			allow: {
+				publishers: ["/goal_marker", "/goal_position", "/map_pointcloud", "/obj_pointcloud", "/object_labels", "/map_2d_marker", "/graph_markers"],
+				subscribers: [],
+				service_servers: [],
+				service_clients: [],
+				action_servers: [],
+				action_clients: [],
+			},
+
+			work_thread_num: 5,
+		},
+	},
+
+	mode: "router",
+
+	listen: {
+		endpoints: ["tcp/0.0.0.0:7447"],
+	},
+
+	scouting: {
+		multicast: {
+			enabled: false,
+		},
+		gossip: {
+			enabled: false,
+		},
+	},
+}

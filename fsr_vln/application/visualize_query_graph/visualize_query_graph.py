@@ -41,7 +41,20 @@ import numpy as np
 import open3d as o3d
 from omegaconf import DictConfig, OmegaConf
 
+# ROS 2 imports (optional — skip gracefully if not available)
+try:
+    import rclpy
+    from geometry_msgs.msg import PoseStamped
+    from rclpy.node import Node
+    from std_msgs.msg import ColorRGBA
+    from visualization_msgs.msg import Marker, MarkerArray
+
+    _ROS2_AVAILABLE = True
+except ImportError:
+    _ROS2_AVAILABLE = False
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from application.visualize_query_graph.map_visual import MapVisual
 from benchmark_queries import get_queries
 from memory.hmsg.graph.graph import Graph
 
@@ -62,6 +75,83 @@ _OBJ_COLORS = [
     [1.00, 1.00, 0.10],  # yellow
     [1.00, 0.40, 0.65],  # pink
 ]
+
+
+# ---------------------------------------------------------------------------
+# ROS 2 publisher
+# ---------------------------------------------------------------------------
+
+
+class QueryResultPublisher(Node if _ROS2_AVAILABLE else object):
+    """ROS 2 node that publishes query results as PoseStamped + MarkerArray."""
+
+    def __init__(self):
+        super().__init__("hmsg_query_result_publisher")
+        self.goal_pub = self.create_publisher(PoseStamped, "/goal_position", 10)
+        self.marker_pub = self.create_publisher(MarkerArray, "/goal_marker", 10)
+        self.get_logger().info("QueryResultPublisher ready.")
+
+    def publish_results(self, result_entries: List[dict], query: str) -> None:
+        """Publish top result as PoseStamped goal and all results as Markers."""
+        if not result_entries:
+            return
+
+        now = self.get_clock().now().to_msg()
+
+        # --- Goal: top-ranked object ---
+        top = result_entries[0]
+        pos = top["lidar_map_position"]
+
+        pose_msg = PoseStamped()
+        pose_msg.header.frame_id = "map"
+        pose_msg.header.stamp = now
+        pose_msg.pose.position.x = float(pos[0])
+        pose_msg.pose.position.y = float(pos[1])
+        pose_msg.pose.position.z = float(pos[2])
+        pose_msg.pose.orientation.w = 1.0
+        self.goal_pub.publish(pose_msg)
+
+        # --- Markers: one sphere per result object ---
+        marker_array = MarkerArray()
+
+        # Clear previous markers
+        delete_all = Marker()
+        delete_all.header.frame_id = "map"
+        delete_all.header.stamp = now
+        delete_all.ns = "hmsg_query_goals"
+        delete_all.action = Marker.DELETEALL
+        marker_array.markers.append(delete_all)
+
+        for i, entry in enumerate(result_entries):
+            p = entry["lidar_map_position"]
+            color = _OBJ_COLORS[i % len(_OBJ_COLORS)]
+
+            marker = Marker()
+            marker.header.frame_id = "map"
+            marker.header.stamp = now
+            marker.ns = "hmsg_query_goals"
+            marker.id = i
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD
+            marker.pose.position.x = float(p[0])
+            marker.pose.position.y = float(p[1])
+            marker.pose.position.z = float(p[2])
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = 0.3
+            marker.scale.y = 0.3
+            marker.scale.z = 0.3
+            marker.color = ColorRGBA(
+                r=float(color[0]), g=float(color[1]), b=float(color[2]), a=1.0
+            )
+            marker.lifetime.sec = 0
+            marker_array.markers.append(marker)
+
+        self.marker_pub.publish(marker_array)
+        self.get_logger().info(
+            f"Published goal for '{query}' → "
+            f"[{', '.join(f'{v:.3f}' for v in pos)}], "
+            f"{len(result_entries)} marker(s)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +278,7 @@ def run_query_loop(
     queries: List[str],
     use_vlm: bool,
     run_dir: str,
+    ros_publisher: "QueryResultPublisher | None" = None,
 ) -> Tuple[List[dict], Dict[str, float]]:
     """Run the full query loop over a list of instructions.
 
@@ -270,6 +361,10 @@ def run_query_loop(
                     "lidar_map_position": obj_center_in_map.tolist(),
                 }
             )
+
+        # --- Publish ROS 2 goal + markers ---
+        if ros_publisher is not None:
+            ros_publisher.publish_results(result_entries, query)
 
         # --- Save combined scene (one PLY + one PNG) ---
         combined = room_pcd_combined
@@ -387,6 +482,19 @@ def main(params: DictConfig) -> None:
     hmsg.load_hmsg_graph(params.main.graph_path)
     hmsg.vln_result_dir = run_dir
 
+    # Connect to map visualizer and publish the map
+    map_visual = MapVisual(hmsg)
+    map_visual.publish_map()
+
+    # Initialise ROS 2 goal/marker publisher (optional)
+    ros_publisher = None
+    if _ROS2_AVAILABLE:
+        if not rclpy.ok():
+            rclpy.init()
+        ros_publisher = QueryResultPublisher()
+    else:
+        print("ROS 2 not available — skipping ROS publishers (install rclpy to enable)")
+
     # Room naming
     room_types = list(params.main.room_types) if params.main.room_types else []
     hmsg.generate_room_names(
@@ -410,7 +518,7 @@ def main(params: DictConfig) -> None:
             "LLM_Parse_Time": 0.0,
         }
         for query in _interactive_queries():
-            results, sums = run_query_loop(hmsg, [query], use_vlm, run_dir)
+            results, sums = run_query_loop(hmsg, [query], use_vlm, run_dir, ros_publisher)
             all_results.extend(results)
             for key in metric_sums:
                 metric_sums[key] += sums.get(key, 0.0)
@@ -429,7 +537,7 @@ def main(params: DictConfig) -> None:
             print("No queries to run. Exiting.")
             return
 
-        all_results, metric_sums = run_query_loop(hmsg, queries, use_vlm, run_dir)
+        all_results, metric_sums = run_query_loop(hmsg, queries, use_vlm, run_dir, ros_publisher)
 
     # Compute and save metrics summary
     avgs = _print_and_build_metrics(metric_sums, len(queries))
@@ -447,6 +555,12 @@ def main(params: DictConfig) -> None:
         json.dump(summary_json, f, ensure_ascii=False, indent=2)
     print(f"\nSummary saved to {summary_path}")
     print(f"Run directory : {run_dir}")
+
+    # Tear down ROS 2 node
+    if ros_publisher is not None:
+        ros_publisher.destroy_node()
+    if _ROS2_AVAILABLE and rclpy.ok():
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":
