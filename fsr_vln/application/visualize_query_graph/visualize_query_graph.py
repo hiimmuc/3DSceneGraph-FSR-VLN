@@ -278,6 +278,7 @@ def run_query_loop(
     queries: List[str],
     use_vlm: bool,
     run_dir: str,
+    visualize: bool = True,
     ros_publisher: "QueryResultPublisher | None" = None,
 ) -> Tuple[List[dict], Dict[str, float]]:
     """Run the full query loop over a list of instructions.
@@ -378,7 +379,8 @@ def run_query_loop(
         o3d.io.write_point_cloud(pcd_path, combined)
         print(f"  Saved {pcd_path}")
 
-        visualize_and_save(room_pcd_combined, obj_pcds, spheres, save_path=png_path)
+        if visualize:
+            visualize_and_save(room_pcd_combined, obj_pcds, spheres, save_path=png_path)
 
         # --- Write per-query results.json ---
         query_result = {
@@ -448,6 +450,7 @@ def main(params: DictConfig) -> None:
     spatial_reasoning_method = params.main.spatial_reasoning_method
     fast_slow_method = params.main.fast_slow_method
     use_vlm = params.main.use_vlm and fast_slow_method != "fast_match"
+    visualize = not params.main.query_only
 
     # Build per-run output directory: <save_path>/<dataset>/<YYYYMMDD_HHMMSS>/
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -483,6 +486,7 @@ def main(params: DictConfig) -> None:
     hmsg.vln_result_dir = run_dir
 
     # Connect to map visualizer and publish the map
+    print("\nPublishing map to Rviz visualizer...")
     map_visual = MapVisual(hmsg)
     map_visual.publish_map()
 
@@ -518,7 +522,9 @@ def main(params: DictConfig) -> None:
             "LLM_Parse_Time": 0.0,
         }
         for query in _interactive_queries():
-            results, sums = run_query_loop(hmsg, [query], use_vlm, run_dir, ros_publisher)
+            results, sums = run_query_loop(
+                hmsg, [query], use_vlm, run_dir, visualize=visualize, ros_publisher=ros_publisher
+            )
             all_results.extend(results)
             for key in metric_sums:
                 metric_sums[key] += sums.get(key, 0.0)
@@ -537,7 +543,9 @@ def main(params: DictConfig) -> None:
             print("No queries to run. Exiting.")
             return
 
-        all_results, metric_sums = run_query_loop(hmsg, queries, use_vlm, run_dir, ros_publisher)
+        all_results, metric_sums = run_query_loop(
+            hmsg, queries, use_vlm, run_dir, visualize=visualize, ros_publisher=ros_publisher
+        )
 
     # Compute and save metrics summary
     avgs = _print_and_build_metrics(metric_sums, len(queries))

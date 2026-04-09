@@ -3,6 +3,7 @@ import socket
 
 import cv2
 import numpy as np
+from tqdm import tqdm
 
 
 class MapVisual:
@@ -51,7 +52,6 @@ class MapVisual:
         colored = np.hstack((points, colors))
 
         self.send_msg(4, colored.astype(np.float32).tobytes())
-        print(f"[TCP] Sent highlight object {obj.name}")
 
     def compute_room_boundary(self, room):
         verts = np.array(room.vertices, dtype=np.float32)
@@ -105,31 +105,39 @@ class MapVisual:
 
     def publish_map(self):
         # 1. Floor
-        for i, floor in enumerate(self.hmsg.floors):
+        for i, floor in tqdm(
+            enumerate(self.hmsg.floors), desc="Publishing floors", total=len(self.hmsg.floors)
+        ):
             points = self.open3d_to_xyz(floor.pcd)
             self.send_msg(0, points.astype(np.float32).tobytes())
-            print(f"[TCP] Sent floor {i}")
 
         # 2. Rooms + objects merged as colored point cloud
         all_points = []
 
-        for i, room in enumerate(self.hmsg.rooms):
+        pbar_rooms = tqdm(
+            enumerate(self.hmsg.rooms), desc="Processing rooms", total=len(self.hmsg.rooms)
+        )
+        for i, room in pbar_rooms:
             points = self.open3d_to_xyz(room.pcd)
             all_points.append(self.colorize(points, f"room_{i}"))
-            print(f"[TCP] Add room {room.name}")
 
-        for obj in self.hmsg.objects:
+        pbar_objs = tqdm(
+            self.hmsg.objects, desc="Processing objects", total=len(self.hmsg.objects)
+        )
+        for obj in pbar_objs:
             if len(obj.pcd.points) < 10:
                 continue
             points = self.open3d_to_xyz(obj.pcd)
             all_points.append(self.colorize(points, obj.name))
-            print(f"[TCP] Add object {obj.name}")
 
         if all_points:
             self.send_msg(1, np.vstack(all_points).astype(np.float32).tobytes())
 
         # 3. Object centroids + labels
-        for obj in self.hmsg.objects:
+        pbar_labels = tqdm(
+            self.hmsg.objects, desc="Publishing labels", total=len(self.hmsg.objects)
+        )
+        for obj in pbar_labels:
             center = np.asarray(obj.pcd.points).mean(axis=0)
             center_map = (self.T_tomap @ np.hstack((center, 1.0)))[:3]
             payload = {
@@ -139,13 +147,16 @@ class MapVisual:
                 "z": float(center_map[2]),
             }
             self.send_msg(2, json.dumps(payload).encode("utf-8"))
-            print(f"[TCP] Sent label {obj.name}")
 
         # 4. Scene graph edges
         graph_data = []
-        for obj in self.hmsg.objects:
+        pbar_graph = tqdm(
+            self.hmsg.objects, desc="Building scene graph", total=len(self.hmsg.objects)
+        )
+        for obj in pbar_graph:
             if len(obj.pcd.points) < 10:
                 continue
+            pbar_graph.set_description_str(f"Building scene graph - Object: {obj.name}")
             center_obj_map = (
                 self.T_tomap @ np.hstack((np.asarray(obj.pcd.points).mean(axis=0), 1.0))
             )[:3]
@@ -165,12 +176,16 @@ class MapVisual:
                     "name": obj.name,
                 }
             )
+        pbar_graph.set_description_str("Building scene graph - done")
+
         self.send_msg(3, json.dumps(graph_data).encode("utf-8"))
 
         # 5. Room boundaries
-        for room in self.hmsg.rooms:
+        pbar_boundaries = tqdm(
+            self.hmsg.rooms, desc="Publishing room boundaries", total=len(self.hmsg.rooms)
+        )
+        for room in pbar_boundaries:
             boundary = self.compute_room_boundary(room)
             if boundary is None:
                 continue
             self.send_msg(5, boundary.tobytes())
-            print(f"[TCP] Sent room boundary {room.name}")

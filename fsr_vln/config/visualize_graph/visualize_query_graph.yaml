@@ -6,6 +6,7 @@ main:
     use_vlm: true
     spatial_reasoning_method: auto_region # auto_region | human_assign | none
     fast_slow_method: fast_match # fast_match | slow_reasoning
+    query_only: true # if true, only runs the query loop without visualization or ROS publishers
 
 models:
     clip:
