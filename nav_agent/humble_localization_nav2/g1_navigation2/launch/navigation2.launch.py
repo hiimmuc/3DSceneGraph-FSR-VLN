@@ -36,7 +36,8 @@ def generate_launch_description():
         #    get_package_share_directory('g1_navigation2'),
         #    'map',
         #    'grid_map.yaml'))
-        default=os.path.join('/map/D-robotics-0905/grid_map.yaml'))
+        # 定位导航地图路径：priorDir 路径下放置栅格地图 grid_map.yaml 和 grid_map.pgm
+        default=os.path.join('/workspace/map/grid_map/grid_map.yaml'))
 
     param_file_name = 'g1.yaml'
     param_dir = LaunchConfiguration(

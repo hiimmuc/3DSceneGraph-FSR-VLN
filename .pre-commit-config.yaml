@@ -1,0 +1,17 @@
+repos:
+  - repo: https://github.com/pre-commit/mirrors-autopep8
+    rev: v2.0.4
+    hooks:
+      - id: autopep8
+        args: ["--in-place", "--aggressive", "--aggressive"]
+
+  - repo: https://github.com/PyCQA/docformatter
+    rev: v1.7.7  # 更新到最新版本
+    hooks:
+      - id: docformatter
+        args:
+          - "--in-place"
+          - "--recursive"
+          - "--wrap-summaries=79"
+          - "--wrap-descriptions=79"
+          - "--pre-summary-newline"

@@ -33,8 +33,14 @@ class HorizonDataset(RGBDDataset):
         # camera_config_path = "orbslam3_rgbd.yaml"
         pose_name = "poses"
         camera_config_path = "d435i.yaml"
-        self.rgb_intrinsics, self.depth_intrinsics = self.load_camera_params(
-            os.path.join(self.root_dir, camera_config_path))
+        if camera_config_path is not None and os.path.exists(os.path.join(self.root_dir, camera_config_path)):
+            print("use camera config file: ", camera_config_path)
+            self.rgb_intrinsics, self.depth_intrinsics = self.load_camera_params(os.path.join(self.root_dir, camera_config_path))
+        elif os.path.exists(os.path.join(self.root_dir, "rectify_cam_param.txt")):
+            self.rgb_intrinsics = np.loadtxt(os.path.join(self.root_dir, "rectify_cam_param.txt"))
+            self.depth_intrinsics = self.rgb_intrinsics.copy()
+        else:
+            assert False, "No camera config file found in the directory"
         self.scale = 1000.0
         print("self.root_dir: ", self.root_dir)
         if pose_name is not None and os.path.exists(
@@ -49,11 +55,11 @@ class HorizonDataset(RGBDDataset):
                 os.path.join(self.root_dir, "CameraTrajectory.txt")
             )
             print("use pose file: ", "CameraTrajectory.txt")
-        elif os.path.exists(os.path.join(self.root_dir, "cam_1_poses_updated.txt")):
-            camtoworlds, ts_list = self.load_tum_pose(
-                os.path.join(self.root_dir, "cam_1_poses_updated.txt")
+        elif os.path.exists(os.path.join(self.root_dir, "cam_pos.txt")):
+            camtoworlds, ts_list = self.load_tum_pose_pocket2(
+                os.path.join(self.root_dir, "cam_pos.txt")
             )
-            print("use pose file: ", "cam_1_poses_updated.txt")
+            print("use pose file: ", "cam_pos.txt")
         else:
             assert False, "No pose file found in the directory"
 
@@ -197,6 +203,47 @@ class HorizonDataset(RGBDDataset):
             # Extract translation and quaternion
             # ts, tx, ty, tz, qx, qy, qz, qw = pose
             ts, tx, ty, tz, qw, qx, qy, qz = pose
+            # Create rotation matrix from quaternion
+            quat = [qx, qy, qz, qw]
+            rot_matrix = R.from_quat(
+                quat
+            ).as_matrix()  # Convert quaternion to 3x3 rotation matrix
+            # Create the homogeneous transformation matrix (4x4)
+            T = np.eye(4)
+            T[:3, :3] = rot_matrix  # Rotation part
+            T[:3, 3] = [tx, ty, tz]  # Translation part
+
+            # Append to list
+            T_list.append(T)
+            ts_list.append(ts)
+
+        camtoworlds = np.array(T_list)
+        return camtoworlds, ts_list
+    
+    def load_tum_pose_pocket2(self, path: str) -> np.ndarray:
+        """
+        Load ego pose from file.
+
+        Args:
+            path (str): Path to ego pose file.
+
+        Returns:
+            np.ndarray: Ego pose, tum format, ts tx ty tz qx qy qz qw
+        """
+        tum_pose_raw = np.loadtxt(path)
+        # sort by ts
+        tum_pose_raw = tum_pose_raw[tum_pose_raw[:, 0].argsort()]
+        # pt = PoseTransformer()
+        # pt.loadarray(tum_pose_raw)
+        # pt.normalize2origin()
+        # tum_pose = pt.dumparray()
+        tum_pose = tum_pose_raw
+        # transform to (n,4,4) matrix
+        ts_list = []
+        T_list = []
+        for pose in tum_pose:
+            # Extract translation and quaternion
+            ts, _, tx, ty, tz, qw, qx, qy, qz = pose
             # Create rotation matrix from quaternion
             quat = [qx, qy, qz, qw]
             rot_matrix = R.from_quat(
