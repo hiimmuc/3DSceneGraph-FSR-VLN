@@ -1,120 +1,262 @@
 """
-LICENSE.
+Point cloud visualization with instance-level label annotations.
 
+LICENSE:
 This project as a whole is licensed under the Apache License, Version 2.0.
 
-THIRD-PARTY LICENSES
-
-Third-party software already included in HoloAgent is governed by the separate
-Open Source license terms under which the third-party software has been
-distributed.
-
-NOTICE ON LICENSE COMPATIBILITY FOR DISTRIBUTORS
-
-Notably, this project depends on the third-party software FAST-LIVO2 and HOVSG.
-Their default licenses restrict commercial use—separate permission from their
-original authors is required for commercial integration/redistribution.
-
-The third-party software FAST-LIVO2 dependency (licensed under GPL-2.0-only)
-utilizes rpg_vikit-ros2 which contains components under the GPL-3.0. Please be
-aware of license compatibility when distributing a combined work.
-
-DISCLAIMER
-
-Users are solely responsible for ensuring compliance with all applicable
-license terms when using, modifying, or distributing the project. Project
-maintainers accept no liability for any license violations arising from such
-use.
+THIRD-PARTY LICENSES:
+See project LICENSE file for details on third-party dependencies and their licenses.
 """
-# pylint: disable=missing-docstring
-import time
-# 读取点云
-import open3d as o3d
-import numpy as np
+
+import argparse
+import logging
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
 import matplotlib.pyplot as plt
-# 用于创建图形用户界面和渲染场景
-import open3d.visualization.gui as gui  # type: ignore
-import open3d.visualization.rendering as rendering  # type: ignore
+import numpy as np
+import open3d as o3d
+import open3d.visualization.gui as gui
+import open3d.visualization.rendering as rendering
+
+logger = logging.getLogger(__name__)
 
 
-def exit_after_delay():
-    time.sleep(5)  # 等待 5 秒
-    gui.Application.instance.quit()  # 退出应用
+@dataclass
+class ClusteringConfig:
+    """Configuration for point cloud clustering."""
 
-# 函数功能，用于显示点云并标注类别标签
+    pcd_path: str
+    eps: float = 0.05
+    min_points: int = 50
+    cmap_name: str = "tab20"
+    cluster_names: Optional[Dict[int, str]] = None
 
 
-def show_point_cloud_with_labels(pcd, point_labels, cluster_labels):
-    """
-    显示点云并标注类别标签。
+@dataclass
+class VisualizationConfig:
+    """Configuration for GUI visualization."""
 
-    Args:
-        pcd (open3d.geometry.PointCloud): 输入的点云数据。
-        labels (numpy.ndarray): 点云的聚类标签，每个点对应一个聚类索引。
-        cluster_names (dict): 聚类索引到类名的映射，用于显示在点云标签中。
+    window_title: str = "Point Cloud with Instance Labels"
+    window_width: int = 1024
+    window_height: int = 768
+    bg_color: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+    font_size: int = 8
+    camera_fov: float = 60.0
 
-    Returns:
-        None
-    """
-    # 初始化GUI应用
-    app = gui.Application.instance
-    app.initialize()
 
-    # 创建窗口和场景
-    window = app.create_window(
-        "mapvln raw existing object instances", 1024, 768)
-    # 创建一个场景小部件（SceneWidget）并将其添加到窗口中
+def _load_point_cloud(filepath: str) -> o3d.geometry.PointCloud:
+    """Load point cloud from file."""
+    logger.info(f"Loading point cloud from {filepath}")
+    return o3d.io.read_point_cloud(filepath)
+
+
+def _cluster_point_cloud(pcd: o3d.geometry.PointCloud, config: ClusteringConfig) -> np.ndarray:
+    """Perform DBSCAN clustering on point cloud."""
+    logger.info(f"Clustering with eps={config.eps}, min_points={config.min_points}")
+    labels = np.array(
+        pcd.cluster_dbscan(
+            eps=config.eps,
+            min_points=config.min_points,
+            print_progress=True,
+        )
+    )
+    return labels
+
+
+def _colorize_clusters(
+    pcd: o3d.geometry.PointCloud, labels: np.ndarray, cmap_name: str = "tab20"
+) -> None:
+    """Apply colormap to clusters."""
+    max_label = labels.max()
+    logger.info(f"Found {max_label + 1} clusters")
+
+    cmap = plt.get_cmap(cmap_name)
+    colors = cmap(labels / (max_label + 1 if max_label > 0 else 1))
+    colors[labels < 0] = 0  # Noise points -> black
+
+    pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
+
+
+def _get_cluster_names(
+    labels: np.ndarray, provided_names: Optional[Dict[int, str]] = None
+) -> Dict[int, str]:
+    """Generate cluster names from labels and provided mapping."""
+    cluster_names = {}
+    max_label = labels.max()
+
+    for i in range(max_label + 1):
+        if provided_names and i in provided_names:
+            cluster_names[i] = provided_names[i]
+        else:
+            cluster_names[i] = f"cluster_{i}"
+
+    return cluster_names
+
+
+def _setup_scene(
+    window: gui.Window,
+    pcd: o3d.geometry.PointCloud,
+    labels: np.ndarray,
+    cluster_names: Dict[int, str],
+    config: VisualizationConfig,
+) -> gui.SceneWidget:
+    """Setup the visualization scene."""
+    # Create scene widget
     scene = gui.SceneWidget()
     scene.scene = rendering.Open3DScene(window.renderer)
     window.add_child(scene)
 
-    # 设置场景背景和光照
-    scene.scene.set_background([1, 1, 1, 1])  # 白色背景
-    scene.scene.add_geometry("pcd", pcd, rendering.MaterialRecord())  # 添加点云到场景
+    # Set background and add point cloud
+    scene.scene.set_background(config.bg_color)
+    scene.scene.add_geometry("pcd", pcd, rendering.MaterialRecord())
 
-    # 遍历每个聚类标签，并在点云中添加对应的文本标签
-    for i in range(max(point_labels) + 1):
-        cluster_idx = np.where(point_labels == i)[0]  # 找到术语当前聚类的索引
+    # Add 3D labels for each cluster
+    logger.info("Adding cluster labels to scene")
+    for i in range(labels.max() + 1):
+        cluster_idx = np.where(labels == i)[0]
         if len(cluster_idx) == 0:
             continue
+
         cluster_points = np.asarray(pcd.points)[cluster_idx]
-        center = cluster_points.mean(axis=0)  # 计算当前家具类点的中心位置
-        # 获取聚类名称，如果没有则使用默认名称cluster_{i}
-        label = cluster_labels.get(i, f"cluster_{i}")
-        # 添加3d文本标签
+        center = cluster_points.mean(axis=0)
+        label = cluster_names.get(i, f"cluster_{i}")
+
         scene.add_3d_label(center, label)
 
-    # 设置相机的中心位置为[0, 0, 0]
-    center = np.array([0.0, 0.0, 0.0], dtype=np.float32).reshape(3, 1)
-    # 获取点云的轴对齐包围盒
+    # Configure camera
     bounding_box = pcd.get_axis_aligned_bounding_box()
-    # 设置相机视角为60度，并将其对准点云的包围盒
-    scene.setup_camera(60.0, bounding_box, center)
+    center = np.array([0.0, 0.0, 0.0], dtype=np.float32).reshape(3, 1)
+    scene.setup_camera(config.camera_fov, bounding_box, center)
 
-    # 启动GUI应用，显示窗口
+    return scene
+
+
+def _run_visualization(window: gui.Window, config: VisualizationConfig) -> None:
+    """Launch the visualization GUI."""
+    app = gui.Application.instance
     app.run()
 
 
-# 加载点云和聚类
-pcd = o3d.io.read_point_cloud(
-    "/mnt/disk2/hovsg/HOV-SG/data/scannet/scene_graph/scannet/scene0378_00/full_pcd.ply")
-labels = np.array(pcd.cluster_dbscan(eps=0.05,  # 聚类半径
-                                     min_points=50,  # 最小点数
-                                     print_progress=True))  # 显示进度
+def visualize_point_cloud_with_labels(
+    pcd: o3d.geometry.PointCloud,
+    labels: np.ndarray,
+    cluster_names: Optional[Dict[int, str]] = None,
+    vis_config: Optional[VisualizationConfig] = None,
+) -> None:
+    """
+    Display point cloud with cluster labels in GUI.
 
-# 颜色
-max_label = labels.max()
-print("max_label: ", max_label)
-colors = plt.get_cmap("tab20")(
-    labels / (max_label + 1 if max_label > 0 else 1))
-print(colors)
-colors[labels < 0] = 0
-pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
+    Args:
+        pcd: Open3D point cloud object
+        labels: Cluster assignments for each point
+        cluster_names: Mapping from cluster ID to name
+        vis_config: Visualization configuration
+    """
+    if vis_config is None:
+        vis_config = VisualizationConfig()
 
-# 聚类类别名映射
-cluster_names = {0: "chair", 1: "table", 2: "sofa"}  # 可根据聚类结果自行扩展
+    if cluster_names is None:
+        cluster_names = {}
 
-# 显示
-# 启动一个线程，在 5 秒后退出应用
-# threading.Thread(target=exit_after_delay).start()
-show_point_cloud_with_labels(pcd, labels, cluster_names)  # 调用时保持变量名一致
+    # Initialize GUI
+    app = gui.Application.instance
+    app.initialize()
+
+    # Create window
+    window = app.create_window(
+        vis_config.window_title, vis_config.window_width, vis_config.window_height
+    )
+
+    # Setup scene
+    _setup_scene(window, pcd, labels, cluster_names, vis_config)
+
+    # Run visualization
+    _run_visualization(window, vis_config)
+
+
+def _merge_cli_args(
+    clustering_config: ClusteringConfig,
+    vis_config: VisualizationConfig,
+    cli_args: argparse.Namespace,
+) -> Tuple[ClusteringConfig, VisualizationConfig]:
+    """Merge CLI arguments into configs."""
+    # Update clustering config
+    if cli_args.pcd_path:
+        clustering_config.pcd_path = cli_args.pcd_path
+    if cli_args.eps is not None:
+        clustering_config.eps = cli_args.eps
+    if cli_args.min_points is not None:
+        clustering_config.min_points = cli_args.min_points
+    if cli_args.cmap:
+        clustering_config.cmap_name = cli_args.cmap
+
+    # Update visualization config
+    if cli_args.title:
+        vis_config.window_title = cli_args.title
+    if cli_args.width is not None:
+        vis_config.window_width = cli_args.width
+    if cli_args.height is not None:
+        vis_config.window_height = cli_args.height
+
+    return clustering_config, vis_config
+
+
+def main() -> None:
+    """Main entry point with CLI argument support."""
+    parser = argparse.ArgumentParser(
+        description="Visualize point cloud with instance-level labels"
+    )
+
+    # Clustering arguments
+    parser.add_argument(
+        "--pcd-path",
+        type=str,
+        default="outputs/built_graphs/horizon/LivingRoomDataset_20260330/full_pcd.ply",
+        help="Path to point cloud file",
+    )
+    parser.add_argument(
+        "--eps", type=float, default=None, help="DBSCAN epsilon (clustering radius)"
+    )
+    parser.add_argument(
+        "--min-points", type=int, default=None, help="Minimum points for cluster (DBSCAN)"
+    )
+    parser.add_argument(
+        "--cmap", type=str, default=None, help="Matplotlib colormap name (default: tab20)"
+    )
+
+    # Visualization arguments
+    parser.add_argument("--title", type=str, default=None, help="Window title")
+    parser.add_argument("--width", type=int, default=None, help="Window width in pixels")
+    parser.add_argument("--height", type=int, default=None, help="Window height in pixels")
+
+    args = parser.parse_args()
+
+    # Create configs
+    clustering_config = ClusteringConfig(pcd_path=args.pcd_path)
+    vis_config = VisualizationConfig()
+
+    # Merge with CLI arguments
+    clustering_config, vis_config = _merge_cli_args(clustering_config, vis_config, args)
+
+    logger.info(f"Clustering config: {clustering_config}")
+    logger.info(f"Visualization config: {vis_config}")
+
+    # Load and process point cloud
+    pcd = _load_point_cloud(clustering_config.pcd_path)
+    labels = _cluster_point_cloud(pcd, clustering_config)
+    _colorize_clusters(pcd, labels, clustering_config.cmap_name)
+
+    # Generate and display cluster names
+    cluster_names = _get_cluster_names(labels)
+    logger.info(f"Cluster names: {cluster_names}")
+
+    # visualize
+    visualize_point_cloud_with_labels(pcd, labels, cluster_names, vis_config)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    main()

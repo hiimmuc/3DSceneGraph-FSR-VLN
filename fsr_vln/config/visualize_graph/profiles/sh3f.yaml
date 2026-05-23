@@ -1,0 +1,18 @@
+# @package main
+scene_id: icra_sh3f
+dataset: horizon
+depth_cut: 6.0
+dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
+graph_path: /mnt/holoagent/fsrvln/scene_graphs_opensource/horizon/icra_sh3f/graph_20250906010328
+save_path: /mnt/holoagent/fsrvln/scene_graphs_opensource
+room_generation_method: obj_embedding
+room_types:
+    - Pantry
+    - Office
+    - Office-Pantry
+room_names_human_assign:
+    - office pantry
+    - office pantry
+    - office
+long_query:
+    spec: [obj, room, floor]

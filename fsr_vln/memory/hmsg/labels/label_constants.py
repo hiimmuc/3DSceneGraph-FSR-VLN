@@ -42,22 +42,22 @@ SCANNET_LABELS_20_CF = (
     "bathtub",
     "furniture",
 )
-# cabinet：柜子
-# bed：床
-# chair：椅子
-# sofa：沙发
-# table：桌子
-# bookshelf：书架
-# picture：图片 / 挂画
-# counter：操作台 / 柜台
-# desk：书桌
-# curtain：窗帘
-# refrigerator：冰箱
-# shower curtain：浴帘
-# toilet：马桶
-# sink：水槽 / 洗手池
-# bathtub：浴缸
-# furniture：家具
+# cabinet: wardrobe/cabinet
+# bed: bed
+# chair: chair
+# sofa: sofa
+# table: table
+# bookshelf: bookshelf
+# picture: picture / painting
+# counter: countertop / counter
+# desk: desk
+# curtain: curtain
+# refrigerator: refrigerator
+# shower curtain: shower curtain
+# toilet: toilet
+# sink: sink / washbasin
+# bathtub: bathtub
+# furniture: furniture
 
 
 MATTERPORT_LABELS_21 = (
@@ -442,58 +442,19 @@ NUSCENES_LABELS_DETAILS = (
 
 raw_category_to_nyu20_dict = {
     "wall": ["wall"],
-    "floor": [
-        "floor",
-        "carpet"],
-    "cabinet": [
-        "cabinet",
-        "kitchen cabinet",
-        "kitchen cabinets",
-        "cabinets"],
-    "bed": [
-        "bed",
-        "loft bed",
-        "bunk bed",
-        "bedframe"],
-    "chair": [
-        "chair",
-        "office chair",
-        "armchair"],
-    "sofa": [
-        "sofa",
-        "couch",
-        "sofa chair",
-        "sofa bed",
-        "sofa chair"],
-    "table": [
-        "table",
-        "desk",
-        "coffee table",
-        "end table",
-        "dining table"],
-    "door": [
-        "door",
-        "doorframe",
-        "doors",
-        "closet doors",
-        "bathroom stall door",
-        "sliding door"],
-    "window": [
-        "window",
-        "windowsill",
-        "glass doors"],
-    "bookshelf": [
-        "bookshelf",
-        "bookshelves"],
+    "floor": ["floor", "carpet"],
+    "cabinet": ["cabinet", "kitchen cabinet", "kitchen cabinets", "cabinets"],
+    "bed": ["bed", "loft bed", "bunk bed", "bedframe"],
+    "chair": ["chair", "office chair", "armchair"],
+    "sofa": ["sofa", "couch", "sofa chair", "sofa bed", "sofa chair"],
+    "table": ["table", "desk", "coffee table", "end table", "dining table"],
+    "door": ["door", "doorframe", "doors", "closet doors", "bathroom stall door", "sliding door"],
+    "window": ["window", "windowsill", "glass doors"],
+    "bookshelf": ["bookshelf", "bookshelves"],
     "picture": ["picture"],
     "counter": ["counter"],
-    "desk": [
-        "desk",
-        "desk lamp"],
-    "curtain": [
-        "curtain",
-        "shower curtain",
-        "shower curtain rod"],
+    "desk": ["desk", "desk lamp"],
+    "curtain": ["curtain", "shower curtain", "shower curtain rod"],
     "refrigerator": ["refrigerator"],
     "shower curtain": ["shower curtain"],
     "toilet": ["toilet"],
@@ -946,7 +907,16 @@ OPENVOCAB_MATTERPORT_LABELS = {
     "cushion": ["cushion", "pillow"],
     "window": ["window", "windowsill", "window_frame", "windowpane", "window_screen"],
     "sofa": ["sofa"],
-    "bed": ["bed", "bedpost", "bedstead", "headboard", "footboard", "bedspread", "mattress", "sheet"],
+    "bed": [
+        "bed",
+        "bedpost",
+        "bedstead",
+        "headboard",
+        "footboard",
+        "bedspread",
+        "mattress",
+        "sheet",
+    ],
     "curtain": ["curtain", "shower_curtain"],
     "chest_of_drawers": ["chest_of_drawers", "drawer", "dresser", "night_stand"],
     "plant": ["plant"],

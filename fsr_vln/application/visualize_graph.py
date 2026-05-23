@@ -1,285 +1,372 @@
-import os
-import json
+"""Scene graph visualization with configurable parameters and CLI argument support."""
+
+import argparse
 import glob
-import numpy as np
+import json
+import logging
+import os
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import Dict, Tuple
 
 import hydra
+import numpy as np
 import open3d as o3d
-import matplotlib.pyplot as plt
 import pyvista as pv
-from tqdm import tqdm
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
+
+logger = logging.getLogger(__name__)
 
 
-def get_cmap(n, name="hsv"):
-    """Returns a function that maps each index in 0, 1, ..., n-1 to a distinct
-    RGB color; the keyword argument name must be a standard mpl colormap
-    name."""
-    return plt.cm.get_cmap(name, n)
+@dataclass
+class VisualizationConfig:
+    """Configuration for graph visualization."""
+
+    graph_path: str
+    point_size: int = 5
+    sphere_radius_floor: float = 0.5
+    sphere_radius_room: float = 0.15
+    ceiling_filter_margin: float = 0.4
+    color_brightness_room: float = 1.2
+    excluded_object_keywords: Tuple[str, ...] = (
+        "wall",
+        "floor",
+        "ceiling",
+        "paneling",
+        "banner",
+        "overhang",
+    )
+    excluded_object_names: Tuple[str, ...] = (
+        "divider",
+        "ledge",
+        "pillar",
+        "tape",
+        "stairs",
+        "door",
+        "doors",
+        "stair",
+        "window",
+        "glass",
+        "railing",
+        "glass doors",
+        "whiteboard",
+        "sliding door",
+        "carpet",
+        "picture",
+    )
+    initial_offset: Tuple[float, float, float] = (7.0, 2.5, 4.0)
+    min_object_points: int = 10
+    room_height_offset: float = 3.5
 
 
-@hydra.main(version_base=None,
-            config_path="../config",
-            config_name="visualize_graph")
-def main(params: DictConfig):
-    # Initialize the PyVista plotter
-    p = pv.Plotter()
+def _load_json(filepath: str) -> Dict:
+    """Load JSON file safely."""
+    with open(filepath, "r") as fp:
+        return json.load(fp)
 
-    # Load paths to floor PLY files and corresponding JSON metadata
-    floors_ply_paths = sorted(
-        glob.glob(
-            os.path.join(
-                params.graph_path,
-                "floors",
-                "*.ply")))
-    floors_info_paths = sorted(
-        glob.glob(
-            os.path.join(
-                params.graph_path,
-                "floors",
-                "*.json")))
 
-    # Initialize data structures for storing point clouds and metadata
+def _load_point_cloud(filepath: str) -> o3d.geometry.PointCloud:
+    """Load point cloud file."""
+    return o3d.io.read_point_cloud(filepath)
+
+
+def _extract_metadata(data: Dict, keys: Tuple[str, ...]) -> Dict:
+    """Extract specific keys from metadata dictionary."""
+    return {k: v for k, v in data.items() if k in keys}
+
+
+def _load_floors(graph_path: str, config: VisualizationConfig) -> Tuple[Dict, Dict, Dict]:
+    """Load and process floor data."""
+    floors_ply_paths = sorted(glob.glob(os.path.join(graph_path, "floors", "*.ply")))
+    floors_info_paths = sorted(glob.glob(os.path.join(graph_path, "floors", "*.json")))
+
     floor_pcds = {}
     floor_infos = {}
     hier_topo = defaultdict(dict)
-    init_offset = np.array([7.0, 2.5, 4.0])  # Initial offset for visualization
+    init_offset = np.array(config.initial_offset)
 
-    # Process each floor
-    for counter, (ply_path, info_path) in enumerate(
-            zip(floors_ply_paths, floors_info_paths)):
-        with open(info_path, "r") as fp:
-            floor_info = json.load(fp)
-        # Store relevant floor metadata
-        floor_infos[floor_info["floor_id"]] = {k: v for k, v in floor_info.items(
-        ) if k in ["floor_id", "name", "rooms", "floor_height", "floor_zero_level", "vertices"]}
-        # Apply visualization offset to each floor
-        floor_infos[floor_info["floor_id"]
-                    ]["viz_offset"] = init_offset * counter
+    for counter, (ply_path, info_path) in enumerate(zip(floors_ply_paths, floors_info_paths)):
+        floor_info = _load_json(info_path)
+        floor_id = floor_info["floor_id"]
+
+        floor_infos[floor_id] = _extract_metadata(
+            floor_info,
+            ("floor_id", "name", "rooms", "floor_height", "floor_zero_level", "vertices"),
+        )
+        floor_infos[floor_id]["viz_offset"] = init_offset * counter
+
         for r_id in floor_info["rooms"]:
-            hier_topo[floor_info["floor_id"]][r_id] = []
+            hier_topo[floor_id][r_id] = []
 
-        # Load the floor point cloud
-        floor_pcds[floor_info["floor_id"]] = o3d.io.read_point_cloud(ply_path)
+        floor_pcds[floor_id] = _load_point_cloud(ply_path)
 
-    # Load paths to room PLY files and corresponding JSON metadata
-    rooms_ply_paths = sorted(
-        glob.glob(
-            os.path.join(
-                params.graph_path,
-                "rooms",
-                "*.ply")))
-    rooms_info_paths = sorted(
-        glob.glob(
-            os.path.join(
-                params.graph_path,
-                "rooms",
-                "*.json")))
+    return floor_pcds, floor_infos, hier_topo
 
-    # Initialize data structures for storing room point clouds and metadata
+
+def _load_rooms(
+    graph_path: str, floor_infos: Dict, config: VisualizationConfig
+) -> Tuple[Dict, Dict]:
+    """Load and process room data."""
+    rooms_ply_paths = sorted(glob.glob(os.path.join(graph_path, "rooms", "*.ply")))
+    rooms_info_paths = sorted(glob.glob(os.path.join(graph_path, "rooms", "*.json")))
+
     room_pcds = {}
     room_infos = {}
 
-    # Process each room
     for ply_path, info_path in zip(rooms_ply_paths, rooms_info_paths):
-        with open(info_path, "r") as fp:
-            room_info = json.load(fp)
-        # Store relevant room metadata
-        room_infos[room_info["room_id"]] = {
-            k: v for k, v in room_info.items() if k in ["room_id", "name", "floor_id", "room_height", "room_zero_level", "vertices"]
-        }
-        for o_id in room_info["objects"]:
-            hier_topo[room_info["floor_id"]][room_info["room_id"]].append(o_id)
+        room_info = _load_json(info_path)
+        room_id = room_info["room_id"]
+        floor_id = room_info["floor_id"]
 
-        # Load the room point cloud and apply filtering
-        orig_cloud = o3d.io.read_point_cloud(ply_path)
+        room_infos[room_id] = _extract_metadata(
+            room_info,
+            ("room_id", "name", "floor_id", "room_height", "room_zero_level", "vertices"),
+        )
+
+        # Load and filter point cloud
+        orig_cloud = _load_point_cloud(ply_path)
         orig_cloud_xyz = np.asarray(orig_cloud.points)
-        below_ceiling_filter = (
-            orig_cloud_xyz[:, 1]
-            < room_infos[room_info["room_id"]]["room_zero_level"]
-            + room_infos[room_info["room_id"]]["room_height"]
-            - 0.4
+        ceiling_level = (
+            room_infos[room_id]["room_zero_level"]
+            + room_infos[room_id]["room_height"]
+            - config.ceiling_filter_margin
         )
-        room_pcds[room_info["room_id"]] = orig_cloud.select_by_index(
-            np.where(below_ceiling_filter)[0])
-        cloud_xyz = np.asarray(room_pcds[room_info["room_id"]].points)
-        cloud_xyz += floor_infos[room_info["floor_id"]]["viz_offset"]
-        cloud = pv.PolyData(cloud_xyz)
-        room_pcds[room_info["room_id"]].colors = o3d.utility.Vector3dVector(
-            np.clip(np.array(room_pcds[room_info["room_id"]].colors) * 1.2, 0.0, 1.0)
+        below_ceiling = orig_cloud_xyz[:, 1] < ceiling_level
+        room_pcds[room_id] = orig_cloud.select_by_index(np.where(below_ceiling)[0])
+
+        # Apply visualization offset
+        cloud_xyz = np.asarray(room_pcds[room_id].points)
+        cloud_xyz += floor_infos[floor_id]["viz_offset"]
+
+        # Enhance colors
+        room_pcds[room_id].colors = o3d.utility.Vector3dVector(
+            np.clip(np.array(room_pcds[room_id].colors) * config.color_brightness_room, 0.0, 1.0)
         )
-        # p.add_mesh(
-        #     cloud,
-        #     scalars=np.asarray(room_pcds[room_info["room_id"]].colors),
-        #     rgb=True,
-        #     point_size=5,
-        #     opacity=0.8,
-        #     show_vertices=True,
-        # )
 
-    # Load paths to object PLY files and corresponding JSON metadata
-    objects_ply_paths = sorted(
-        glob.glob(
-            os.path.join(
-                params.graph_path,
-                "objects",
-                "*.ply")))
-    objects_info_paths = sorted(
-        glob.glob(
-            os.path.join(
-                params.graph_path,
-                "objects",
-                "*.json")))
+    return room_pcds, room_infos
 
-    # Initialize data structures for storing object point clouds, metadata,
-    # and features
+
+def _load_objects(graph_path: str, floor_infos: Dict, room_infos: Dict) -> Tuple[Dict, Dict, Dict]:
+    """Load and process object data."""
+    objects_ply_paths = sorted(glob.glob(os.path.join(graph_path, "objects", "*.ply")))
+    objects_info_paths = sorted(glob.glob(os.path.join(graph_path, "objects", "*.json")))
+
     object_pcds = {}
     object_infos = {}
     object_feats = {}
 
-    # Process each object
     for ply_path, info_path in zip(objects_ply_paths, objects_info_paths):
-        with open(info_path, "r") as fp:
-            object_info = json.load(fp)
-        # Store relevant object metadata
-        object_infos[object_info["object_id"]] = {k: v for k, v in object_info.items(
-        ) if k in ["object_id", "name", "room_id", "object_height", "object_zero_level"]}
-        object_feats[object_info["object_id"]] = np.asarray(
-            object_info["embedding"])
-        hier_topo[room_infos[object_info["room_id"]]["floor_id"]
-                  ][room_infos[object_info["room_id"]]["room_id"]].append(object_info["object_id"])
+        obj_info = _load_json(info_path)
+        obj_id = obj_info["object_id"]
+        room_id = obj_info["room_id"]
+        floor_id = room_infos[room_id]["floor_id"]
 
-        # Load the object point cloud and apply visualization offset
-        object_pcds[object_info["object_id"]
-                    ] = o3d.io.read_point_cloud(ply_path)
-        cloud_xyz = np.asarray(object_pcds[object_info["object_id"]].points)
-        cloud_xyz += floor_infos[room_infos[object_info["room_id"]]
-                                 ["floor_id"]]["viz_offset"]
+        object_infos[obj_id] = _extract_metadata(
+            obj_info, ("object_id", "name", "room_id", "object_height", "object_zero_level")
+        )
+        object_feats[obj_id] = np.asarray(obj_info["embedding"])
 
-    # Calculate centroids for floors
-    max_floor_id = list(hier_topo.keys())[-1]
-    max_floor_centroid = np.mean(
-        np.asarray(
-            floor_pcds[max_floor_id].points),
-        axis=0)
+        # Load point cloud with offset
+        object_pcds[obj_id] = _load_point_cloud(ply_path)
+        cloud_xyz = np.asarray(object_pcds[obj_id].points)
+        cloud_xyz += floor_infos[floor_id]["viz_offset"]
+
+    return object_pcds, object_infos, object_feats
+
+
+def _should_include_object(
+    obj_info: Dict, obj_pcd: o3d.geometry.PointCloud, config: VisualizationConfig
+) -> bool:
+    """Check if object should be included in visualization."""
+    name_lower = obj_info["name"].lower()
+
+    # Exclude by keyword
+    if any(kw in name_lower for kw in config.excluded_object_keywords):
+        return False
+
+    # Exclude by specific name
+    if obj_info["name"] in config.excluded_object_names:
+        return False
+
+    # Exclude by point count
+    if len(obj_pcd.points) < config.min_object_points:
+        return False
+
+    return True
+
+
+def _visualize_hierarchy(
+    plotter: pv.Plotter,
+    floor_pcds: Dict,
+    floor_infos: Dict,
+    room_pcds: Dict,
+    room_infos: Dict,
+    object_pcds: Dict,
+    object_infos: Dict,
+    hier_topo: Dict,
+    config: VisualizationConfig,
+) -> None:
+    """Add hierarchy visualization to plotter."""
+    # Visualize floor centroids
     floor_centroids = {
-        floor_id: np.mean(
-            np.asarray(
-                floor_pcds[floor_id].points),
-            axis=0) for floor_id in hier_topo.keys()}
+        fid: np.mean(np.asarray(floor_pcds[fid].points), axis=0) for fid in hier_topo.keys()
+    }
     floor_centroids_viz = {
-        floor_id: floor_centroids[floor_id] +
-        floor_infos[floor_id]["viz_offset"] +
-        [
-            0.0,
-            4.0,
-            0.0] for floor_id in hier_topo.keys()}
+        fid: floor_centroids[fid] + floor_infos[fid]["viz_offset"] + np.array([0.0, 4.0, 0.0])
+        for fid in hier_topo.keys()
+    }
+    for fid, centroid in floor_centroids_viz.items():
+        plotter.add_mesh(
+            pv.Sphere(center=tuple(centroid), radius=config.sphere_radius_floor), color="orange"
+        )
 
-    # Calculate the root node centroid for visualization
-    root_offset = [
-        np.mean(np.stack(list(floor_centroids_viz.values())).T, axis=1)[0],
-        6.0,
-        np.mean(np.stack(list(floor_centroids_viz.values())).T, axis=1)[2],
-    ]
-    root_node_centroid_viz = max_floor_centroid + \
-        floor_infos[max_floor_id]["viz_offset"] + root_offset
-
-    # Visualize the centroids of floors
-    for floor_id, floor_centroid_viz in floor_centroids_viz.items():
-        p.add_mesh(
-            pv.Sphere(
-                center=tuple(floor_centroid_viz),
-                radius=0.5),
-            color="orange")
-
-    # Calculate and visualize the centroids of rooms
+    # Visualize room centroids
     room_centroids = {
-        room_id: np.mean(
-            np.asarray(
-                room_pcds[room_id].points),
-            axis=0) for room_id in room_infos.keys()}
+        rid: np.mean(np.asarray(room_pcds[rid].points), axis=0) for rid in room_infos.keys()
+    }
     room_centroids_viz = {
-        room_id: room_centroids[room_id] + [0.0, 3.5, 0] for room_id in room_infos.keys()}
-    for room_id, room_centroid_viz in room_centroids_viz.items():
-        p.add_mesh(
-            pv.Sphere(
-                center=tuple(room_centroid_viz),
-                radius=0.15),
-            color="blue")
-    #     p.add_mesh(
-    #         pv.Line(tuple(floor_centroids_viz[room_infos[room_id]["floor_id"]]), tuple(room_centroid_viz)),
-    #         line_width=4,
-    #     )
-    #     # p.add_point_labels([center], [object_name], font_size=8, point_color="blue", text_color="black")
+        rid: room_centroids[rid] + np.array([0.0, config.room_height_offset, 0.0])
+        for rid in room_infos.keys()
+    }
+    for rid, centroid in room_centroids_viz.items():
+        plotter.add_mesh(
+            pv.Sphere(center=tuple(centroid), radius=config.sphere_radius_room), color="blue"
+        )
 
-    # Calculate and visualize the centroids of objects
-    obj_centroids = {
-        obj_id: np.mean(
-            np.asarray(
-                object_pcds[obj_id].points),
-            axis=0) for obj_id in object_infos.keys()}
-    obj_centroids_viz = {
-        obj_id: obj_centroids[obj_id] for obj_id in object_infos.keys()}
+    # Visualize objects and connections
     for obj_id, obj_info in object_infos.items():
-        if (
-            not any(
-                substring in obj_info["name"].lower()
-                for substring in ["wall", "floor", "ceiling", "paneling", "banner", "overhang"]
-            )
-            and len(object_pcds[obj_id].points) > 10  # 25
-        ):
-            print("included object of category:", obj_info["name"])
-            object_name = obj_info["name"]
-            # if object_name in ["divider", "pillar", "carpet"]:
-            #     continue
+        if not _should_include_object(obj_info, object_pcds[obj_id], config):
+            continue
 
-            if object_name in [
-                "divider",
-                "ledge",
-                "pillar",
-                "tape",
-                "stairs",
-                "door",
-                "doors",
-                "stair",
-                "window",
-                "glass",
-                "railing",
-                "glass doors",
-                "whiteboard",
-                "sliding door",
-                "carpet",
-                    "picture"]:
-                continue
+        logger.info(f"Including object: {obj_info['name']}")
 
-            p.add_mesh(pv.Line(tuple(room_centroids_viz[obj_info["room_id"]]), tuple(
-                obj_centroids_viz[obj_id])), line_width=1.5, opacity=0.5, )
-            # if object_name in ["divider", "tape", "stairs", "door", "doors", "stair", "window", "glass", "object",
-            #                    "railing", "glass doors", "whiteboard", "sliding door", "carpet", "picture"]:
-            #     continue
-            # add object point cloud
-            object_pcds[obj_id].paint_uniform_color(np.random.rand(3))
-            cloud_xyz = np.asarray(object_pcds[obj_id].points)
-            center = cloud_xyz.mean(axis=0)  # 计算当前家具类点的中心位置
-            cloud = pv.PolyData(cloud_xyz)
-            p.add_mesh(
-                cloud,
-                scalars=np.asarray(object_pcds[obj_id].colors),
-                rgb=True,
-                point_size=5,
-                show_vertices=True,
-            )
-            p.add_point_labels(
-                [center],
-                [object_name],
-                font_size=8,
-                point_color="blue",
-                text_color="black")
+        room_id = obj_info["room_id"]
+        obj_centroid = np.mean(np.asarray(object_pcds[obj_id].points), axis=0)
 
-    # Show the visualization
-    p.show()
+        # Draw connection from room to object
+        plotter.add_mesh(
+            pv.Line(tuple(room_centroids_viz[room_id]), tuple(obj_centroid)),
+            line_width=1.5,
+            opacity=0.5,
+        )
+
+        # Add object point cloud
+        object_pcds[obj_id].paint_uniform_color(np.random.rand(3))
+        cloud_xyz = np.asarray(object_pcds[obj_id].points)
+        cloud = pv.PolyData(cloud_xyz)
+
+        plotter.add_mesh(
+            cloud,
+            scalars=np.asarray(object_pcds[obj_id].colors),
+            rgb=True,
+            point_size=config.point_size,
+            show_vertices=True,
+        )
+
+        plotter.add_point_labels(
+            [obj_centroid], [obj_info["name"]], font_size=8, point_color="blue", text_color="black"
+        )
+
+
+def _merge_configs(config_dict: DictConfig, cli_args: Dict) -> VisualizationConfig:
+    """Merge config file with CLI arguments."""
+    # merged = OmegaConf.to_container(config_dict)
+
+    # # Override with CLI arguments if provided
+    # for key, value in cli_args.items():
+    #     if value is not None:
+    #         merged[key] = value
+
+    # return VisualizationConfig(**merged)
+
+    # Chỉ lấy các field VisualizationConfig cần
+
+    main_cfg = config_dict.main
+
+    merged = {
+        "graph_path": main_cfg.graph_path,
+        "point_size": 5,
+        "min_object_points": 10,
+        "sphere_radius_floor": 0.5,
+        "sphere_radius_room": 0.15,
+        "ceiling_filter_margin": 0.4,
+        "color_brightness_room": 1.2,
+        "room_height_offset": 3.5,
+    }
+
+    # CLI override
+    for key, value in cli_args.items():
+        if value is not None:
+            merged[key] = value
+
+    return VisualizationConfig(**merged)
+
+@hydra.main(
+    version_base=None, config_path="../config/visualize_graph", config_name="visualize_query_graph"
+)
+def main(params: DictConfig) -> None:
+    """Main visualization function with CLI argument support."""
+    # Parse CLI arguments for config override
+    # parser = argparse.ArgumentParser(description="Visualize scene graph")
+    # parser.add_argument("--graph-path", type=str, default=None, help="Path to graph directory")
+    # parser.add_argument("--point-size", type=int, default=None, help="Point size in visualization")
+    # parser.add_argument(
+    #     "--min-object-points", type=int, default=None, help="Minimum points for object inclusion"
+    # )
+    # args = parser.parse_args()
+
+    # # Merge config with CLI arguments
+    # cli_overrides = {
+    #     "graph_path": args.graph_path,
+    #     "point_size": args.point_size,
+    #     "min_object_points": args.min_object_points,
+    # }\
+
+
+    cli_overrides = {}
+    config = _merge_configs(params, cli_overrides)
+
+    logger.info(f"Using config: {config}")
+
+    # Initialize plotter
+    plotter = pv.Plotter()
+
+    # Load data
+    logger.info("Loading floors...")
+    floor_pcds, floor_infos, hier_topo = _load_floors(config.graph_path, config)
+
+    logger.info("Loading rooms...")
+    room_pcds, room_infos = _load_rooms(config.graph_path, floor_infos, config)
+
+    logger.info("Loading objects...")
+    object_pcds, object_infos, object_feats = _load_objects(
+        config.graph_path, floor_infos, room_infos
+    )
+
+    # Update hierarchy
+    for obj_id, obj_info in object_infos.items():
+        room_id = obj_info["room_id"]
+        floor_id = room_infos[room_id]["floor_id"]
+        hier_topo[floor_id][room_id].append(obj_id)
+
+    # Visualize
+    logger.info("Building visualization...")
+    _visualize_hierarchy(
+        plotter,
+        floor_pcds,
+        floor_infos,
+        room_pcds,
+        room_infos,
+        object_pcds,
+        object_infos,
+        hier_topo,
+        config,
+    )
+
+    logger.info("Showing visualization...")
+    plotter.show()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

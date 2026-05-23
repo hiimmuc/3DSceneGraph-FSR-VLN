@@ -1,0 +1,10 @@
+# @package _global_
+main:
+    scene_id: icra_ic4f
+    dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
+    save_path: /mnt/holoagent/fsrvln/scene_graphs_opensource
+    depth_cut: 10.0
+
+pipeline:
+    skip_frames: 8
+    obj_labels: SCANNET200

@@ -1,0 +1,230 @@
+"""Vision-language model utilities for image-based spatial reasoning."""
+
+import base64
+import os
+import re
+import time
+from typing import List, Optional, Tuple
+
+import numpy as np
+
+
+def _img_to_data_uri(path: str) -> str:
+    """Convert a local image file path to a base64 data URI.
+
+    Ollama's OpenAI-compatible endpoint does not accept raw file paths;
+    images must be embedded as ``data:image/<type>;base64,<data>`` URIs.
+    Paths that already look like HTTP(S) URLs are returned unchanged.
+    """
+    if path.startswith(("http://", "https://", "data:")):
+        return path
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif", "webp": "webp"}.get(
+        ext, "jpeg"
+    )
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:image/{mime};base64,{encoded}"
+
+
+class VLMClient:
+    """Vision-language reasoning client.
+
+    Wraps an OpenAI-compatible multimodal endpoint to provide image-grounded
+    reasoning operations: object detection, frame selection, and query generation.
+
+    Usage::
+
+        from memory.hmsg.tools.llm import create_llm_client
+        from memory.hmsg.tools.vlm import VLMClient
+
+        client, model = create_llm_client()
+        vlm = VLMClient(client, model)
+
+        queries = vlm.generate_object_queries("find a sofa in the living room")
+        best_frame = vlm.choose_best_frame(image_paths, instruction)
+        has_obj = vlm.detect_in_image(img_path, "chair")
+    """
+
+    def __init__(self, client, model: str) -> None:
+        self._client = client
+        self._model = model
+
+    # ------------------------------------------------------------------
+    # Core primitives
+    # ------------------------------------------------------------------
+
+    def call(self, messages: list, seed: int = 123) -> str:
+        """Send *messages* to the VLM with automatic retry on transient errors."""
+        while True:
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self._model, messages=messages, seed=seed
+                )
+                return resp.choices[0].message.content
+            except Exception as exc:
+                print(exc)
+                time.sleep(1)
+                print("Retrying ...")
+
+    def float_score(self, img_path: str, query: str) -> float:
+        """Ask the VLM for a [0, 1] presence score for *query* in *img_path*.
+
+        Returns 0.0 if the response cannot be parsed as a float in [0, 1].
+        """
+        prompt = (
+            f"On a scale from 0 to 1, how strongly does this image contain a '{query}'? "
+            "Respond only with a single number (e.g., 0.73)."
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an object detector. "
+                    "Answer only with a single number between 0 and 1, no text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": _img_to_data_uri(img_path)}},
+                ],
+            },
+        ]
+        raw = self.call(messages)
+        try:
+            score = float(raw.strip())
+            return score if 0.0 <= score <= 1.0 else 0.0
+        except Exception:
+            return 0.0
+
+    # ------------------------------------------------------------------
+    # High-level reasoning operations
+    # ------------------------------------------------------------------
+
+    def generate_object_queries(self, instruction: str) -> List[str]:
+        """Extract CLIP-ready search phrases from a navigation instruction.
+
+        Uses the VLM to infer the target object(s) and generate diverse
+        synonyms / descriptive variants for CLIP-based image retrieval.
+
+        Returns:
+            List of search phrases (empty list if no object is identifiable).
+        """
+        prompt = f"""
+You are an AI assistant for visual navigation, and your name is **Motion**. Please ignore all occurrences of the word Motion in the input instructions, as they do not represent navigation targets.
+
+Given a navigation instruction, extract the main target object(s) mentioned or implied.
+If the instruction does not explicitly mention an object, infer the most likely target object(s) based on common sense and the user's intent.
+Generate a diverse bullet list of English phrases for CLIP-based image retrieval, including synonyms and descriptive variants.
+If no clear object is mentioned, output an empty list.
+Instruction: {instruction}"""
+
+        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
+        response = self.call(messages)
+        text_probes = re.findall(r"-(.*?)\n", response)
+        text_probes = [item.strip(' "-') for item in text_probes]
+        return [item for item in text_probes if item]
+
+    def choose_best_frame(self, image_paths: List[str], instruction: str) -> str:
+        """Select the best frame from *image_paths* for the given *instruction*.
+
+        Returns the raw VLM response string containing a ``<frame_id>`` tag.
+        The caller is responsible for extracting the integer frame index.
+        """
+        system_prompt = (
+            "You are a robot operating in an indoor environment and your task is to respond "
+            "to the user command about going to a specific location by finding the closest "
+            "frame in the provided locations to navigate to."
+        )
+        video_prompt = []
+        for i, img_path in enumerate(image_paths):
+            video_prompt.append({"type": "text", "text": f"Frame:{i}"})
+            video_prompt.append(
+                {"type": "image_url", "image_url": {"url": _img_to_data_uri(img_path)}}
+            )
+        instruction_prompt = (
+            f"User says: {instruction}. "
+            "Can you find the closet frame in the provided locations to navigate to?"
+        )
+        rules_prompt = (
+            "Rules to follow:\n"
+            "1. Output the frame id (integer) wrapped in the <frame_id> tag.\n"
+            "2. Carefully compare the candidate locations with the user instruction and select "
+            "the closest one.  Describe the image you choose in detail to justify your choice "
+            "after you respond the frame_id."
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    *video_prompt,
+                    {"type": "text", "text": system_prompt},
+                    {"type": "text", "text": instruction_prompt},
+                    {"type": "text", "text": rules_prompt},
+                ],
+            }
+        ]
+        return self.call(messages)
+
+    def detect_and_select(
+        self, img_list: List[str], query: str, score_threshold: float = 0.5
+    ) -> Tuple[List[bool], Optional[str]]:
+        """Detect *query* in each image and return ``(results, best_image_path)``.
+
+        Two-step pipeline per image:
+          1. Yes/no gate — fast binary check.
+          2. Float scoring — ranks confirmed positives on [0, 1].
+
+        Images that pass the gate but score below *score_threshold* are
+        demoted to negative.
+
+        Returns:
+            results: Per-image boolean detection flags.
+            best_image_path: Path of the highest-scoring image, or None if
+                             no image passed detection.
+        """
+        results, scores = [], []
+        for img in img_list:
+            prompt_yesno = (
+                f"Does this image contain a '{query}'? Answer strictly with 'yes' or 'no'."
+            )
+            messages_yesno = [
+                {
+                    "role": "system",
+                    "content": "You are an object detector. Answer only 'yes' or 'no', no explanation.",
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_yesno},
+                        {"type": "image_url", "image_url": {"url": _img_to_data_uri(img)}},
+                    ],
+                },
+            ]
+            ans_raw = self.call(messages_yesno).strip().lower()
+            has_object = ans_raw == "yes"
+
+            score = 0.0
+            if has_object:
+                score = self.float_score(img, query)
+                if score < score_threshold:
+                    has_object = False
+
+            results.append(has_object)
+            scores.append(score)
+            print(
+                f"[VLM] Image: {img} → raw_yesno='{ans_raw}', score={score:.3f}, "
+                f"has_object={has_object}, query={query}"
+            )
+
+        best_image = img_list[int(np.argmax(scores))] if any(results) else None
+        return results, best_image
+
+    def detect_in_image(self, img_path: str, query: str, score_threshold: float = 0.3) -> bool:
+        """Return True if *query* object is present in *img_path* with sufficient confidence."""
+        score = self.float_score(img_path, query)
+        has_object = score >= score_threshold
+        print(f"[VLM] {img_path} → score={score:.3f}, has_object={has_object}")
+        return has_object

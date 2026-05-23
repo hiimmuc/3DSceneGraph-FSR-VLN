@@ -1,106 +1,203 @@
 """This file contains the class definition for the Object in HMSG."""
-import json
-import os
+
+from typing import Union
 
 import numpy as np
-import open3d as o3d
+from memory.hmsg.graph.persistence import EntityPersistence, PersistenceHandler
 
 
-class Object:
+class Object(PersistenceHandler):
+    """Class to represent an object in a room.
+
+    Args:
+        object_id: Unique identifier for the object
+        room_id: Identifier of the room this object belongs to
+        name: Name of the object (e.g., "Chair", "Table")
     """
-    Class to represent an object in a room.
 
-    :param object_id: Unique identifier for the object
-    :param room_id: Identifier of the room this object belongs to
-    :param name: Name of the object (e.g., "Chair", "Table")
-    """
+    def __init__(self, object_id: Union[str, int], room_id: Union[str, int], name: str = None):
+        """Initialize an Object entity.
 
-    def __init__(self, object_id, room_id, name=None):
-        self.object_id = object_id  # Unique identifier for the object
-        self.vertices = None  # Coordinates of the object in the point cloud 8 vertices
-        self.embedding = None  # CLIP Embedding of the object
-        self.pcd = None  # Point cloud of the object
-        self.room_id = room_id  # Identifier of the room this object belongs to
-        self.name = name  # Name of the object (e.g., "Chair", "Table")
-        self.gt_name = None
-        self.best_view_id = None  # best view id for the object
-        self.view_ids = []  # view id the object belongs to
-
-    def set_vertices(self, vertices):
+        Args:
+            object_id: Unique identifier for the object
+            room_id: Identifier of the room this object belongs to
+            name: Name of the object
         """
-        Method to set the vertices of the object :param vertices:
+        self._object_id = object_id
+        self._room_id = room_id
+        self._name = name
+        self._vertices = None
+        self._embedding = None
+        self._pcd = None
+        self._gt_name = None
+        self._best_view_id = None
+        self._view_ids: list = []
 
-        Coordinates of the object in the point cloud 8 vertices.
+    # Properties for better encapsulation (OCP: Open/Closed Principle)
+    @property
+    def object_id(self):
+        return self._object_id
+
+    @property
+    def room_id(self):
+        return self._room_id
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value: str):
+        self._name = value
+
+    @property
+    def vertices(self):
+        return self._vertices
+
+    @vertices.setter
+    def vertices(self, value):
+        self._vertices = value
+
+    @property
+    def embedding(self):
+        return self._embedding
+
+    @embedding.setter
+    def embedding(self, value):
+        self._embedding = value
+
+    @property
+    def pcd(self):
+        return self._pcd
+
+    @pcd.setter
+    def pcd(self, value):
+        self._pcd = value
+
+    @property
+    def gt_name(self):
+        return self._gt_name
+
+    @gt_name.setter
+    def gt_name(self, value: str):
+        self._gt_name = value
+
+    @property
+    def best_view_id(self):
+        return self._best_view_id
+
+    @best_view_id.setter
+    def best_view_id(self, value):
+        self._best_view_id = value
+
+    @property
+    def view_ids(self):
+        return self._view_ids
+
+    def add_view(self, view_id: Union[int, str]) -> None:
+        """Add a view ID to the object's list of views.
+
+        Args:
+            view_id: View identifier to add
         """
-        self.vertices = vertices  # Method to set the vertices of the object
+        if view_id not in self._view_ids:
+            self._view_ids.append(view_id)
 
-    def save(self, path):
-        """Save the object in folder as ply for the point cloud and json for
-        the metadata."""
-        # save the point cloud
-        o3d.io.write_point_cloud(
-            os.path.join(
-                path, str(
-                    self.object_id) + ".ply"), self.pcd)
-        # save the metadata
-        metadata = {
-            "object_id": self.object_id,
-            "vertices": np.array(
-                self.vertices).tolist(),
-            "room_id": self.room_id,
-            "name": self.name,
-            "embedding": self.embedding.tolist() if self.embedding is not None else "",
-            "view_ids": self.view_ids,
-            "best_view_id": self.best_view_id,
+    def serialize(self) -> dict:
+        """Serialize the object to a dictionary (SRP: Persistence handling).
+
+        Returns:
+            Dictionary with all object data
+        """
+        return {
+            "object_id": self._object_id,
+            "vertices": np.array(self._vertices).tolist() if self._vertices is not None else None,
+            "room_id": self._room_id,
+            "name": self._name,
+            "embedding": self._embedding.tolist() if self._embedding is not None else None,
+            "view_ids": self._view_ids,
+            "best_view_id": self._best_view_id,
+            "gt_name": self._gt_name,
         }
-        with open(os.path.join(path, str(self.object_id) + ".json"), "w") as outfile:
-            json.dump(metadata, outfile)
 
-    def load(self, path):
-        """Load the object from folder as ply for the point cloud and json for
-        the metadata."""
-        # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            os.path.join(path, str(self.object_id) + ".ply"))
-        # load the metadata
-        with open(path + "/" + str(self.object_id) + ".json") as json_file:
-            metadata = json.load(json_file)
-            self.vertices = np.asarray(metadata["vertices"])
-            self.room_id = metadata["room_id"]
-            self.name = metadata["name"]
-            self.embedding = np.asarray(
-                metadata["embedding"]) if metadata["embedding"] != "" else None
-            # self.view_ids = metadata["view_ids"]
-            # self.best_view_id = metadata["best_view_id"]
+    def deserialize(self, data: dict) -> None:
+        """Deserialize the object from a dictionary.
 
-    def load_new(self, path):
-        """Load the object from folder as ply for the point cloud and json for
-        the metadata."""
-        # load the point cloud
-        self.pcd = o3d.io.read_point_cloud(
-            os.path.join(path, str(self.object_id) + ".ply"))
-        # load the metadata
-        with open(path + "/" + str(self.object_id) + ".json") as json_file:
-            metadata = json.load(json_file)
-            self.vertices = np.asarray(metadata["vertices"])
-            self.room_id = metadata["room_id"]
-            self.name = metadata["name"]
-            self.embedding = np.asarray(
-                metadata["embedding"]) if metadata["embedding"] != "" else None
-            self.view_ids = metadata["view_ids"]
-            self.best_view_id = metadata["best_view_id"]
+        Args:
+            data: Dictionary with object data
+        """
+        self._vertices = np.asarray(data["vertices"]) if data.get("vertices") is not None else None
+        self._name = data.get("name")
+        self._embedding = (
+            np.asarray(data["embedding"]) if data.get("embedding") is not None else None
+        )
+        self._view_ids = data.get("view_ids", [])
+        self._best_view_id = data.get("best_view_id")
+        self._gt_name = data.get("gt_name")
 
-    def __add__(self, other):
-        """Method to add two objects together :param other: Object to add to
-        self."""
-        if self.pcd.is_empty():
-            return other
-        if other.pcd.is_empty():
-            return self
-        self.pcd += other.pcd
-        self.vertices = self.pcd.get_axis_aligned_bounding_box().get_box_points()
-        self.embedding = np.mean([self.embedding, other.embedding], axis=0)
+    def save(self, path: str) -> None:
+        """Save object to disk with point cloud and metadata.
+
+        Args:
+            path: Directory path to save the object
+        """
+        EntityPersistence.save_entity_with_pcd(
+            str(self._object_id), self.serialize(), self._pcd, path
+        )
+
+    def load(self, path: str, load_pcd: bool = True) -> None:
+        """Load object from disk (unified method replaces load and load_new).
+
+        Args:
+            path: Directory path to load the object from
+            load_pcd: Whether to load the point cloud (useful for metadata-only loading)
+        """
+        pcd, data = EntityPersistence.load_entity_with_pcd(str(self._object_id), path, load_pcd)
+        if pcd is not None:
+            self._pcd = pcd
+        self.deserialize(data)
+
+    def merge(self, other: "Object") -> "Object":
+        """Merge this object with another object (combine point clouds and embeddings).
+
+        Args:
+            other: Object to merge with
+
+        Returns:
+            Self for chaining operations
+        """
+        if self._pcd is None or self._pcd.is_empty():
+            self._pcd = other._pcd
+        elif other._pcd is not None and not other._pcd.is_empty():
+            self._pcd += other._pcd
+            self._vertices = self._pcd.get_axis_aligned_bounding_box().get_box_points()
+
+        # Merge embeddings by averaging
+        if self._embedding is not None and other._embedding is not None:
+            self._embedding = np.mean([self._embedding, other._embedding], axis=0)
+        elif other._embedding is not None:
+            self._embedding = other._embedding
+
+        # Merge view IDs
+        self._view_ids = list(set(self._view_ids + other._view_ids))
+
         return self
 
+    def __add__(self, other: "Object") -> "Object":
+        """Operator overload for merge using + operator.
+
+        Args:
+            other: Object to merge with
+
+        Returns:
+            Self after merging
+        """
+        return self.merge(other)
+
     def __str__(self) -> str:
-        return f"Name: {self.name}" + f"_{self.object_id}"
+        """String representation of the object."""
+        return f"{self.__class__.__name__}(id={self._object_id}, name={self._name}, room={self._room_id})"
+
+    def __repr__(self) -> str:
+        """Developer-friendly representation."""
+        return self.__str__()

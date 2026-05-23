@@ -1,29 +1,23 @@
-
-import os
 from abc import ABC, abstractmethod
+
+import cv2
 import numpy as np
 import open3d as o3d
-from scipy.spatial import cKDTree
-import cv2
-
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 
 class RGBDDataset(Dataset, ABC):
-    """
-    Abstract class for RGBD datasets.
+    """Abstract class for RGBD datasets.
 
     This class provides a base structure for loading RGBD datasets. Subclasses
-    need to implement the abstract methods to handle specific dataset formats.
-    """
+    need to implement the abstract methods to handle specific dataset formats."""
 
     def __init__(self, cfg):
-        """
-        Args:
-            root_dir: Path to the root directory containing the dataset.
-            mode: "train", "val", or "test" depending on the data split.
-            transforms: Optional transformations to apply to the data.
-        """
+        """Args:
+
+        root_dir: Path to the root directory containing the dataset.
+        mode: "train", "val", or "test" depending on the data split.
+        transforms: Optional transformations to apply to the data."""
         self.root_dir = cfg["root_dir"]
         self.transforms = cfg["transforms"]
         self.depth_cut = cfg["depth_cut"]
@@ -35,6 +29,7 @@ class RGBDDataset(Dataset, ABC):
     @abstractmethod
     def _get_data_list(self):
         """This method should be implemented by subclasses to define how to get
+
         a list of data samples (RGB and depth image paths) based on the dataset
         format and mode (train, val, test)."""
         pass
@@ -48,59 +43,57 @@ class RGBDDataset(Dataset, ABC):
 
     def _load_image(self, path):
         """This method should be implemented by subclasses to load the RGB
+
         image based on the dataset format (e.g., OpenCV, PIL)."""
         pass
 
     def _load_depth(self, path):
         """This method should be implemented by subclasses to load the depth
+
         image based on the dataset format (e.g., OpenCV, PIL)."""
         pass
 
     def _load_pose(self, path):
         """This method should be implemented by subclasses to load the camera
+
         pose based on the dataset format."""
         pass
 
     def _load_rgb_intrinsics(self, path):
         """This method should be implemented by subclasses to load the RGB
+
         camera intrinsics based on the dataset format."""
         pass
 
     def _load_depth_intrinsics(self, path):
         """This method should be implemented by subclasses to load the depth
+
         camera intrinsics based on the dataset format."""
         pass
 
     def create_pcd(
-            self,
-            rgb,
-            depth,
-            camera_pose=None,
-            idx=None,
-            mask_img=False,
-            filter_distance=np.inf):
-        """
-        Create Open3D point cloud from RGB and depth images, and camera pose.
+        self, rgb, depth, camera_pose=None, idx=None, mask_img=False, filter_distance=np.inf
+    ):
+        """Create Open3D point cloud from RGB and depth images, and camera pose.
 
         filter_distance is used to filter out points that are further than a
         certain distance.
-        :param rgb (pil image): RGB image
-        :param depth (pil image): Depth image
-        :param camera_pose (np.array): Camera pose
-        :param mask_img (bool): Mask image
-        :param filter_distance (float): Filter distance
-        :return: Open3D point cloud
-        """
+
+        Args:
+            rgb: (pil image): RGB image
+            depth: (pil image): Depth image
+            camera_pose: (np.array): Camera pose
+            mask_img: (bool): Mask image
+            filter_distance: (float): Filter distance
+
+        Returns:
+            Open3D point cloud"""
         # convert rgb and depth images to numpy arrays
         rgb = np.array(rgb).astype(np.uint8)
         depth = np.array(depth)
         # resize rgb image to match depth image size if needed
         if rgb.shape[0] != depth.shape[0] or rgb.shape[1] != depth.shape[1]:
-            rgb = cv2.resize(
-                rgb,
-                (depth.shape[1],
-                 depth.shape[0]),
-                interpolation=cv2.INTER_AREA)
+            rgb = cv2.resize(rgb, (depth.shape[1], depth.shape[0]), interpolation=cv2.INTER_AREA)
         # load depth camera intrinsics
         H = rgb.shape[0]
         W = rgb.shape[1]
@@ -114,39 +107,50 @@ class RGBDDataset(Dataset, ABC):
         # depth[clip_depth_mask] = 0
         if mask_img:
             depth = depth * rgb
-        mask = depth > 0
+        # Filter: positive, finite (no NaN/Inf from e.g. ZED 32FC1 invalid pixels)
+        mask = (depth > 0) & np.isfinite(depth)
         x = x[mask]
         y = y[mask]
         depth = depth[mask]
+        if depth.size == 0:
+            return o3d.geometry.PointCloud()
+
         # convert to 3D
         X = (x - camera_matrix[0, 2]) * depth / camera_matrix[0, 0]
         Y = (y - camera_matrix[1, 2]) * depth / camera_matrix[1, 1]
         Z = depth
-        # 该帧相机坐标系的平均深度
+
+        # Drop any NaN/Inf introduced by degenerate intrinsics
+        valid = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
+        X, Y, Z = X[valid], Y[valid], Z[valid]
+        if Z.size == 0:
+            return o3d.geometry.PointCloud()
+
+        # Mean depth in the camera coordinate system for this frame
         if Z.mean() > filter_distance:
             return o3d.geometry.PointCloud()
         # convert to open3d point cloud
-        points = np.hstack(
-            (X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
+        points = np.hstack((X.reshape(-1, 1), Y.reshape(-1, 1), Z.reshape(-1, 1)))
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         if not mask_img:
-            colors = rgb[mask]
+            colors = rgb[mask][valid]
             pcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
-        # 相机系点云转换到世界坐标系
+        # Transform point cloud from camera coordinates to world coordinates
         pcd.transform(camera_pose)
         return pcd
 
     def create_3d_masks(
-            self,
-            masks,
-            depth,
-            full_pcd,
-            full_pcd_tree,
-            camera_pose,
-            idx=None,
-            down_size=0.02,
-            filter_distance=None):
+        self,
+        masks,
+        depth,
+        full_pcd,
+        full_pcd_tree,
+        camera_pose,
+        idx=None,
+        down_size=0.02,
+        filter_distance=None,
+    ):
         """
         create 3d masks from 2D masks
         Args:
@@ -170,12 +174,8 @@ class RGBDDataset(Dataset, ABC):
             mask = np.array(mask)
             # create pcd from mask
             pcd_masked = self.create_pcd(
-                mask,
-                depth,
-                camera_pose,
-                idx=None,
-                mask_img=True,
-                filter_distance=filter_distance)
+                mask, depth, camera_pose, idx=None, mask_img=True, filter_distance=filter_distance
+            )
             # using KD-Tree to find the nearest points in the point cloud
             pcd_masked = np.asarray(pcd_masked.points)
             dist, indices = full_pcd_tree.query(pcd_masked, k=1, workers=-1)

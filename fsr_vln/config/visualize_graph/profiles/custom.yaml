@@ -1,0 +1,26 @@
+# @package main
+# Custom profile — fill in your scene-specific values below, or override via CLI:
+#   python visualize_query_graph.py profiles=custom main.graph_path=/path/to/graph
+scene_id: office_36f
+dataset: custom
+depth_cut: 6.0
+
+dataset_path: ../../data/horizon/
+save_path: outputs/built_graphs
+graph_path: outputs/built_graphs/custom/office_36f/graph_20260515053453
+
+room_generation_method: obj_embedding # label | obj_embedding | view_embedding
+room_types:
+    - living room
+    - bedroom
+    - kitchen
+    - bathroom
+    - dining room
+    - office
+    - storage room
+room_names_human_assign: []
+long_query:
+    spec: [obj, room, floor]
+
+pipeline:
+    obj_labels: FINALLABEL # label registry key: FINALLABEL | SCANNET200

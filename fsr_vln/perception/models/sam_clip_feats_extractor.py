@@ -1,82 +1,79 @@
-import argparse
-import ast
-from pathlib import Path
-import time
-
-import cv2
-import matplotlib.pyplot as plt
 import numpy as np
-import open_clip
-from PIL import Image
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 import torch
-
 from memory.hmsg.utils.clip_utils import get_img_feats, get_img_feats_batch
-from memory.hmsg.utils.sam_utils import crop_all_bounding_boxs, filter_masks
+from memory.hmsg.utils.sam_utils import crop_all_bounding_boxs
 
 
 def extract_feats_raw(
-        image,
-        mask_generator,
-        clip_model,
-        preprocess,
-        clip_feat_dim=768,
-        bbox_margin=0,
-        maskedd_weight=0.75):
-    """
-    Estimate the feature for each pixel in the image.
+    image,
+    mask_generator,
+    clip_model,
+    preprocess,
+    clip_feat_dim=768,
+    bbox_margin=0,
+    masked_weight=0.75,
+):
+    """Estimate the feature for each pixel in the image.
 
-    args:
+    Args:
         image: input image.
         mask_generator: sam model.
         clip_model: clip model.
         preprocess: clip preprocess.
         clip_feat_dim: clip feature dimension.
-        bbox_margin: margin for croped bounding box.
-        maskedd_weight: weight for masked background.
-    return:
-        outfeat: pixel level feature.
+        bbox_margin: margin for cropped bounding box.
+        masked_weight: weight for masked background.
+        return:
+        out_feat: pixel level feature.
         F_masks: feature for each mask.
         masks: all masks.
-        croped_images: croped images.
-        croped_images_masked: croped images with masked background.
-    """
+        cropped_images: cropped images.
+        cropped_images_masked: cropped images with masked background.
+
+    Returns:
+        out_feat: pixel level feature.
+    F_masks: feature for each mask.
+    masks: all masks.
+    cropped_images: cropped images.
+    cropped_images_masked: cropped images with masked background."""
     LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH = image.shape[0], image.shape[1]
     # run SAM on the full image.
     masks = mask_generator.generate(image)
     # run CLIP on the full image.
     F_g = get_img_feats(image, preprocess, clip_model)
     # crop all masks above certain thershold.
-    croped_images = crop_all_bounding_boxs(
-        image, masks, block_background=False, bbox_margin=bbox_margin)
-    croped_images_masked = crop_all_bounding_boxs(
-        image, masks, block_background=True, bbox_margin=bbox_margin)
-    number_of_masks = len(croped_images)
-    # run CLIP on all croped images.
+    cropped_images = crop_all_bounding_boxs(
+        image, masks, block_background=False, bbox_margin=bbox_margin
+    )
+    cropped_images_masked = crop_all_bounding_boxs(
+        image, masks, block_background=True, bbox_margin=bbox_margin
+    )
+
+    # run CLIP on all cropped images.
     F_l = []
-    for img, img_masked in zip(croped_images, croped_images_masked):
+    for img, img_masked in zip(cropped_images, cropped_images_masked):
         f_l_masked = get_img_feats(img_masked, preprocess, clip_model)
         f_l = get_img_feats(img, preprocess, clip_model)
-        f_l = maskedd_weight * f_l_masked + (1 - maskedd_weight) * f_l
-        f_l = torch.nn.functional.normalize(
-            torch.from_numpy(f_l), p=2, dim=-1).cpu().numpy()
+        f_l = masked_weight * f_l_masked + (1 - masked_weight) * f_l
+        f_l = torch.nn.functional.normalize(torch.from_numpy(f_l), p=2, dim=-1).cpu().numpy()
         F_l.append(f_l)
     F_l = np.array(F_l)
     F_l = torch.from_numpy(F_l).cuda()
     F_masks = F_l
     # interpolate F_p to the original image size
-    outfeat = torch.zeros(
-        LOAD_IMG_HEIGHT,
-        LOAD_IMG_WIDTH,
-        clip_feat_dim).cuda()
+    out_feat = torch.zeros(LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH, clip_feat_dim).cuda()
     for i, mask in enumerate(masks):
-        non_zero_indices = torch.argwhere(torch.from_numpy(
-            np.array(mask["segmentation"])) == 1).cuda()
-        outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :] += F_l[i, :]
-        outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :] = torch.nn.functional.normalize(
-            outfeat[non_zero_indices[:, 0], non_zero_indices[:, 1], :], p=2, dim=-1)
-    outfeat = outfeat.half()
-    return outfeat.cpu(), F_masks.cpu(), masks, F_g
+        non_zero_indices = torch.argwhere(
+            torch.from_numpy(np.array(mask["segmentation"])) == 1
+        ).cuda()
+        out_feat[non_zero_indices[:, 0], non_zero_indices[:, 1], :] += F_l[i, :]
+        out_feat[non_zero_indices[:, 0], non_zero_indices[:, 1], :] = (
+            torch.nn.functional.normalize(
+                out_feat[non_zero_indices[:, 0], non_zero_indices[:, 1], :], p=2, dim=-1
+            )
+        )
+    out_feat = out_feat.half()
+    return out_feat.cpu(), F_masks.cpu(), masks, F_g
 
 
 def extract_feats_per_pixel(
@@ -86,80 +83,45 @@ def extract_feats_per_pixel(
     preprocess,
     clip_feat_dim=768,
     bbox_margin=0,
-    maskedd_weight=0.75,
+    masked_weight=0.75,
 ):
-    """
-    Estimate the feature for each pixel in the image using ConceptFusion
+    """Estimate the feature for each pixel in the image using ConceptFusion
+
     method.
 
-    args:
+    Args:
         image: input image.
         mask_generator: sam model.
         clip_model: clip model.
         preprocess: clip preprocess.
         clip_feat_dim: clip feature dimension.
-        bbox_margin: margin for croped bounding box.
-        maskedd_weight: weight for masked background.
-        save_masks_path: the directory to save or load the clip embeddings and SAM masks
-    return:
-        outfeat: pixel level feature.
+        bbox_margin: margin for cropped bounding box.
+        masked_weight: weight for masked background.
+
+    Returns:
+        out_feat: pixel level feature.
         F_masks: feature for each mask.
         masks: all masks.
-        croped_images: croped images.
-        croped_images_masked: croped images with masked background.
-        F_g: global CLIP embedding for the image
-    """
+        F_g: global CLIP embedding for the image"""
     LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH = image.shape[0], image.shape[1]
-    masks = None
 
-    # if nothing is loaded, then generate a mask with SAM
-    # print("before mask_generator")
     masks = mask_generator.generate(image)
-    # print("after mask_generator")
-    # cv2.imshow("image", image)
-    # cv2.waitKey(0)
-    # --- Step 4: 创建 weighted mask 可视化 ---
-    overlay = np.zeros_like(image, dtype=np.float32)
-    for mask in masks:
-        weight = mask["predicted_iou"]  # 或 mask["stability_score"]
-        color = np.random.rand(3)  # RGB in [0, 1]
-        # 将 color × weight 叠加到 overlay 中
-        mask_area = mask["segmentation"]
-        for c in range(3):
-            overlay[:, :, c] += mask_area * color[c] * weight
-    # --- Step 5: Normalize and blend with original image ---
-    overlay = (overlay - overlay.min()) / \
-        (overlay.max() - overlay.min())  # Normalize to [0, 1]
-    overlay_uint8 = (overlay * 255).astype(np.uint8)
-    # 可选：混合原图与 weighted mask（alpha 叠加）
-    alpha = 0.8
-    blended = cv2.addWeighted(image, 1 - alpha, overlay_uint8, alpha, 0)
-    # cv2.imshow("sam", blended)
-    # cv2.waitKey(10)
-    # print("here is ok")
 
-    # masks = filter_masks(masks)
-    # run CLIP on the full image.
-    F_g = None
-    cropped_masked_feats = None
-    cropped_feats = None
-    if F_g is None and cropped_masked_feats is None and cropped_feats is None:
-        F_g = get_img_feats(image, preprocess, clip_model)
-        # crop all masks above certain thershold.
-        croped_images = crop_all_bounding_boxs(
-            image, masks, block_background=False, bbox_margin=bbox_margin)
-        croped_images_masked = crop_all_bounding_boxs(
-            image, masks, block_background=True, bbox_margin=bbox_margin)
-        number_of_masks = len(croped_images)
-        # run CLIP on all cropped images.
-        cropped_masked_feats = get_img_feats_batch(
-            croped_images_masked, preprocess, clip_model)
-        cropped_feats = get_img_feats_batch(
-            croped_images, preprocess, clip_model)
+    F_g = get_img_feats(image, preprocess, clip_model)
+    cropped_images = crop_all_bounding_boxs(
+        image, masks, block_background=False, bbox_margin=bbox_margin
+    )
+    cropped_images_masked = crop_all_bounding_boxs(
+        image, masks, block_background=True, bbox_margin=bbox_margin
+    )
+    number_of_masks = len(cropped_images)
+    cropped_masked_feats = get_img_feats_batch(cropped_images_masked, preprocess, clip_model)
+    cropped_feats = get_img_feats_batch(cropped_images, preprocess, clip_model)
+
     fused_crop_feats = torch.from_numpy(
-        maskedd_weight * cropped_masked_feats + (1 - maskedd_weight) * cropped_feats)
-    F_l = torch.nn.functional.normalize(
-        fused_crop_feats, p=2, dim=-1).cpu().numpy()
+        masked_weight * cropped_masked_feats + (1 - masked_weight) * cropped_feats
+    )
+    F_l = torch.nn.functional.normalize(fused_crop_feats, p=2, dim=-1).cpu().numpy()
     if F_l.shape[0] == 0:
         return None, None, None
     # 1. compute the cosine similarity etween the local feature fLi and the
@@ -175,17 +137,14 @@ def extract_feats_per_pixel(
     F_p = torch.nn.functional.normalize(F_p, p=2, dim=-1)
     # 7. interpolate F_p to the original image size
     F_p = F_p.cuda()
-    outfeat = torch.zeros(
-        LOAD_IMG_HEIGHT *
-        LOAD_IMG_WIDTH,
-        clip_feat_dim,
-        device="cuda")
-    non_zero_ids = torch.from_numpy(
-        np.array([mask["segmentation"] for mask in masks])).reshape((len(masks), -1))
+    out_feat = torch.zeros(LOAD_IMG_HEIGHT * LOAD_IMG_WIDTH, clip_feat_dim, device="cuda")
+    non_zero_ids = torch.from_numpy(np.array([mask["segmentation"] for mask in masks])).reshape(
+        (len(masks), -1)
+    )
     for i, mask in enumerate(masks):
         non_zero_indices = torch.argwhere(non_zero_ids[i] == 1).cuda()
-        outfeat[non_zero_indices, :] += F_p[i, :]
-    outfeat = torch.nn.functional.normalize(outfeat, p=2, dim=-1)
-    outfeat = outfeat.half()
-    outfeat = outfeat.reshape((LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH, clip_feat_dim))
-    return outfeat.cpu(), F_p.cpu(), masks, F_g
+        out_feat[non_zero_indices, :] += F_p[i, :]
+    out_feat = torch.nn.functional.normalize(out_feat, p=2, dim=-1)
+    out_feat = out_feat.half()
+    out_feat = out_feat.reshape((LOAD_IMG_HEIGHT, LOAD_IMG_WIDTH, clip_feat_dim))
+    return out_feat.cpu(), F_p.cpu(), masks, F_g

@@ -1,1 +1,0 @@
-python -m habitat_sim.utils.datasets_download --username xxxxxx --password xxxxxx --uids hm3d_val_v0.2

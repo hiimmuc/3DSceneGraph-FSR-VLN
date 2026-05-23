@@ -1,43 +1,33 @@
-from collections import defaultdict
 import copy
-import glob
 import json
-from multiprocessing import current_process, Process, Queue
 import os
-import random
-import sys
 import time
-from typing import Dict, List, Tuple, Union, Any
+from typing import Any, Dict, List
 
 import cv2
 import matplotlib.pyplot as plt
 import networkx as nx
-from networkx.readwrite import json_graph
 import numpy as np
 import open3d as o3d
-import pyvista as pv
-from scipy.ndimage import binary_closing, binary_dilation, binary_erosion, median_filter
-from scipy.signal import find_peaks
-from scipy.spatial import Delaunay, Voronoi, voronoi_plot_2d
-from scipy.spatial.distance import cdist
 import skfmm
+from memory.hmsg.graph.floor import Floor
+from memory.hmsg.graph.object import Object
+from memory.hmsg.utils.clip_utils import get_text_feats_62_templates
+from memory.hmsg.utils.constants import MATTERPORT_LABELS_40
+from scipy.ndimage import binary_closing, binary_erosion, median_filter
+from scipy.signal import find_peaks
+from scipy.spatial import Voronoi
+from scipy.spatial.distance import cdist
 from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 
-from memory.hmsg.graph.floor import Floor
-from memory.hmsg.graph.object import Object
-from memory.hmsg.utils.constants import MATTERPORT_LABELS_40
-from memory.hmsg.utils.clip_utils import get_text_feats_62_templates
-
-# change matplotlib backend to a gui one
-plt.switch_backend("TkAgg")
+plt.switch_backend("Agg")
 
 
 def compute_sdf(boundary_mask, distance_scale=1):
     dx = 1  # downsample factor
     f = distance_scale / dx  # distance function scale
 
-    # cv2.resize(boundary_map, None, fx=1/dx, fy=1/dx, interpolation=cv2.INTER_NEAREST)
     sdf = skfmm.distance(1 - boundary_mask)
     sdf[sdf > f] = f
     sdf = sdf / f
@@ -47,28 +37,17 @@ def compute_sdf(boundary_mask, distance_scale=1):
 
 class NavigationGraph:
     def __init__(self, floor_pcd: o3d.geometry.PointCloud, cell_size: int):
-        """
-        Initialization of the NavigationGraph class.
+        """Initialization of the NavigationGraph class.
 
         Args:
             floor_pcd (o3d.geometry.PointCloud): The point cloud of the floor.
-            cell_size (int): the resolution of the cell (m/cell)
-        """
+            cell_size (int): the resolution of the cell (m/cell)"""
         self.pcd_min = np.min(np.array(floor_pcd.points), axis=0)
         self.pcd_max = np.max(np.array(floor_pcd.points), axis=0)
-        self.grid_size = np.ceil(
-            (self.pcd_max -
-             self.pcd_min) /
-            cell_size +
-            1).astype(
-            np.int32)
+        self.grid_size = np.ceil((self.pcd_max - self.pcd_min) / cell_size + 1).astype(np.int32)
         self.grid_size = self.grid_size[[0, 2]]
         self.cell_size = cell_size
         self.has_stairs = False
-        # self.midpoint = grid_size // 2
-        # assert self.grid_size % 2 == 0
-
-        # self.reset()
 
     def get_floor_poses(
         self,
@@ -95,9 +74,7 @@ class NavigationGraph:
         floor_max_height = np.max(np.asarray(floor.pcd.points)[:, 1])
         floor_poses_list = []
         upperbound = (
-            upper_floor_min_height
-            if upper_floor_min_height is not None
-            else floor_max_height
+            upper_floor_min_height if upper_floor_min_height is not None else floor_max_height
         )
         for pose in poses_list:
 
@@ -158,18 +135,12 @@ class NavigationGraph:
         """
         floor_pcd = np.array(floor_pcd.points)
         floor_zero_level = floor_info["floor_zero_level"]
-        floor_height = floor_info["floor_height"]
         # remove points above 2 meters from the floor
-        floor_pcd = floor_pcd[floor_pcd[:, 1] <
-                              floor_zero_level + height_region[1]]
+        floor_pcd = floor_pcd[floor_pcd[:, 1] < floor_zero_level + height_region[1]]
         # remove ground points (z < 0.1)
-        floor_pcd = floor_pcd[floor_pcd[:, 1] >
-                              floor_zero_level + height_region[0]]
+        floor_pcd = floor_pcd[floor_pcd[:, 1] > floor_zero_level + height_region[0]]
         # project to 2D
         floor_pcd = floor_pcd[:, [0, 2]]
-        # plot for debugging
-        # plt.scatter(floor_pcd[:, 0], floor_pcd[:, 1], s=1)
-        # plt.show()
         return floor_pcd
 
     def floor_region_vertices(
@@ -190,17 +161,13 @@ class NavigationGraph:
             floor_pcd (np.ndarray): The obstacle point cloud of the floor.
         """
         floor_pcd = np.array(floor_pcd.points)
-        floor_pcd = floor_pcd[
-            floor_pcd[:, 1] < floor_info["floor_zero_level"] + height_max
-        ]
+        floor_pcd = floor_pcd[floor_pcd[:, 1] < floor_info["floor_zero_level"] + height_max]
         floor_pcd = floor_pcd[:, [0, 2]]
         return floor_pcd
 
     def create_occupancy_grid(
-            self,
-            point_cloud: np.ndarray,
-            dilation_radius: int = 5,
-            filter_size: int = 3) -> np.ndarray:
+        self, point_cloud: np.ndarray, dilation_radius: int = 5, filter_size: int = 3
+    ) -> np.ndarray:
         """
         Create the occupancy grid map from the point cloud and apply dilation
         and smoothing.
@@ -236,8 +203,8 @@ class NavigationGraph:
         # apply guassian filter to smooth the occupancy grid map
         if filter_size > 0:
             occupancy_grid_map = cv2.GaussianBlur(
-                occupancy_grid_map.astype(
-                    np.float32), (filter_size, filter_size), 0)
+                occupancy_grid_map.astype(np.float32), (filter_size, filter_size), 0
+            )
 
         return occupancy_grid_map
 
@@ -281,9 +248,7 @@ class NavigationGraph:
             height_pos = np.array([rows, cols]).T
             dist_mat = cdist(inter_pos, height_pos)
             height_ids = np.argsort(dist_mat, axis=1)
-            for i, (int_row, int_col) in enumerate(
-                zip(interpolate_rows, interpolate_cols)
-            ):
+            for i, (int_row, int_col) in enumerate(zip(interpolate_rows, interpolate_cols)):
                 knn = min(knn, len(height_ids[0]))
                 row_col = height_pos[height_ids[i][:knn]]
                 height_list = height_map[row_col[:, 0], row_col[:, 1]]
@@ -291,11 +256,7 @@ class NavigationGraph:
 
         height_map = median_filter(height_map, size=3)
 
-        save_height_map = (
-            height_map.copy() /
-            np.max(height_map) *
-            255).astype(
-            np.uint8)
+        save_height_map = (height_map.copy() / np.max(height_map) * 255).astype(np.uint8)
         save_height_map = cv2.applyColorMap(save_height_map, cv2.COLORMAP_JET)
         cv2.imwrite(os.path.join(floor_dir, "height_map.png"), save_height_map)
 
@@ -352,12 +313,10 @@ class NavigationGraph:
         mask = clusters.labels_ == labels[id]
         major_height = np.mean(pose_heights[mask])
         if cluster:
-            poses_list = [pose for pose in poses_list if np.abs(
-                pose[1, 3] - major_height) < 0.1]
+            poses_list = [pose for pose in poses_list if np.abs(pose[1, 3] - major_height) < 0.1]
 
             poses_min = np.min(np.array(poses_list)[:, 1, 3])
-            poses_list = [
-                pose for pose in poses_list if pose[1, 3] < poses_min + 0.1]
+            poses_list = [pose for pose in poses_list if pose[1, 3] < poses_min + 0.1]
 
         poses_list = np.array(poses_list)
         poses_list = poses_list[:, [0, 2], 3]
@@ -365,15 +324,9 @@ class NavigationGraph:
         poses_list = np.int32(poses_list)
         poses_map = np.zeros(self.grid_size[::-1], dtype=np.uint8)
         for pose in poses_list:
-            cv2.circle(
-                poses_map, tuple(pose), int(
-                    radius / self.cell_size), 1, -1)
+            cv2.circle(poses_map, tuple(pose), int(radius / self.cell_size), 1, -1)
         if save:
-            cv2.imwrite(
-                os.path.join(
-                    floor_dir,
-                    f"poses_region_map.png"),
-                poses_map * 255)
+            cv2.imwrite(os.path.join(floor_dir, "poses_region_map.png"), poses_map * 255)
         return poses_map
 
     def get_main_free_map(
@@ -398,8 +351,7 @@ class NavigationGraph:
             main_free_map (np.ndarray): The free region grid map. 1 is free, 0 is occupied.
         """
         obstaces_vertices = self.obstacles_vertices(floor_pcd, floor_info)
-        floor_region_vertices = self.floor_region_vertices(
-            floor_pcd, floor_info)
+        floor_region_vertices = self.floor_region_vertices(floor_pcd, floor_info)
         floor_occupancy_map = self.create_occupancy_grid(floor_region_vertices)
         if save:
             os.makedirs(floor_dir, exist_ok=True)
@@ -407,18 +359,13 @@ class NavigationGraph:
                 os.path.join(floor_dir, "floor_region_no_closing.png"),
                 floor_occupancy_map.astype(np.uint8) * 255,
             )
-        # floor_occupancy_map = binary_closing(floor_occupancy_map, iterations=5)
         poses_map = self.get_poses_region(
             floor_poses_list, floor_dir=floor_dir, radius=0.5, save=save
         )
         np.logical_or(floor_occupancy_map, poses_map, out=floor_occupancy_map)
         self.map = self.create_occupancy_grid(obstaces_vertices)
         floor_free_map = floor_occupancy_map - self.map
-        floor_free_map = np.where(
-            floor_free_map < 0,
-            0,
-            floor_free_map).astype(
-            np.uint8)
+        floor_free_map = np.where(floor_free_map < 0, 0, floor_free_map).astype(np.uint8)
         main_free_map = self.get_largest_region(floor_free_map)
         if save:
             cv2.imwrite(
@@ -440,10 +387,8 @@ class NavigationGraph:
         return main_free_map
 
     def get_top_down_rgb_map(
-            self,
-            floor_pcd: o3d.geometry.PointCloud,
-            floor_info: Dict,
-            floor_dir: str) -> np.ndarray:
+        self, floor_pcd: o3d.geometry.PointCloud, floor_info: Dict, floor_dir: str
+    ) -> np.ndarray:
         """
         Generate the top-down RGB map of the floor.
 
@@ -458,23 +403,16 @@ class NavigationGraph:
         floor_point_cloud = np.asarray(floor_pcd.points)
         floor_point_color = np.asarray(floor_pcd.colors)
         zero_level = floor_info["floor_zero_level"]
-        floor_height = floor_info["floor_height"]
-        mask = floor_point_cloud[:, 1] < zero_level + 1.5  # floor_height - 0.5
+        mask = floor_point_cloud[:, 1] < zero_level + 1.5
         floor_point_cloud = floor_point_cloud[mask]
         floor_point_color = floor_point_color[mask]
-        floor_grid_vertices = np.int32(
-            (floor_point_cloud - self.pcd_min) / self.cell_size
-        )
-        top_down = np.zeros(
-            [self.grid_size[1], self.grid_size[0], 3], dtype=np.uint8)
-        top_down_height = -1000 * np.ones(
-            [self.grid_size[1], self.grid_size[0]], dtype=np.float32
-        )
+        floor_grid_vertices = np.int32((floor_point_cloud - self.pcd_min) / self.cell_size)
+        top_down = np.zeros([self.grid_size[1], self.grid_size[0], 3], dtype=np.uint8)
+        top_down_height = -1000 * np.ones([self.grid_size[1], self.grid_size[0]], dtype=np.float32)
         for p_i, floor_p in enumerate(floor_grid_vertices):
             col, height, row = floor_p
             if height > top_down_height[row, col]:
-                top_down[row, col] = (
-                    floor_point_color[p_i] * 255).astype(np.uint8)
+                top_down[row, col] = (floor_point_color[p_i] * 255).astype(np.uint8)
                 top_down_height[row, col] = height
         top_down = median_filter(top_down, size=3)
 
@@ -508,10 +446,7 @@ class NavigationGraph:
         Returns:
             nx.Graph: Resulting Voronoi graph.
         """
-        boundary_map = binary_erosion(
-            main_free_map,
-            iterations=1).astype(
-            np.uint8)
+        boundary_map = binary_erosion(main_free_map, iterations=1).astype(np.uint8)
         boundary_map = main_free_map - boundary_map
         cv2.imwrite(
             os.path.join(floor_dir, f"boundary_{name}.png"),
@@ -525,7 +460,6 @@ class NavigationGraph:
         fig_free = cv2.cvtColor(fig_free, cv2.COLOR_GRAY2BGR)
         map_bgr = cv2.cvtColor(map_rgb, cv2.COLOR_RGB2BGR)
         fig = map_bgr.copy()
-        vertices = []
         if height_map is None:
             height_map = np.ones_like(boundary_map) * self.pcd_min[1]
         voronoi_graph = nx.Graph()
@@ -565,8 +499,7 @@ class NavigationGraph:
                 1,
             )
             cv2.circle(fig, tuple(np.int32(src[::-1])), 2, (255, 0, 0), -1)
-            cv2.circle(fig_free, tuple(
-                np.int32(src[::-1])), 2, (255, 0, 0), -1)
+            cv2.circle(fig_free, tuple(np.int32(src[::-1])), 2, (255, 0, 0), -1)
 
             # check if src and tar already exist in the graph
             if (src[0], src[1], floor_id) not in voronoi_graph.nodes:
@@ -592,9 +525,7 @@ class NavigationGraph:
                     floor_id=floor_id,
                 )
             # check if the edge already exists
-            if (src[0], src[1], floor_id) not in voronoi_graph[
-                (tar[0], tar[1], floor_id)
-            ]:
+            if (src[0], src[1], floor_id) not in voronoi_graph[(tar[0], tar[1], floor_id)]:
                 voronoi_graph.add_edge(
                     (src[0], src[1], floor_id),
                     (tar[0], tar[1], floor_id),
@@ -603,13 +534,9 @@ class NavigationGraph:
 
         cv2.imwrite(os.path.join(floor_dir, f"vor_{name}.png"), fig)
         cv2.imwrite(os.path.join(floor_dir, f"vor_free_{name}.png"), fig_free)
-        # vertices = np.array(vertices)
         return voronoi_graph
 
-    def sparsify_graph(
-            self,
-            floor_graph: nx.Graph,
-            resampling_dist: float = 0.4):
+    def sparsify_graph(self, floor_graph: nx.Graph, resampling_dist: float = 0.4):
         """
         Sparsify a topology graph by removing nodes with degree 2.
 
@@ -628,9 +555,7 @@ class NavigationGraph:
         if len(graph.nodes) < 10:
             return graph
         # all nodes with degree 1 or 3+
-        new_node_candidates = [
-            node for node in list(graph.nodes) if (graph.degree(node) != 2)
-        ]
+        new_node_candidates = [node for node in list(graph.nodes) if (graph.degree(node) != 2)]
 
         new_graph = nx.Graph()
         for i, node in enumerate(new_node_candidates):
@@ -647,19 +572,13 @@ class NavigationGraph:
         )
 
         st = time.time()
-        all_path_dense_graph = dict(
-            nx.all_pairs_dijkstra_path(
-                graph, weight="dist"))
+        all_path_dense_graph = dict(nx.all_pairs_dijkstra_path(graph, weight="dist"))
         ed = time.time()
-        print(
-            "time for computing all pairs shortest path: ",
-            ed - st,
-            " seconds")
+        print("time for computing all pairs shortest path: ", ed - st, " seconds")
         sampled_edges_to_add = list()
         pbar = tqdm(range(len(new_graph.nodes)), desc="Sparsifying graph")
         for i in pbar:
-            inner_pbar = tqdm(range(len(new_graph.nodes)),
-                              desc="Sparsifying graph", leave=False)
+            inner_pbar = tqdm(range(len(new_graph.nodes)), desc="Sparsifying graph", leave=False)
             for j in inner_pbar:
                 if i >= j:
                     continue
@@ -680,15 +599,13 @@ class NavigationGraph:
                             )
                         )
                         dist = [
-                            graph.edges[path[k], path[k + 1]]["dist"]
-                            for k in range(len(path) - 1)
+                            graph.edges[path[k], path[k + 1]]["dist"] for k in range(len(path) - 1)
                         ]
                         mov_agg_dist = 0
                         predecessor = path[0]
                         # connect the nodes if there is a path between them
                         # that does not go through any other of the new nodes
-                        if (len(path) and len(
-                                set(path[1:-1]).intersection(new_nodes)) == 0):
+                        if len(path) and len(set(path[1:-1]).intersection(new_nodes)) == 0:
                             for cand_idx, cand_node in enumerate(path[1:-1]):
                                 mov_agg_dist += dist[cand_idx]
                                 if mov_agg_dist * self.cell_size > resampling_dist:
@@ -697,8 +614,7 @@ class NavigationGraph:
                                             predecessor,
                                             cand_node,
                                             np.linalg.norm(
-                                                np.array(predecessor)
-                                                - np.array(cand_node)
+                                                np.array(predecessor) - np.array(cand_node)
                                             ),
                                         )
                                     )
@@ -710,9 +626,7 @@ class NavigationGraph:
                                 (
                                     predecessor,
                                     path[-1],
-                                    np.linalg.norm(
-                                        np.array(predecessor) - np.array(path[-1])
-                                    ),
+                                    np.linalg.norm(np.array(predecessor) - np.array(path[-1])),
                                 )
                             )
                 except BaseException:
@@ -722,14 +636,12 @@ class NavigationGraph:
             k, l, dist = edge_param
             if k not in new_graph.nodes:
                 new_graph.add_node(
-                    k,
-                    pos=graph.nodes[k]["pos"],
-                    floor_id=graph.nodes[k]["floor_id"])
+                    k, pos=graph.nodes[k]["pos"], floor_id=graph.nodes[k]["floor_id"]
+                )
             if l not in new_graph.nodes:
                 new_graph.add_node(
-                    l,
-                    pos=graph.nodes[l]["pos"],
-                    floor_id=graph.nodes[l]["floor_id"])
+                    l, pos=graph.nodes[l]["pos"], floor_id=graph.nodes[l]["floor_id"]
+                )
             new_graph.add_edge(k, l, dist=dist)
 
         self.floor_graph = new_graph
@@ -748,9 +660,8 @@ class NavigationGraph:
         graph = copy.deepcopy(graph)
         while True:
             degree_one_nodes = [
-                node for node in list(
-                    graph.nodes) if (
-                    graph.degree(node) == trim_deg)]
+                node for node in list(graph.nodes) if (graph.degree(node) == trim_deg)
+            ]
             if len(degree_one_nodes) == 0:
                 break
             graph.remove_nodes_from(degree_one_nodes)
@@ -784,8 +695,6 @@ class NavigationGraph:
             cv2.circle(fig, tuple(v1), 2, (255, 0, 0), -1)
             cv2.circle(fig, tuple(v2), 2, (255, 0, 0), -1)
         cv2.imwrite(os.path.join(floor_dir, f"{name}.png"), fig)
-        # cv2.imshow(f"graph on map {name}", fig)
-        # cv2.waitKey()
         return fig
 
     def get_stairs_objects(
@@ -802,9 +711,7 @@ class NavigationGraph:
         Returns:
             stairs_list (List[Object]): The list of stairs objects.
         """
-        text_feats = get_text_feats_62_templates(
-            MATTERPORT_LABELS_40, clip_model, clip_feat_dim
-        )
+        text_feats = get_text_feats_62_templates(MATTERPORT_LABELS_40, clip_model, clip_feat_dim)
         stair_id = MATTERPORT_LABELS_40.index("stairs")
         print(stair_id)
         stairs_list = []
@@ -820,11 +727,9 @@ class NavigationGraph:
 
         return stairs_list
 
-    def get_stairs_graph_with_poses_v2(self,
-                                       floor: Floor,
-                                       floor_id: str,
-                                       poses_list: List[np.ndarray],
-                                       floor_dir: str) -> nx.Graph:
+    def get_stairs_graph_with_poses_v2(
+        self, floor: Floor, floor_id: str, poses_list: List[np.ndarray], floor_dir: str
+    ) -> nx.Graph:
         """
         A way of getting stairs graph based on the poses in between floors.
 
@@ -846,8 +751,7 @@ class NavigationGraph:
         pose_heights = np.array([pose[1, 3] - 1.5 for pose in poses_list])
         hist = np.histogram(pose_heights, bins=100)
         min_peak_height = 0.3 * np.max(hist[0])
-        input_hist = np.concatenate(
-            [[np.min(hist[0])], hist[0], [np.min(hist[0])]])
+        input_hist = np.concatenate([[np.min(hist[0])], hist[0], [np.min(hist[0])]])
         peaks, _ = find_peaks(input_hist, height=min_peak_height)
         peaks = peaks - 1
         plt.clf()
@@ -898,26 +802,15 @@ class NavigationGraph:
         for pose in stairs_poses:
             pos = pose[:3, 3]
             tar_poses.append(pos)
-            pos_2d = np.round(
-                (pos -
-                 self.pcd_min) /
-                self.cell_size).astype(
-                np.int32)
-            cv2.circle(top_down, tuple(
-                np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
-            cv2.imwrite(
-                os.path.join(
-                    floor_dir,
-                    "top_down_rgb_poses.png"),
-                top_down)
+            pos_2d = np.round((pos - self.pcd_min) / self.cell_size).astype(np.int32)
+            cv2.circle(top_down, tuple(np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
+            cv2.imwrite(os.path.join(floor_dir, "top_down_rgb_poses.png"), top_down)
 
         if len(tar_poses) == 0:
             self.has_stairs = False
             return nx.Graph()
 
         min_height = np.min([pos[1] for pos in tar_poses])
-        # cv2.imshow("stairs poses", top_down)
-        # cv2.waitKey()
         voronoi_graph = nx.Graph()
         last_pos = None
         for pos in tar_poses:
@@ -941,20 +834,15 @@ class NavigationGraph:
             else:
                 last_pos = pos_2d
 
-        sparse_voronoi_graph = self.sparsify_graph(
-            voronoi_graph, resampling_dist=0.4)
+        sparse_voronoi_graph = self.sparsify_graph(voronoi_graph, resampling_dist=0.4)
         # sparse_voronoi_graph = voronoi_graph
         self.has_stairs = True
-        self.draw_graph_on_map(
-            top_down, sparse_voronoi_graph, floor_dir, "sparse_vor_stairs"
-        )
+        self.draw_graph_on_map(top_down, sparse_voronoi_graph, floor_dir, "sparse_vor_stairs")
         return sparse_voronoi_graph
 
-    def get_stairs_graph_with_poses(self,
-                                    floor: Floor,
-                                    floor_id: str,
-                                    poses_list: List[np.ndarray],
-                                    floor_dir: str) -> nx.Graph:
+    def get_stairs_graph_with_poses(
+        self, floor: Floor, floor_id: str, poses_list: List[np.ndarray], floor_dir: str
+    ) -> nx.Graph:
         """
         A way of getting stairs graph based on the poses in between floors.
 
@@ -986,26 +874,16 @@ class NavigationGraph:
         id = np.argmax(counts)
         mask = clusters.labels_ == labels[id]
         major_height = np.mean(pose_heights[mask])
-        major_height_poses = [pose[:3, 3]
-                              for pose, m in zip(poses_list, mask) if m]
+        major_height_poses = [pose[:3, 3] for pose, m in zip(poses_list, mask) if m]
         for l in labels:
             print(np.mean(pose_heights[clusters.labels_ == l]))
-        non_min_height_poses = [pose[:3, 3]
-                                for pose in poses_list if pose[1, 3] > major_height + 0.1]
-        # clusters = DBSCAN(eps=0.5).fit(np.array(non_min_height_poses))
-        # labels, counts = np.unique(clusters.labels_, return_counts=True)
-        # id = np.argmax(counts)
-        # mask = clusters.labels_ == labels[id]
-        # non_min_height_poses = [pose for pose, m in zip(non_min_height_poses, mask) if m]
-        # find the closest pose in major_height_poses to the
-        # non_min_height_poses
-        dist_mat = cdist(
-            np.array(non_min_height_poses),
-            np.array(major_height_poses))
+        non_min_height_poses = [
+            pose[:3, 3] for pose in poses_list if pose[1, 3] > major_height + 0.1
+        ]
+        dist_mat = cdist(np.array(non_min_height_poses), np.array(major_height_poses))
         row, col = np.unravel_index(np.argmin(dist_mat), dist_mat.shape)
         non_min_height_poses.append(major_height_poses[col])
-        poses_sorted_by_height = sorted(
-            non_min_height_poses, key=lambda x: x[1])
+        poses_sorted_by_height = sorted(non_min_height_poses, key=lambda x: x[1])
         if len(poses_sorted_by_height) > 0:
             self.has_stairs = True
 
@@ -1014,32 +892,14 @@ class NavigationGraph:
         top_down_copy_1 = top_down.copy()
 
         for pose in non_min_height_poses:
-            pos_2d = np.round(
-                (pose -
-                 self.pcd_min) /
-                self.cell_size).astype(
-                np.int32)
-            cv2.circle(top_down, tuple(
-                np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
-            cv2.imwrite(
-                os.path.join(
-                    floor_dir,
-                    "top_down_rgb_poses.png"),
-                top_down)
+            pos_2d = np.round((pose - self.pcd_min) / self.cell_size).astype(np.int32)
+            cv2.circle(top_down, tuple(np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
+            cv2.imwrite(os.path.join(floor_dir, "top_down_rgb_poses.png"), top_down)
 
         for pose in major_height_poses:
-            pos_2d = np.round(
-                (pose -
-                 self.pcd_min) /
-                self.cell_size).astype(
-                np.int32)
-            cv2.circle(top_down_copy, tuple(
-                np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
-            cv2.imwrite(
-                os.path.join(
-                    floor_dir,
-                    "top_down_rgb_major_poses.png"),
-                top_down_copy)
+            pos_2d = np.round((pose - self.pcd_min) / self.cell_size).astype(np.int32)
+            cv2.circle(top_down_copy, tuple(np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
+            cv2.imwrite(os.path.join(floor_dir, "top_down_rgb_major_poses.png"), top_down_copy)
 
         rest_poses = []
         for pos in [*major_height_poses, *non_min_height_poses]:
@@ -1050,18 +910,9 @@ class NavigationGraph:
         print(rest_poses)
 
         for pose in all_poses:
-            pos_2d = np.round(
-                (pose -
-                 self.pcd_min) /
-                self.cell_size).astype(
-                np.int32)
-            cv2.circle(top_down_copy_1, tuple(
-                np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
-            cv2.imwrite(
-                os.path.join(
-                    floor_dir,
-                    "top_down_rgb_all_poses.png"),
-                top_down_copy_1)
+            pos_2d = np.round((pose - self.pcd_min) / self.cell_size).astype(np.int32)
+            cv2.circle(top_down_copy_1, tuple(np.int32(pos_2d[[0, 2]])), 2, (255, 0, 0), -1)
+            cv2.imwrite(os.path.join(floor_dir, "top_down_rgb_all_poses.png"), top_down_copy_1)
 
         tar_poses = []
         last_pose = np.ones(3) * -np.inf
@@ -1106,12 +957,9 @@ class NavigationGraph:
             else:
                 last_pos = pos_2d
 
-        # sparse_voronoi_graph = self.sparsify_graph(voronoi_graph, resampling_dist=0.4)
         sparse_voronoi_graph = voronoi_graph
         self.has_stairs = True
-        self.draw_graph_on_map(
-            top_down, sparse_voronoi_graph, floor_dir, "sparse_vor_stairs"
-        )
+        self.draw_graph_on_map(top_down, sparse_voronoi_graph, floor_dir, "sparse_vor_stairs")
         return sparse_voronoi_graph
 
     def get_stairs_graph(
@@ -1136,8 +984,7 @@ class NavigationGraph:
         Returns:
             spares_voronoi_graph (nx.Graph): The stairs graph.
         """
-        stairs_list = self.get_stairs_objects(
-            objects_list, clip_model, clip_feat_dim)
+        stairs_list = self.get_stairs_objects(objects_list, clip_model, clip_feat_dim)
 
         floor_stairs_list = []
         for obj in stairs_list:
@@ -1153,14 +1000,10 @@ class NavigationGraph:
         self.has_stairs = True
 
         # merge all points in floor_stairs_list
-        floor_stairs_pcd = np.concatenate(
-            [obj.pcd.points for obj in floor_stairs_list], axis=0
-        )
+        floor_stairs_pcd = np.concatenate([obj.pcd.points for obj in floor_stairs_list], axis=0)
 
         # save floor_stairs_pcd to ply
-        floor_stairs_pcd = o3d.geometry.PointCloud(
-            o3d.utility.Vector3dVector(floor_stairs_pcd)
-        )
+        floor_stairs_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(floor_stairs_pcd))
         save_path = os.path.join(floor_dir, f"floor_{floor_id}_stairs.ply")
         o3d.io.write_point_cloud(save_path, floor_stairs_pcd)
 
@@ -1178,23 +1021,11 @@ class NavigationGraph:
             os.path.join(floor_dir, "stairs_map_no_erosion.png"),
             stairs_map_no_erosion.astype(np.uint8) * 255,
         )
-        stairs_map = binary_erosion(
-            stairs_map_no_erosion,
-            iterations=5).astype(
-            np.uint8)
-        cv2.imwrite(
-            os.path.join(
-                floor_dir,
-                "stairs_map.png"),
-            stairs_map.astype(
-                np.uint8) *
-            255)
+        stairs_map = binary_erosion(stairs_map_no_erosion, iterations=5).astype(np.uint8)
+        cv2.imwrite(os.path.join(floor_dir, "stairs_map.png"), stairs_map.astype(np.uint8) * 255)
         stairs_height = self.get_height_map(
-            np.asarray(
-                floor_stairs_pcd.points),
-            floor_dir,
-            stairs_map_no_erosion,
-            10)
+            np.asarray(floor_stairs_pcd.points), floor_dir, stairs_map_no_erosion, 10
+        )
         stairs_voronoi = self.get_voronoi_graph(
             stairs_map,
             stairs_map,
@@ -1203,13 +1034,9 @@ class NavigationGraph:
             name="stairs",
             height_map=stairs_height,
         )
-        # sparse_stairs_voronoi = self.sparsify_graph(stairs_voronoi, resampling_dist=0.4)
         sparse_stairs_voronoi = stairs_voronoi
-        sparse_stairs_voronoi = self.trim_graph(
-            sparse_stairs_voronoi, trim_deg=1)
-        self.draw_graph_on_map(
-            stairs_map, sparse_stairs_voronoi, floor_dir, "sparse_vor_stairs"
-        )
+        sparse_stairs_voronoi = self.trim_graph(sparse_stairs_voronoi, trim_deg=1)
+        self.draw_graph_on_map(stairs_map, sparse_stairs_voronoi, floor_dir, "sparse_vor_stairs")
         return sparse_stairs_voronoi
 
     def get_floor_graph(
@@ -1238,15 +1065,10 @@ class NavigationGraph:
         voronoi_graph = self.get_voronoi_graph(
             main_free_map, top_down, floor_dir, int(floor.floor_id)
         )
-        # sparse_floor_voronoi = self.sparsify_graph(voronoi_graph, resampling_dist=0.4)
         sparse_floor_voronoi = voronoi_graph
 
-        self.draw_graph_on_map(
-            top_down, sparse_floor_voronoi, floor_dir, "sparse_vor_rgb"
-        )
-        self.draw_graph_on_map(
-            main_free_map, sparse_floor_voronoi, floor_dir, "sparse_vor"
-        )
+        self.draw_graph_on_map(top_down, sparse_floor_voronoi, floor_dir, "sparse_vor_rgb")
+        self.draw_graph_on_map(main_free_map, sparse_floor_voronoi, floor_dir, "sparse_vor")
 
         # save necessary data
         self.top_down = top_down
@@ -1291,22 +1113,22 @@ class NavigationGraph:
         floor_node = list(tar_graph.nodes)[col]
         print("stairs, floor")
         print(stair_node, floor_node)
-        print(src_graph.nodes[stair_node]["pos"],
-              tar_graph.nodes[floor_node]["pos"])
+        print(src_graph.nodes[stair_node]["pos"], tar_graph.nodes[floor_node]["pos"])
         print(
             src_graph.nodes[stair_node]["floor_id"],
             tar_graph.nodes[floor_node]["floor_id"],
         )
 
         tar_graph = nx.compose(tar_graph, src_graph)
-        tar_graph.add_edge(stair_node, floor_node, dist=np.linalg.norm(
-            np.array(stair_node[:2]) - np.array(floor_node[:2])), )
+        tar_graph.add_edge(
+            stair_node,
+            floor_node,
+            dist=np.linalg.norm(np.array(stair_node[:2]) - np.array(floor_node[:2])),
+        )
         if floor_dir is not None:
             fig = self.draw_graph_on_map(
-                self.top_down,
-                tar_graph,
-                floor_dir,
-                "vor_rgb_combined_highlighted")
+                self.top_down, tar_graph, floor_dir, "vor_rgb_combined_highlighted"
+            )
             src_pos = np.int32([stair_node[1], stair_node[0]])
             tar_pos = np.int32([floor_node[1], floor_node[0]])
             cv2.circle(fig, tuple(src_pos), 3, (0, 255, 0), -1)
@@ -1337,22 +1159,18 @@ class NavigationGraph:
         sparse_floor_voronoi = self.connect_voronoi_graphs(
             sparse_stairs_voronoi, sparse_floor_voronoi, floor_dir
         )
-        self.draw_graph_on_map(
-            self.top_down, sparse_floor_voronoi, floor_dir, "vor_rgb_combined"
-        )
+        self.draw_graph_on_map(self.top_down, sparse_floor_voronoi, floor_dir, "vor_rgb_combined")
         self.sparse_floor_voronoi = sparse_floor_voronoi
         return sparse_floor_voronoi
 
     @staticmethod
     def save_voronoi_graph(graph: nx.Graph, floor_dir: str, name: str) -> None:
-        """
-        Save the Voronoi graph to a json file.
+        """Save the Voronoi graph to a json file.
 
         Args:
             graph (nx.Graph): The Voronoi graph.
             floor_dir (str): The directory where the intermediate results are stored.
-            name (str): The name of the file.
-        """
+            name (str): The name of the file."""
         graph_path = os.path.join(floor_dir, f"{name}_graph.json")
         graph_json = nx.node_link_data(graph)
         with open(graph_path, "w") as f:

@@ -1,0 +1,11 @@
+# @package _global_
+main:
+    scene_id: icra_sh3f
+    dataset_path: /mnt/holoagent/fsrvln/rgbd_datasets/
+    save_path: /mnt/holoagent/fsrvln/scene_graphs_opensource
+    depth_cut: 6.0
+
+pipeline:
+    voxel_size: 0.02
+    skip_frames: 8
+    obj_labels: FINALLABEL
