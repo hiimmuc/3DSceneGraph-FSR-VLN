@@ -30,9 +30,10 @@ MultiSession::Session::Session(int _idx, std::string _name,
   const float kICPFilterSize = 0.2;  // TODO move to yaml
   downSizeFilterICP.setLeafSize(kICPFilterSize, kICPFilterSize, kICPFilterSize);
 
-  loadSessionGraph();
+  if(!loadSessionGraph()){
+    loadKeyframePose();
+  }
   loadGlobalMap();
-
   loadSessionKeyframePointclouds();
   loadSessionScanContextDescriptors();
 }  // ctor
@@ -154,10 +155,61 @@ void MultiSession::Session::loopFindNearKeyframesLocalCoord(
   nearKeyframes.all_cloud->clear();  // redundant?
   *nearKeyframes.all_cloud = *cloud_temp;
 }
+// loal keyframe pose
+void MultiSession::Session::loadKeyframePose(){
+  std::string keyframe_pose_path =
+      session_dir_path_ + "/keyframe_pose.txt";
+  if(!fs::exists(keyframe_pose_path)) {
+    PCL_ERROR("Couldn't find keyframe pose file %s\n", keyframe_pose_path.c_str());
+    return;
+  }
+  std::ifstream posefile_handle(keyframe_pose_path);
+  std::string strOneLine;
+  while (getline(posefile_handle, strOneLine)) {
+    std::stringstream ss(strOneLine);
+    int keyframe_idx;
+    double timestamp;
+    float x, y, z, qw, qx, qy, qz;
+    // Format: index time x y z qw qx qy qz
+    ss >> keyframe_idx >> timestamp >> x >> y >> z >> qw >> qx >> qy >> qz;
 
+    Eigen::Quaternionf q(qw, qx, qy, qz);
+    Eigen::Affine3f affine = Eigen::Affine3f::Identity();
+    affine.translation() << x, y, z;
+    affine.linear() = q.toRotationMatrix();
+
+    float roll, pitch, yaw;
+    pcl::getTranslationAndEulerAngles(affine, x, y, z, roll, pitch, yaw);
+
+
+    PointTypePose thisPose6D;
+    thisPose6D.x = x;
+    thisPose6D.y = y;
+    thisPose6D.z = z;
+    thisPose6D.intensity = keyframe_idx;  // TODO
+    thisPose6D.roll = roll;
+    thisPose6D.pitch = pitch;
+    thisPose6D.yaw = yaw;
+    thisPose6D.time = 0.0;  // TODO: no-use
+    cloudKeyPoses6D->push_back(thisPose6D);
+
+    PointTypeXYZI thisPose3D;
+    thisPose3D.x = x;
+    thisPose3D.y = y;
+    thisPose3D.z = z;
+    cloudKeyPoses3D->push_back(thisPose3D);
+  }
+  PCL_INFO_STREAM("\033[1;32m Keyframe poses are loaded ("
+                  << name_ << ") with size: " << cloudKeyPoses6D->size()
+                  << "\033[0m\n");
+}
 // load pointcloud
 void MultiSession::Session::loadSessionKeyframePointclouds() {
   std::string pcd_dir = session_dir_path_ + "/keyframe_cloud/";
+  if(!fs::exists(pcd_dir)) {
+    PCL_ERROR("Couldn't find keyframe cloud dir %s\n", pcd_dir.c_str());
+    return;
+  }
 
   // parse names (un-sorted)
   std::vector<std::pair<int, std::string>> pcd_names;
@@ -197,10 +249,10 @@ void MultiSession::Session::loadSessionKeyframePointclouds() {
     cloudKeyFrames.push_back(thisKeyFrame);
 
     num_pcd_loaded++;
-    if (num_pcd_loaded > nodes_.size()) {
-      std::cout << "error in the num of pcds" << std::endl;
-      break;
-    }
+    // if (num_pcd_loaded > nodes_.size()) {
+    //   std::cout << "error in the num of pcds" << std::endl;
+    //   break;
+    // }
   }
   // std::cout << "\nPCDs are loaded (" << name_ << ")" << std::endl;
   PCL_INFO_STREAM("\033[1;32m PCDs are loaded ("
@@ -211,7 +263,10 @@ void MultiSession::Session::loadSessionKeyframePointclouds() {
 // load sc
 void MultiSession::Session::loadSessionScanContextDescriptors() {
   std::string scd_dir = session_dir_path_ + "/keyframe_scancontext/";
-
+  if(!fs::exists(scd_dir)) {
+    PCL_ERROR("Couldn't find scancontext dir %s\n", scd_dir.c_str());
+    return;
+  }
   // parse names (un-sorted)
   std::vector<std::pair<int, std::string>> scd_names;
   for (auto& _scd : fs::directory_iterator(scd_dir)) {
@@ -250,10 +305,13 @@ void MultiSession::Session::loadSessionScanContextDescriptors() {
 }
 
 // load pose-graph
-void MultiSession::Session::loadSessionGraph() {
+bool MultiSession::Session::loadSessionGraph() {
   std::string posefile_path =
       session_dir_path_ + "/singlesession_posegraph.g2o";
-
+  if(!fs::exists(posefile_path)) {
+    PCL_ERROR("Couldn't find pose graph file %s\n", posefile_path.c_str());
+    return false;
+  }
   std::ifstream posefile_handle(posefile_path);
   std::string strOneLine;
   while (getline(posefile_handle, strOneLine)) {
@@ -291,12 +349,16 @@ void MultiSession::Session::loadSessionGraph() {
   //
   PCL_INFO_STREAM("\033[1;32m Session loaded: " << posefile_path << "\033[0m");
   PCL_INFO_STREAM("\033[1;32m - num nodes: " << nodes_.size() << "\033[0m\n");
+  return true;
 }
 
 // load map
 void MultiSession::Session::loadGlobalMap() {
   std::string mapfile_path = session_dir_path_ + "/cloudGlobal.pcd";
-
+  if (!fs::exists(mapfile_path)) {
+    PCL_ERROR("Couldn't find map file %s\n", mapfile_path.c_str());
+    return;
+  }
   pcl::PointCloud<pcl::PointXYZI>::Ptr raw_global_map(
       new pcl::PointCloud<pcl::PointXYZI>());
   if (pcl::io::loadPCDFile<pcl::PointXYZI>(mapfile_path, *raw_global_map) ==
@@ -305,12 +367,6 @@ void MultiSession::Session::loadGlobalMap() {
     return;
   }
 
-  // pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_global_map(
-  //     new pcl::PointCloud<pcl::PointXYZI>());
-  // pcl::VoxelGrid<pcl::PointXYZI> voxel;
-  // voxel.setLeafSize(0.4f, 0.4f, 0.4f);
-  // voxel.setInputCloud(raw_global_map);
-  // voxel.filter(*filtered_global_map);
 
   globalMap.reset(new pcl::PointCloud<PointTypeXYZI>());
   globalMap->reserve(raw_global_map->points.size());
@@ -330,6 +386,7 @@ void MultiSession::Session::loadGlobalMap() {
                                             << globalMap->points.size()
                                             << "\033[0m\n");
 }
+  
 
 // IncreMapping
 gtsam::Pose3 MultiSession::IncreMapping::getPoseOfIsamUsingKey(

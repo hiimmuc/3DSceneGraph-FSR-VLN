@@ -66,8 +66,7 @@ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name,
   path.header.stamp = this->node->now();
   path.header.frame_id = "camera_init";
   // 回环检测线程
-  // std::thread loopthread(&loopClosureThread);
-  // loopthread = std::thread(&LIVMapper::loopClosureThread, this);
+  loopthread = std::thread(&LIVMapper::loopClosureThread, this);
   // 例如 20Hz 发布（可调）
   // 构造函数里：
   if (depth_en) {
@@ -552,12 +551,17 @@ void LIVMapper::gravityAlignment() {
     V3D ez(0, 0, -1), gz(_state.gravity);
     Eigen::Quaterniond G_q_I0 = Eigen::Quaterniond::FromTwoVectors(gz, ez);
     M3D G_R_I0 = G_q_I0.toRotationMatrix();
-
+    double yaw_angle = std::atan2(G_R_I0(1, 0), G_R_I0(0, 0));
+    Eigen::Matrix3d yaw_correction = Eigen::AngleAxisd(-yaw_angle, Eigen::Vector3d::UnitZ())
+                                     .toRotationMatrix();
+    G_R_I0 = yaw_correction * G_R_I0;
     _state.pos_end = G_R_I0 * _state.pos_end;
     _state.rot_end = G_R_I0 * _state.rot_end;
     _state.vel_end = G_R_I0 * _state.vel_end;
     _state.gravity = G_R_I0 * _state.gravity;
     gravity_align_finished = true;
+    std::cout << "Init rotation:\n"
+              << G_R_I0 << std::endl;
     std::cout << "Gravity Alignment Finished" << std::endl;
   }
 }
@@ -697,6 +701,15 @@ void LIVMapper::handleVIO() {
   geoQuat.y = quat.y();
   geoQuat.z = quat.z();
   publish_frame_world(pubLaserCloudFullRes, vio_manager);
+  PointCloudXYZI().swap(*pcl_wait_pub);
+  PointCloudXYZI().swap(*pcl_w_wait_pub);
+  PointCloudXYZRGB().swap(*pcl_wait_save);
+  PointCloudXYZI().swap(*pcl_wait_save_intensity);
+  // pcl_wait_pub->clear();
+  // pcl_w_wait_pub->clear();
+  // pcl_wait_save->clear();
+  // pcl_wait_save_intensity->clear();
+  // pcl_body_wait_pub->clear();
   publish_odometry(pubOdomAftMapped);
 
   // publish rgb, depth, and camera pose
@@ -704,8 +717,6 @@ void LIVMapper::handleVIO() {
     enqueueSnapshot();
   else
     publish_img_rgb(pubImage, vio_manager);
-
-  // publish_img_rgb(pubImage, vio_manager);
 }
 // TODO: rviz展示回环边, can be used for relocalization
 void LIVMapper::visualizeLoopClosure() {
@@ -999,13 +1010,7 @@ void LIVMapper::saveKeyFramesAndFactor() {
       new pcl::PointCloud<PointTypeXYZI>());  // 降采样后的
   pcl::copyPointCloud(*pcl_body_wait_pub,
                       *thisSurfKeyFrame);  // 存储关键帧,没有降采样的点云
-  // 降采样thisSurfKeyFrame
-  // pcl::VoxelGrid<PointTypeXYZI> downSizeFilter;
-  // downSizeFilter.setLeafSize(0.1, 0.1, 0.1);  // 设置降采样体素大小
-  // downSizeFilter.setInputCloud(thisSurfKeyFrame);
-  // downSizeFilter.filter(*thisSurfKeyFrameDS);  // 执行降采样
-  // std::cout << RED << "pcl_body_wait_pub size: " << pcl_body_wait_pub->size()
-  //           << endl;
+  PointCloudXYZI().swap(*pcl_body_wait_pub);
   surfCloudKeyFrames.emplace_back(thisSurfKeyFrame);
 
   // updatePath(thisPose6D);  // 可视化update后的最新位姿
@@ -1388,34 +1393,6 @@ bool LIVMapper::handleLIO() {
   } else {
     downSizeFilterSurf.setInputCloud(feats_undistort);
     downSizeFilterSurf.filter(*feats_down_body);
-    // dect_ground->extract_ground(*feats_undistort);
-    // pcl::PointCloud<PointType>::Ptr non_ground_pc(
-    //     new pcl::PointCloud<PointType>(dect_ground->non_ground_pc_));
-    // pcl::PointCloud<PointType>::Ptr ds_non_ground_pc(
-    //     new pcl::PointCloud<PointType>());
-    // pcl::PointCloud<PointType>::Ptr ground_pc(
-    //     new pcl::PointCloud<PointType>(dect_ground->ground_pc_));
-    // ds_ground_pc->reserve(ground_pc->size());
-    // ds_non_ground_pc->reserve(non_ground_pc->size() + ground_pc->size());
-
-    // // 对非地面点进行降采样
-    // downSizeFilterSurf.setInputCloud(non_ground_pc);
-    // downSizeFilterSurf.filter(*ds_non_ground_pc);
-    // downSizeFilterGround.setInputCloud(ground_pc);
-    // downSizeFilterGround.filter(*ds_ground_pc);
-    // *ds_non_ground_pc += *ds_ground_pc;
-    // std::cout << "ds ground points size: " << ds_ground_pc->points.size()
-    //           << std::endl;
-    // std::cout << "ds all points size: " << ds_non_ground_pc->points.size()
-    //           << std::endl;
-    // pcl::copyPointCloud(*ds_non_ground_pc, *feats_down_body);
-    // std::cout << "[ LIO ] downsampled from " <<
-    // feats_undistort->points.size()
-    //           << " to " << feats_down_body->points.size() << std::endl;
-
-    // ds_ground_pc->clear();
-
-    // dect_ground->reset();
   }
   double g1 = omp_get_wtime();
 
@@ -1423,34 +1400,17 @@ bool LIVMapper::handleLIO() {
 
   feats_down_size = feats_down_body->points.size();
   voxelmap_manager->feats_down_body_ = feats_down_body;
-  // transformLidar(_state.rot_end, _state.pos_end, feats_down_body,
-  //                feats_down_world);
-  // voxelmap_manager->feats_down_world_ = feats_down_world;
   voxelmap_manager->feats_down_size_ = feats_down_size;
-
   if (!lidar_map_inited) {
     lidar_map_inited = true;
     transformLidar(_state.rot_end, _state.pos_end, feats_down_body,
                    feats_down_world);
-    // voxelmap_manager->feats_down_world_ = feats_down_world;
     voxelmap_manager->BuildVoxelMapLRU(feats_down_world);
-    // voxelmap_manager->BuildVoxelMap();
   }
 
   double t1 = omp_get_wtime();
-  // before state estimation
-  // cout << "[ LIO ] Start State Estimation" << endl;
-  // cout << "Before pos: " << _state.pos_end.transpose() << endl;
-  // cout << "Before vel: " << _state.vel_end.transpose() << endl;
-  // cout << "Before rpy: " << RotMtoEuler(_state.rot_end).transpose() << endl;
-
   voxelmap_manager->StateEstimation(state_propagat);
-  // voxelmap_manager->StateEstimation2(state_propagat);
   _state = voxelmap_manager->state_;
-  // cout << "After pos: " << _state.pos_end.transpose() << endl;
-  // cout << "After vel: " << _state.vel_end.transpose() << endl;
-  // cout << "After rpy: " << RotMtoEuler(_state.rot_end).transpose() << endl;
-
   if (enable_zupt && frame_num % zupt_interval == 0) {
     zupt->setState(_state);
     zupt->setMeasurement(zupt_noise * zupt_noise, 0.0);
@@ -1465,9 +1425,6 @@ bool LIVMapper::handleLIO() {
       wheel_odometry_->update_state(_state, wheel_linear_velocity_);
     }
   }
-  // wheel_extrinsic_ekf_->update(_state, wheel_linear_velocity_);
-  // _pv_list = voxelmap_manager->pv_list_;
-
   double t2 = omp_get_wtime();
 
   if (imu_prop_enable) {
@@ -1518,25 +1475,13 @@ bool LIVMapper::handleLIO() {
     voxelmap_manager->pv_list_[i].var = var;
   }
   voxelmap_manager->UpdateVoxelMapLRU(voxelmap_manager->pv_list_);
-  // std::cout << "[ LIO ] Update Voxel Map" << std::endl;
   _pv_list = voxelmap_manager->pv_list_;
 
   double t4 = omp_get_wtime();
-
-  // if (voxelmap_manager->config_setting_.map_sliding_en) {
-  //   voxelmap_manager->mapSliding();
-  // }
-
-  // laserCloudFullRes默认使用包含地面点信息的feats_undistort
   PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort
                                                      : feats_down_body);
   int size = laserCloudFullRes->points.size();
   PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
-
-  // double g0 = omp_get_wtime();
-  // dect_ground->extract_ground(*laserCloudFullRes);
-  // double g1 = omp_get_wtime();
-  // dect_ground->reset();
 
 #pragma omp parallel for
   for (int i = 0; i < size; i++) {
@@ -1547,15 +1492,11 @@ bool LIVMapper::handleLIO() {
     *pcl_w_wait_pub = *laserCloudWorld;
     *pcl_body_wait_pub = *laserCloudFullRes;
   }
-  // pcl_body_wait_pub
   if (!img_en) publish_frame_lidar(pubLaserUndistortCloud);
-  if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager);
-  if (pub_effect_point_en)
-    publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
-  if (voxelmap_manager->config_setting_.is_pub_plane_map_)
-    voxelmap_manager->pubVoxelMapLRU();
-  publish_path(pubPath);
-  publish_mavros(mavros_pose_publisher);
+  // if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager);
+  PointCloudXYZI().swap(*pcl_wait_pub);
+  PointCloudXYZRGB().swap(*pcl_wait_save);
+  PointCloudXYZI().swap(*pcl_wait_save_intensity);
   if (!img_en) {
     Eigen::Quaterniond quat(_state.rot_end);
     geoQuat.w = quat.w();
@@ -1564,29 +1505,12 @@ bool LIVMapper::handleLIO() {
     geoQuat.z = quat.z();
     publish_odometry(pubOdomAftMapped);
   }
+  double t5 = omp_get_wtime();
 
   frame_num++;
   aver_time_consu =
       aver_time_consu * (frame_num - 1) / frame_num + (t4 - t0) / frame_num;
 
-  // aver_time_icp = aver_time_icp * (frame_num - 1) / frame_num + (t2 - t1) /
-  // frame_num; aver_time_map_inre = aver_time_map_inre * (frame_num - 1) /
-  // frame_num + (t4 - t3) / frame_num; aver_time_solve = aver_time_solve *
-  // (frame_num - 1) / frame_num + (solve_time) / frame_num;
-  // aver_time_const_H_time = aver_time_const_H_time * (frame_num - 1) /
-  // frame_num + solve_const_H_time / frame_num; printf("[ mapping time ]: per
-  // scan: propagation %0.6f downsample: %0.6f match: %0.6f solve: %0.6f  ICP:
-  // %0.6f  map incre: %0.6f total: %0.6f \n"
-  //         "[ mapping time ]: average: icp: %0.6f construct H: %0.6f, total:
-  //         %0.6f \n", t_prop - t0, t1 - t_prop, match_time, solve_time, t3 -
-  //         t1, t5 - t3, t5 - t0, aver_time_icp, aver_time_const_H_time,
-  //         aver_time_consu);
-
-  // printf("\033[1;36m[ LIO mapping time ]: current scan: icp: %0.6f secs,
-  // map incre: %0.6f secs, total: %0.6f secs.\033[0m\n"
-  //         "\033[1;36m[ LIO mapping time ]: average: icp: %0.6f secs, map
-  //         incre: %0.6f secs, total: %0.6f secs.\033[0m\n", t2 - t1, t4 -
-  //         t3, t4 - t0, aver_time_icp, aver_time_map_inre, aver_time_consu);
   printf(
       "\033[1;34m+-----------------------------------------------------------"
       "--"
@@ -1613,7 +1537,8 @@ bool LIVMapper::handleLIO() {
       "--"
       "+\033[0m\n");
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Ground Detection", g1 - g0);
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t4 - t0);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Publish Cloud", t5 - t4);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t5 - t0);
   // // save t4-t0 to /Log/time.txt
   // std::ofstream fout_time;
   // fout_time.open(std::string(ROOT_DIR) + "Log/result/lio_time.txt",
@@ -1824,9 +1749,7 @@ void LIVMapper::saveKeyFrame() {
   pcl::io::savePCDFileASCII(trans_dir, *cloudKeyPoses6D);
   std::cout << "Completed saving key frame pose" << std::endl;
   // save sc and keyframe cloud
-  const SCInputType sc_input_type =
-      SCInputType::SINGLE_SCAN_FULL;  // TODO: change this in ymal
-  bool soMany = false;
+  const SCInputType sc_input_type = SCInputType::MULTI_SCAN_FEAT;  // TODO: change this in ymal
   std::cout << "save sc and keyframe" << std::endl;
   std::string scd_path = save_dir + "keyframe_scancontext/";
   fsmkdir(scd_path);
@@ -1841,13 +1764,9 @@ void LIVMapper::saveKeyFrame() {
     } else if (sc_input_type == SCInputType::MULTI_SCAN_FEAT) {
       pcl::PointCloud<PointTypeXYZI>::Ptr multiKeyFrameFeatureCloud(
           new pcl::PointCloud<PointTypeXYZI>());
-      loopFindNearKeyframes(multiKeyFrameFeatureCloud, i,
-                            historyKeyframeSearchNum);
-      if (soMany) {
-        pcl::copyPointCloud(*multiKeyFrameFeatureCloud, *save_cloud);
-      } else {
-        pcl::copyPointCloud(*surfCloudKeyFrames[i], *save_cloud);
-      }
+      // 前后各两帧
+      loopFindNearKeyframes(multiKeyFrameFeatureCloud, i, 2);
+      pcl::copyPointCloud(*multiKeyFrameFeatureCloud, *save_cloud);
       scLoop.makeAndSaveScancontextAndKeys(*save_cloud);
     }
 
@@ -1910,12 +1829,9 @@ void LIVMapper::run(rclcpp::Node::SharedPtr &node) {
 
 void LIVMapper::extractWheelVel(LidarMeasureGroup &meas) {
   std::lock_guard<std::mutex> lock2(odoLock);
-  // newest_imu.header.stamp
   // double start_time = meas.lidar_frame_beg_time;
   double start_time = meas.last_lio_update_time;
   static double first_time = start_time;
-  // std::cout << "processRobotOdometry: lidar_end_time: " << start_time
-  //           << std::endl;
   std::cout << std::fixed << std::setprecision(19)
             << "extractWheelVel: lidar_start_time: " << start_time << std::endl;
   while (!odomQueue.empty()) {
@@ -2909,7 +2825,6 @@ void LIVMapper::publish_frame_lidar(
         &pubLaserUndistortCloud){
   sensor_msgs::msg::PointCloud2 laserCloudmsg;
   pcl::toROSMsg(*pcl_body_wait_pub, laserCloudmsg);
-  PointCloudXYZI().swap(*pcl_body_wait_pub);
   laserCloudmsg.header.stamp = rclcpp::Time(last_timestamp_lidar * 1e9);
   laserCloudmsg.header.frame_id = "camera_init";
   pubLaserUndistortCloud->publish(laserCloudmsg);
@@ -2976,9 +2891,6 @@ void LIVMapper::publish_frame_world(
     }
   }
 
-  // std::cout << "ground_num: " << laserNoGroundCloudWorldRGB->size()
-  //           << std::endl;
-  // std::cout << "all_num: " << pcl_wait_pub->points.size() << std::endl;
   /*** Publish Frame ***/
   sensor_msgs::msg::PointCloud2 laserCloudmsg;
   // For relocalization, we need to publish the pcl_w_wait_pub
@@ -3061,11 +2973,6 @@ void LIVMapper::publish_frame_world(
       }
     }
   }
-
-  PointCloudXYZI().swap(*pcl_wait_pub);
-  PointCloudXYZI().swap(*pcl_w_wait_pub);
-  PointCloudXYZRGB().swap(*pcl_wait_save);
-  PointCloudXYZI().swap(*pcl_wait_save_intensity);
 }
 
 void LIVMapper::publish_submap_world(const PointCloudXYZRGB::Ptr &rgb_cloud) {
@@ -3166,6 +3073,7 @@ void LIVMapper::publish_path(
   set_posestamp(msg_body_pose.pose);
   msg_body_pose.header.stamp = this->node->get_clock()->now();
   msg_body_pose.header.frame_id = "camera_init";
+  path.poses.clear();
   path.poses.emplace_back(msg_body_pose);
   pubPath->publish(path);
 }

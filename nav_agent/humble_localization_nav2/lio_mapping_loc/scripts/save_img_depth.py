@@ -7,15 +7,16 @@ from cv_bridge import CvBridge
 import cv2
 import os
 
-
 class ImagePoseSaver(Node):
     def __init__(self):
         super().__init__('image_pose_saver')
 
+
         # 顶层输出目录
         self.output_dir = '/map/image_depth_pose'
         # 清空目录下的内容
-
+        
+        
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
         self.rgb_dir = os.path.join(self.output_dir, 'rgb')
@@ -64,8 +65,7 @@ class ImagePoseSaver(Node):
 
     def save_image(self, msg, img_type):
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(
-                msg, desired_encoding='passthrough')
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             if img_type == 'rgb':
                 filename = os.path.join(self.rgb_dir, f"{timestamp:.6f}.png")
@@ -76,8 +76,7 @@ class ImagePoseSaver(Node):
             self.img_count += 1
 
             if self.img_count % 50 == 0:
-                self.get_logger().info(
-                    f"Saved {self.img_count} images so far...")
+                self.get_logger().info(f"Saved {self.img_count} images so far...")
         except Exception as e:
             self.get_logger().error(f"Failed to save {img_type} image: {e}")
 

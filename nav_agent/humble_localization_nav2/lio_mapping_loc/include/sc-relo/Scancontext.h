@@ -37,7 +37,7 @@ using PointTypeXYZI =
                            // exchange the original bin encoding function (i.e.,
                            // max hegiht) to max intensity (for detail, refer 20
                            // ICRA Intensity Scan Context)
-// typedef pcl::PointXYZINormal PointType;
+// // typedef pcl::PointXYZINormal PointType;
 
 using KeyMat = std::vector<std::vector<float> >;
 using InvKeyTree = KDTreeVectorOfVectorsAdaptor<KeyMat, float>;
@@ -101,8 +101,8 @@ class SCManager {
             // the lidar local coord (not robot base coord) / if you use
             // robot-coord-transformed lidar scans, just set this as 0.
 
-  const int PC_NUM_RING = 20;    // 20 in the original paper (IROS 18)
-  const int PC_NUM_SECTOR = 60;  // 60 in the original paper (IROS 18)
+  const int PC_NUM_RING = 40;    // 20 in the original paper (IROS 18)
+  const int PC_NUM_SECTOR = 120;  // 60 in the original paper (IROS 18)
   const double PC_MAX_RADIUS =
       80.0;  // 80 meter max in the original paper (IROS 18)
   const double PC_UNIT_SECTORANGLE = 360.0 / double(PC_NUM_SECTOR);

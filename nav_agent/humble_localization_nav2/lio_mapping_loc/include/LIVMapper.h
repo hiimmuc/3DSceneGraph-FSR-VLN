@@ -126,7 +126,7 @@ class LIVMapper {
       const std::vector<PointToPlane> &ptpl_list);
   void publish_odometry(
       const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr
-          &pmavros_pose_publisherubOdomAftMapped);
+          &pubOdomAftMapped);
   void publish_mavros(
       const rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr
           &mavros_pose_publisher);

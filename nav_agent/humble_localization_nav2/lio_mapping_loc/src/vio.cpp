@@ -2589,8 +2589,8 @@ void VIOManager::dumpDataForColmap(double img_time) {
         std::string(ROOT_DIR) + "Log/Colmap/images/" + img_time + ".png";
 
     // Undistort and save the image
-    // cv::Mat img_rgb_undistort;
-    // pinhole_cam->undistortImage(img_rgb, img_rgb_undistort);
+    cv::Mat img_rgb_undistort;
+    pinhole_cam->undistortImage(img_rgb, img_rgb_undistort);
     cv::imwrite(image_path, img_rgb_undistort);
 
     // Save pose information

@@ -44,7 +44,8 @@ class Session {
     globalMap.reset(new pcl::PointCloud<PointTypeXYZI>());
   }
 
-  void loadSessionGraph();
+  bool loadSessionGraph();
+  void loadKeyframePose();
   void loadSessionScanContextDescriptors();
   void loadSessionKeyframePointclouds();
   void loadGlobalMap();

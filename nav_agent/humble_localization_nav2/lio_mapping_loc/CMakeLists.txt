@@ -5,9 +5,8 @@ project(fast_livo)
 
 set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g -pthread")
-# set(CMAKE_BUILD_TYPE "Debug")
-# add_compile_options(-g -O0)            # 禁止过度优化
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
+add_compile_options(-Wno-unknown-pragmas)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -69,6 +68,16 @@ else()
   message(STATUS "Single core detected. Multithreading disabled.")
 endif()
 
+# Check for CUDA support
+find_package(CUDA)
+if(CUDA_FOUND)
+  message(STATUS "CUDA found")
+  enable_language(CUDA)
+  add_definitions(-DCUDA_EN)
+else()
+  message(STATUS "CUDA not found")
+endif()
+
 # Check for OpenMP support
 find_package(OpenMP QUIET)
 if(OpenMP_CXX_FOUND)
@@ -108,16 +117,15 @@ find_package(vikit_ros REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(PCL REQUIRED)
+find_package(PCL 1.15.0 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Sophus REQUIRED)
-find_package(Boost REQUIRED COMPONENTS thread)
+find_package(Boost REQUIRED COMPONENTS)
 find_package(GTSAM REQUIRED)
 message(STATUS "GTSAM version: ${GTSAM_VERSION}")
 find_package(PythonLibs REQUIRED)
-# eigen_conversions
-# find_package(eigen_conversions REQUIRED)
-# Include directories for dependencies
+add_subdirectory(thirdparty/fast_gicp)
+
 include_directories(
   ${EIGEN3_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
@@ -127,11 +135,15 @@ include_directories(
   ${vikit_common_INCLUDE_DIRS}
   ${vikit_ros_INCLUDE_DIRS}
   include
+
 )
 include_directories(${PROJECT_SOURCE_DIR}/include/FRICP-toolkit)
 include_directories(${CMAKE_BINARY_DIR}/rosidl_generator_cpp)
 include_directories(
   include/fast_livo
+  thirdparty/fast_gicp/include/fast_gicp
+  thirdparty/fast_gicp/include/
+
 )
 rosidl_generate_interfaces(${PROJECT_NAME} "srv/SaveMap.srv" DEPENDENCIES std_msgs sensor_msgs)
 set(dependencies
@@ -146,7 +158,6 @@ set(dependencies
   vikit_common
   vikit_ros
   image_transport
-  # pcl_ros
   pcl_msgs
   pcl_conversions
   tf2_ros
@@ -154,12 +165,6 @@ set(dependencies
 )
 
 set(COMMON_DEPENDENCIES OpenMP::OpenMP_CXX)
-
-# link_directories(${COMMON_DEPENDENCIES}
-#   ${vikit_common_LIBRARIES}/libvikit_common.so
-#   ${vikit_ros_LIBRARIES}/libvikit_ros.so
-# )
-
 # Add libraries
 add_library(vio src/vio.cpp src/frame.cpp src/visual_point.cpp)
 add_library(lio src/voxel_map.cpp)
@@ -169,7 +174,6 @@ add_library(laser_mapping src/LIVMapper.cpp include/sc-relo/Scancontext.cpp src/
 add_library(utils src/utils.cpp)
 add_library(incremental_mapping include/multi-session/Incremental_mapping.cpp include/sc-relo/Scancontext.cpp)
 add_library(pose_estimator include/online-relo/pose_estimator.cpp include/sc-relo/Scancontext.cpp)
-# add_library(sc include/sc-relo/Scancontext.cpp)
 ament_target_dependencies(vio ${dependencies} )
 ament_target_dependencies(lio ${dependencies})
 ament_target_dependencies(pre ${dependencies})
@@ -177,6 +181,7 @@ ament_target_dependencies(imu_proc ${dependencies})
 ament_target_dependencies(laser_mapping ${dependencies})
 ament_target_dependencies(incremental_mapping ${dependencies})
 ament_target_dependencies(pose_estimator ${dependencies})
+target_link_libraries(pose_estimator fast_gicp)
 # linking libraries or executables to public dependencies
 target_link_libraries(laser_mapping 
     ${CMAKE_SOURCE_DIR}/../../install/vikit_common/lib/libvikit_common.so 
@@ -191,16 +196,32 @@ target_link_libraries(pre ${COMMON_DEPENDENCIES} "${cpp_typesupport_target}")
 target_link_libraries(imu_proc ${COMMON_DEPENDENCIES} "${cpp_typesupport_target}")
 
 add_executable(multi_session src/multi_session.cpp)
-# ament_target_dependencies(multi_session ${dependencies})
 target_link_libraries(multi_session ${COMMON_DEPENDENCIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} incremental_mapping gtsam stdc++fs "${cpp_typesupport_target}")
 
 add_executable(online_relo src/online_relocalization.cpp)
-# ament_target_dependencies(online_relo ${dependencies})
-target_link_libraries(online_relo ${COMMON_DEPENDENCIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES}  ${OpenCV_LIBRARIES} pose_estimator incremental_mapping gtsam stdc++fs "${cpp_typesupport_target}")
+target_link_libraries(online_relo 
+${COMMON_DEPENDENCIES} 
+${PCL_LIBRARIES} 
+${PYTHON_LIBRARIES} 
+${OpenCV_LIBRARIES} 
+pose_estimator 
+incremental_mapping 
+gtsam 
+stdc++fs 
+"${cpp_typesupport_target}")
 
 # Add the main executable
 add_executable(fastlivo_mapping src/main.cpp)
 
+# add_executable(reloc_robot_odom src/reloc_robot_odom.cpp)
+# ament_target_dependencies(reloc_robot_odom ${dependencies})
+# target_include_directories(reloc_robot_odom PRIVATE ${EIGEN3_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS})
+# target_link_libraries(reloc_robot_odom 
+# ${COMMON_DEPENDENCIES} 
+# ${PCL_LIBRARIES} 
+# ${Boost_LIBRARIES}
+# "${cpp_typesupport_target}"
+# )
 ament_target_dependencies(fastlivo_mapping ${dependencies})
 # Link libraries to the executable
 target_link_libraries(fastlivo_mapping
@@ -215,9 +236,7 @@ target_link_libraries(fastlivo_mapping
   ${Sophus_LIBRARIES}
   ${Boost_LIBRARIES}
   "${cpp_typesupport_target}"
-  # ${GTSAM_LIBRARIES}  # 添加 GTSAM 库
 )
-
 # Link mimalloc if found
 if(mimalloc_FOUND)
   target_link_libraries(fastlivo_mapping mimalloc)
@@ -242,6 +261,10 @@ install(
   DIRECTORY config launch rviz_cfg
   DESTINATION share/${PROJECT_NAME}
 )
+# install(TARGETS reloc_robot_odom
+#   DESTINATION lib/${PROJECT_NAME}
+# )
+
 install(
   DIRECTORY "include/"
   DESTINATION include
@@ -302,7 +325,12 @@ install(TARGETS pose_estimator
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
-
+# install(TARGETS reloc_robot_odom
+#   EXPORT export_${PROJECT_NAME}
+#   ARCHIVE DESTINATION lib
+#   LIBRARY DESTINATION lib
+#   RUNTIME DESTINATION bin
+# )
 ament_export_include_directories(include)
 # Export dependencies
 ament_export_dependencies(

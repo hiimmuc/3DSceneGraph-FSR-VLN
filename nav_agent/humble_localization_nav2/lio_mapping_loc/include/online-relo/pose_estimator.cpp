@@ -2,8 +2,6 @@
 // initialization only)
 #include "pose_estimator.h"
 
-#include "../FRICP-toolkit/registeration.h"
-
 pose_estimator::pose_estimator(rclcpp::Node::SharedPtr &node_) : node(node_) {
   allocateMemory();
 
@@ -14,13 +12,29 @@ pose_estimator::pose_estimator(rclcpp::Node::SharedPtr &node_) : node(node_) {
   this->node->declare_parameter("relo.searchDis", 10.0);
   this->node->declare_parameter("relo.searchNum", 3);
   this->node->declare_parameter("relo.trustDis", 5.0);
-  this->node->declare_parameter("relo.regMode", 5);
   this->node->declare_parameter("relo.extrinsic_T", std::vector<double>());
   this->node->declare_parameter("relo.extrinsic_R", std::vector<double>());
   this->node->declare_parameter("relo.relo_interval", 10);
   // external_flg
   this->node->declare_parameter("relo.sc_init_enable", false);
   this->node->declare_parameter("relo.external_flg", false);
+  // reg_mode_
+  this->node->declare_parameter("relo.reg_mode", 0);
+  // localmap_res_
+  this->node->declare_parameter("relo.localmap_res", 0.2);
+  // currentcloud_res_
+  this->node->declare_parameter("relo.currentcloud_res", 0.2);
+  // init_cloud_num_
+  this->node->declare_parameter("relo.init_cloud_num", 5);
+
+  // 简化版多帧累积参数
+  this->node->declare_parameter("relo.accum_enable", false);
+  this->node->declare_parameter("relo.accum_window_size", 5);
+  this->node->declare_parameter<double>("relo.ndt_score_threshold", 0.3);
+
+  this->node->get_parameter("relo.accum_enable", accum_enable_);
+  this->node->get_parameter("relo.accum_window_size", accum_window_size_);
+  if (accum_window_size_ < 1) accum_window_size_ = 1;
 
   this->node->get_parameter("relo.priorDir", priorDir);
   this->node->get_parameter("relo.cloudTopic", cloudTopic);
@@ -28,7 +42,6 @@ pose_estimator::pose_estimator(rclcpp::Node::SharedPtr &node_) : node(node_) {
   this->node->get_parameter("relo.searchDis", searchDis);
   this->node->get_parameter("relo.searchNum", searchNum);
   this->node->get_parameter("relo.trustDis", trustDis);
-  this->node->get_parameter("relo.regMode", regMode);
   this->node->get_parameter("relo.extrinsic_T", extrinT_);
   this->node->get_parameter("relo.extrinsic_R", extrinR_);
   // relo_interval
@@ -37,6 +50,14 @@ pose_estimator::pose_estimator(rclcpp::Node::SharedPtr &node_) : node(node_) {
   this->node->get_parameter("relo.external_flg", external_flg);
   // sc_init_enable
   this->node->get_parameter("relo.sc_init_enable", sc_init_enable);
+  // reg_mode_
+  this->node->get_parameter("relo.reg_mode", reg_mode_);
+  // localmap_res_
+  this->node->get_parameter("relo.localmap_res", localmap_res_);
+  // currentcloud_res_
+  this->node->get_parameter("relo.currentcloud_res", currentcloud_res_);
+  // init_cloud_num_
+  this->node->get_parameter("relo.init_cloud_num", init_cloud_num_);
 
   extrinT << VEC_FROM_ARRAY(extrinT_);
   extrinR << MAT_FROM_ARRAY(extrinR_);
@@ -99,18 +120,49 @@ pose_estimator::pose_estimator(rclcpp::Node::SharedPtr &node_) : node(node_) {
   pubMeasurementEdge =
       this->node->create_publisher<visualization_msgs::msg::MarkerArray>(
           "measurement", 10);
-  // pubPath = this->node->create_publisher<nav_msgs::msg::Path>("/path_loc",
-  // 10);
+  pubPath = this->node->create_publisher<nav_msgs::msg::Path>("/eloc_path",10);
   RCLCPP_INFO(this->node->get_logger(), "rostopic is ok");
 
   sessions.push_back(MultiSession::Session(1, "priorMap", priorDir, true));
   *priorMap += *sessions[0].globalMap;
   *priorPath += *sessions[0].cloudKeyPoses3D;
-  publishCloud(pubPriorMap, priorMap, this->node->now(), "world");
+  pcl::VoxelGrid<PointTypeXYZI> filter;
+  filter.setLeafSize(1.0f, 1.0f, 1.0f);
+  filter.setInputCloud(priorMap);
+  filter.filter(*filterPriorMap);
+  publishCloud(pubPriorMap, filterPriorMap, this->node->now(), "world");
+
 
   downSizeFilterPub.setLeafSize(3.0, 3.0, 3.0);
-  downSizeFilterLocalMap.setLeafSize(0.2, 0.2, 0.2);
-  downSizeFilterCurrentCloud.setLeafSize(0.2, 0.2, 0.2);
+  downSizeFilterLocalMap.setLeafSize(localmap_res_, localmap_res_, localmap_res_);
+  downSizeFilterCurrentCloud.setLeafSize(currentcloud_res_, currentcloud_res_, currentcloud_res_);
+#ifdef CUDA_EN
+  // vgicp_cuda
+  fvgicpCuda.setResolution(0.5);
+  fvgicpCuda.setNearestNeighborSearchMethod(fast_gicp::NearestNeighborMethod::GPU_BRUTEFORCE);
+  fvgicpCuda.setMaximumIterations(50);
+  fvgicpCuda.setMaxCorrespondenceDistance(0.1);
+  // ndt_cuda
+  ndtCuda.setResolution(1.0);
+  ndtCuda.setDistanceMode(fast_gicp::NDTDistanceMode::D2D);
+  ndtCuda.setTransformationEpsilon(1e-6);
+  ndtCuda.setEuclideanFitnessEpsilon(1e-6);
+  ndtCuda.setMaximumIterations(50);
+  ndtCuda.setStepSize(0.1);
+  ndtCuda.setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT1);
+#endif
+
+  ndtPCL.setResolution(1.0);             // 体素分辨率(米)，可在 0.5~2.0 调整
+  ndtPCL.setStepSize(0.1);                // line search 步长
+  ndtPCL.setTransformationEpsilon(1e-4);  // 收敛阈值
+  ndtPCL.setMaximumIterations(50);        // 迭代次数·
+  ndtPCL.setMinPointPerVoxel(3);         // 每个体素的最小点数
+
+
+  icpPCL.setMaxCorrespondenceDistance(0.1);
+  icpPCL.setMaximumIterations(50);
+  icpPCL.setTransformationEpsilon(1e-4);
+  icpPCL.setEuclideanFitnessEpsilon(1e-4);
 
   height = priorPath->points[0].z;
 
@@ -118,12 +170,32 @@ pose_estimator::pose_estimator(rclcpp::Node::SharedPtr &node_) : node(node_) {
   kdtreeGlobalMapPoses_copy->setInputCloud(priorPath);
   RCLCPP_INFO(this->node->get_logger(), "load prior knowledge");
 
-  // reg.push_back(Registeration(regMode));
   invalid_idx.emplace_back(-1);
+
+  this->node->declare_parameter("relo.initpose_prior", std::vector<double>{0.0, 0.0, 0.0});
+  this->node->declare_parameter("relo.enable_prior_pose", true);
+  this->node->declare_parameter("relo.ndt_score", 0.15);
+
+  this->node->get_parameter("relo.initpose_prior", initpose_prior_);
+  this->node->get_parameter("relo.enable_prior_pose", enable_prior_pose_);
+  this->node->get_parameter("relo.ndt_score_threshold", ndt_score_threshold_);
+
+  if (enable_prior_pose_) {
+    RCLCPP_INFO(this->node->get_logger(), "Using prior pose for initialization: x=%.2f, y=%.2f, yaw=%.2f", 
+                initpose_prior_[0], initpose_prior_[1], initpose_prior_[2]);
+    pose_zero.x = initpose_prior_[0];
+    pose_zero.y = initpose_prior_[1];
+    pose_zero.yaw = initpose_prior_[2];
+    receive_ext_flg = true;
+  } else {
+    RCLCPP_INFO(this->node->get_logger(), "Waiting for manual initialization via RViz2...");
+  }
+
 }
 
 void pose_estimator::allocateMemory() {
   priorMap.reset(new pcl::PointCloud<PointTypeXYZI>());
+  filterPriorMap.reset(new pcl::PointCloud<PointTypeXYZI>());
   priorPath.reset(new pcl::PointCloud<PointTypeXYZI>());
   reloCloudInMap.reset(new pcl::PointCloud<PointTypeXYZI>());
   cloudInBody.reset(new pcl::PointCloud<PointTypeXYZI>());
@@ -137,6 +209,10 @@ void pose_estimator::allocateMemory() {
   currentCloudDs.reset(new pcl::PointCloud<PointTypeXYZI>());
   currentCloudInMap.reset(new pcl::PointCloud<PointTypeXYZI>());
   currentCloudDsInOdom.reset(new pcl::PointCloud<PointTypeXYZI>());
+  ndt_alignedCloud.reset(new pcl::PointCloud<PointTypeXYZI>());
+  currentLocalMapDS.reset(new pcl::PointCloud<PointTypeXYZI>());
+  currentCloudDsAccum_.reset(new pcl::PointCloud<PointTypeXYZI>());
+  currentCloudReg_.reset(new pcl::PointCloud<PointTypeXYZI>());
 }
 
 void pose_estimator::cloudCBK(
@@ -175,7 +251,6 @@ void pose_estimator::poseCBK(const nav_msgs::msg::Odometry::SharedPtr msg) {
 
 void pose_estimator::externalCBK(
     const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
-  // if (external_flg) return;
   RCLCPP_INFO(this->node->get_logger(),
               "please set your external pose now ...");
   externalPose.x = msg->pose.pose.position.x;
@@ -193,6 +268,12 @@ void pose_estimator::externalCBK(
               externalPose.y, externalPose.z, externalPose.roll,
               externalPose.pitch, externalPose.yaw);
   receive_ext_flg = true;
+}
+
+// 方法A：使用旋转矩阵直接计算yaw（最稳定）
+float pose_estimator::getYawFromTransform(const Eigen::Affine3f& tf) {
+    Eigen::Matrix3f R = tf.rotation();
+    return std::atan2(R(1,0), R(0,0));  // 从2D旋转矩阵提取角度
 }
 
 void pose_estimator::run(rclcpp::Node::SharedPtr &node) {
@@ -271,10 +352,8 @@ void pose_estimator::run(rclcpp::Node::SharedPtr &node) {
     pcl::PointCloud<PointTypeXYZI>::Ptr relo_pt =
         std::make_shared<pcl::PointCloud<PointTypeXYZI>>();
 
-
     // Lk to Lk-1
     deltaPose = lastPoseInOdom.inverse() * currentPoseInOdom;
-
     // predict current pose in map frame
     currentPoseInMap = lastPoseInMap * deltaPose;
     PointTypeXYZI currentPose3dInMap;
@@ -288,11 +367,57 @@ void pose_estimator::run(rclcpp::Node::SharedPtr &node) {
     downSizeFilterCurrentCloud.filter(*currentCloudDs);
     std::cout << "current ds cloud in lidar size: " << currentCloud->points.size()
               << std::endl;
+    // 1) 维护窗口：只缓存，不做重计算
+    if (accum_enable_ && accum_window_size_ > 1 && currentCloudDs && !currentCloudDs->empty()) {
+      pcl::PointCloud<PointTypeXYZI>::Ptr ds_copy(new pcl::PointCloud<PointTypeXYZI>());
+      *ds_copy = *currentCloudDs;
+      ds_cloud_window_.push_back(ds_copy);
+      pose_odom_window_.push_back(currentPoseInOdom.matrix());
+
+      while ((int)ds_cloud_window_.size() > accum_window_size_) ds_cloud_window_.pop_front();
+      while ((int)pose_odom_window_.size() > accum_window_size_) pose_odom_window_.pop_front();
+    } else {
+      // 关闭累积时，避免窗口无限增长
+      ds_cloud_window_.clear();
+      pose_odom_window_.clear();
+    }
 
     bool relo_success = true;
+    const bool need_relo =
+        ((!relo_pt->points.empty() && easyToRelo(relo_pt->points[0]) &&
+          idx % relo_interval == 0 && currentCloudDs->points.size() > 0) ||
+         idx < 20);
     // 初始化稳定后降低重定位频率
-    if (!relo_pt->points.empty() && easyToRelo(relo_pt->points[0]) &&
-        idx % relo_interval == 0 && currentCloudDs->points.size()>0) {
+    if (need_relo) {
+      // 2) 仅在重定位前构建配准输入
+      currentCloudReg_ = currentCloudDs;  // 默认用单帧
+      if (accum_enable_ && accum_window_size_ > 1 && ds_cloud_window_.size() >= 2) {
+        currentCloudDsAccum_->clear();
+
+        const Eigen::Matrix4f T_odom_lidar_latest = pose_odom_window_.back();
+
+        pcl::PointCloud<PointTypeXYZI>::Ptr accum_raw(new pcl::PointCloud<PointTypeXYZI>());
+        accum_raw->reserve(200000);
+
+        for (size_t i = 0; i < ds_cloud_window_.size(); ++i) {
+          const Eigen::Matrix4f T_odom_lidar_i = pose_odom_window_[i];
+          const Eigen::Matrix4f T_latest_i = T_odom_lidar_latest.inverse() * T_odom_lidar_i; // i -> latest
+          pcl::PointCloud<PointTypeXYZI> tmp;
+          pcl::transformPointCloud(*ds_cloud_window_[i], tmp, T_latest_i);
+          *accum_raw += tmp;
+        }
+
+        // 再体素一次，防止点数暴涨（复用 downSizeFilterCurrentCloud 的 leaf size）
+        downSizeFilterCurrentCloud.setInputCloud(accum_raw);
+        downSizeFilterCurrentCloud.filter(*currentCloudDsAccum_);
+
+        if (!currentCloudDsAccum_->empty()) {
+          currentCloudReg_ = currentCloudDsAccum_;
+          std::cout << "use accumulated cloud for registration, size="
+                    << currentCloudReg_->points.size()
+                    << " window=" << ds_cloud_window_.size() << std::endl;
+        }
+      }
       relo_success = relocalization();
       relo_pt->clear();
       if (!relo_success) {
@@ -304,79 +429,198 @@ void pose_estimator::run(rclcpp::Node::SharedPtr &node) {
     idx++;
     lastPoseInMap = currentPoseInMap;
     lastPoseInOdom= currentPoseInOdom;
+    // 添加map系机器人当前位置x,y,yaw打印
+    float yaw_angle = getYawFromTransform(currentPoseInMap);
+    std::cout << "Robot position in map frame - x: " << currentPoseInMap.translation().x()
+              << ", y: " << currentPoseInMap.translation().y()
+              << ", yaw: " << yaw_angle << " rad"
+              << std::endl;
+    
 
     rate.sleep();
   }
 }
-// 直接计算lidar to map的位姿
-bool pose_estimator::relocalization() {
-  std::cout << ANSI_COLOR_GREEN << "relo mode for frame: " << idx
-            << ANSI_COLOR_RESET << std::endl;
 
-  nearCloud->clear();
-  localMapDS->clear();
-  for (auto &it : idxVec) {
-    *nearCloud +=
-        *transformPointCloud(sessions[0].cloudKeyFrames[it].all_cloud,
-                             &sessions[0].cloudKeyPoses6D->points[it]);
-  }
-
-  // downsize
-  downSizeFilterLocalMap.setLeafSize(0.20, 0.20, 0.20);
-  downSizeFilterLocalMap.setInputCloud(nearCloud);
-  downSizeFilterLocalMap.filter(*localMapDS);
-  std::cout << "downsized local map size: " << localMapDS->points.size()
-            << std::endl;
-  if (localMapDS->points.size() < 1000) {
-    std::cout << "local map size is too small, skip this relo" << std::endl;
-    return false;
-  }
+#ifdef CUDA_EN
+bool pose_estimator::ndt_cuda(pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                              pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                              Eigen::Matrix4f &init_pose,
+                              Eigen::Matrix4f &output_pose){                              
   // // 统计耗时
-  auto start = std::chrono::high_resolution_clock::now();
-  // TODO: overflow when ndt registeration. icp is working well
-  pcl::IterativeClosestPoint<PointTypeXYZI, PointTypeXYZI> NDT;
-  NDT.setMaxCorrespondenceDistance(0.20);
-  NDT.setMaximumIterations(50);
-  NDT.setTransformationEpsilon(1e-6);
-  NDT.setEuclideanFitnessEpsilon(1e-6);
-  NDT.setRANSACIterations(1);
-  NDT.setInputSource(currentCloudDs);
-  NDT.setInputTarget(localMapDS);
-  // // NDT = pcl::NormalDistributionsTransform<PointTypeXYZI,
-  // //                                         PointTypeXYZI>();  // 重置NDT
-  // NDT.setResolution(0.5f);             // 体素分辨率(米)，可在 0.5~2.0 调整
-  // NDT.setStepSize(0.1);                // line search 步长
-  // NDT.setTransformationEpsilon(1e-4);  // 收敛阈值
-  // NDT.setMaximumIterations(60);        // 迭代次数
-  // NDT.setInputSource(currentCloudDsInOdom);
-  // NDT.setInputTarget(localMapDS);
-  Eigen::Affine3f init_pose = currentPoseInMap;
+  ndtCuda.clearSource();
+  ndtCuda.clearTarget();
+  ndtCuda.setInputSource(input_cloud);
+  ndtCuda.setInputTarget(target_cloud);
   pcl::PointCloud<PointTypeXYZI>::Ptr alignedCloud(
       new pcl::PointCloud<PointTypeXYZI>());
-  NDT.align(*alignedCloud,init_pose.matrix());
-  auto end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed = end - start;
-  std::cout << "NDT registration time: " << elapsed.count() << " seconds"
-            << std::endl;
-  Eigen::Matrix4f transform = NDT.getFinalTransformation();
-  Eigen::Matrix3d rot = transform.matrix().block<3, 3>(0, 0).cast<double>();
-  Eigen::Vector3d linear = transform.matrix().block<3, 1>(0, 3).cast<double>();
-  std::cout << "NDT has converged: " << NDT.hasConverged()
-            << " with score: " << NDT.getFitnessScore() << std::endl;
-  std::cout << "NDT lidar to map transformation: " << linear.transpose() << " "
-            << rot.eulerAngles(0, 1, 2).transpose() << std::endl;
-  if (!NDT.hasConverged() || NDT.getFitnessScore() > 1.0) {
-    std::cout << "NDT did not converge or fitness score too high, skip this "
+  ndtCuda.align(*alignedCloud,init_pose);
+  output_pose = ndtCuda.getFinalTransformation();
+  std::cout << "NDT-CUDA has converged: " << ndtCuda.hasConverged()
+            << " with score: " << ndtCuda.getFitnessScore() << std::endl;
+  if (ndtCuda.getFitnessScore() > 0.1) {
+    std::cout << "NDT-CUDA did not converge or fitness score too high, skip this "
                  "relo"
               << std::endl;
     return false;
   }
+  return true;
+}
+bool pose_estimator::vgicp_cuda(const pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                             const pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                             const Eigen::Matrix4f &init_pose,
+                             Eigen::Matrix4f &output_pose){                              
+  // // 统计耗时
+  fvgicpCuda.clearSource();
+  fvgicpCuda.clearTarget();
+  fvgicpCuda.setInputSource(input_cloud);
+  fvgicpCuda.setInputTarget(target_cloud);
+  pcl::PointCloud<PointTypeXYZI>::Ptr alignedCloud(
+      new pcl::PointCloud<PointTypeXYZI>());
+  fvgicpCuda.align(*alignedCloud,init_pose);
+  output_pose = fvgicpCuda.getFinalTransformation();
+  std::cout << "VGICP-CUDA has converged: " << fvgicpCuda.hasConverged()
+            << " with score: " << fvgicpCuda.getFitnessScore() << std::endl;
+  if (fvgicpCuda.getFitnessScore() > 0.1) {
+    std::cout << "VGICP-CUDA did not converge or fitness score too high, skip this "
+                 "relo"
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+#endif
+bool pose_estimator::icp_pcl(const pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                             const pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                             const Eigen::Matrix4f &init_pose,
+                             Eigen::Matrix4f &output_pose){
 
+  icpPCL.setInputSource(input_cloud);
+  icpPCL.setInputTarget(target_cloud);
+  pcl::PointCloud<PointTypeXYZI>::Ptr alignedCloud(
+      new pcl::PointCloud<PointTypeXYZI>());
+  icpPCL.align(*alignedCloud,init_pose);
+  output_pose = icpPCL.getFinalTransformation();
+  Eigen::Matrix3d rot = output_pose.block<3, 3>(0, 0).cast<double>();
+  Eigen::Vector3d linear = output_pose.block<3, 1>(0, 3).cast<double>();
+  std::cout << "PCL ICP has converged: " << icpPCL.hasConverged()
+            << " with score: " << icpPCL.getFitnessScore() << std::endl;
+  std::cout << "PCL ICP lidar to map transformation: " << linear.transpose() << " "
+            << rot.eulerAngles(0, 1, 2).transpose() << std::endl;
+  if (!icpPCL.hasConverged() || icpPCL.getFitnessScore() > 0.1) {
+    std::cout << "PCL ICP did not converge or fitness score too high, skip this "
+                 "relo"
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+bool pose_estimator::ndt_pcl(const pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                             const pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                             const Eigen::Matrix4f &init_pose,
+                             Eigen::Matrix4f &output_pose){
+  if (!target_cloud || target_cloud->empty()) {
+      std::cerr << "Error: target cloud is empty!" << std::endl;
+      return false;
+  }
+  if (!input_cloud || input_cloud->empty()) {
+      std::cerr << "Error: input cloud is empty!" << std::endl;
+      return false;
+  }
+  ndtPCL.setInputSource(input_cloud);
+  ndtPCL.setInputTarget(target_cloud);
+  pcl::PointCloud<PointTypeXYZI>::Ptr alignedCloud(new pcl::PointCloud<PointTypeXYZI>());
+  ndtPCL.align(*alignedCloud,init_pose);
+  output_pose = ndtPCL.getFinalTransformation();
+  Eigen::Matrix3d rot = output_pose.block<3, 3>(0, 0).cast<double>();
+  Eigen::Vector3d linear = output_pose.block<3, 1>(0, 3).cast<double>();
+  std::cout << "PCL NDT has converged: " << ndtPCL.hasConverged()
+            << " with score: " << ndtPCL.getFitnessScore() << std::endl;
+  std::cout << "PCL NDT lidar to map transformation: " << linear.transpose() << " "
+            << rot.eulerAngles(0, 1, 2).transpose() << std::endl;
+  if (!ndtPCL.hasConverged() || ndtPCL.getFitnessScore() > 0.15) {
+    std::cout << "PCL NDT did not converge or fitness score too high, skip this "
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+
+// 直接计算lidar to map的位姿
+bool pose_estimator::relocalization() {
+  std::cout << ANSI_COLOR_GREEN << "relo mode for frame: " << idx
+            << ANSI_COLOR_RESET << std::endl;
+  // *** 修复：创建全新的局部点云 ***
+  // 不要使用成员变量 nearCloud 和 localMapDS 来存储当前帧的 target map
+  pcl::PointCloud<PointTypeXYZI>::Ptr tempNearCloud(new pcl::PointCloud<PointTypeXYZI>());
+  for (auto &it : idxVec) {
+    *tempNearCloud +=
+        *transformPointCloud(sessions[0].cloudKeyFrames[it].all_cloud,
+                             &sessions[0].cloudKeyPoses6D->points[it]);
+  }
+  // 本次用于配准的输入云（单帧 or 多帧累积）
+  pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud = currentCloudReg_;
+  if (!input_cloud) input_cloud = currentCloudDs;
+
+  // downsize
+  currentLocalMapDS->clear();
+  downSizeFilterLocalMap.setInputCloud(tempNearCloud);
+  downSizeFilterLocalMap.filter(*currentLocalMapDS);
+  std::cout << "downsized local map size: " << currentLocalMapDS->points.size()
+            << std::endl;
+  if (currentLocalMapDS->points.size() < 1000) {
+    std::cout << "local map size is too small, skip this relo" << std::endl;
+    return false;
+  }
+
+  Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+  auto start = std::chrono::high_resolution_clock::now();
+  bool ndt_success = false;
+  // initialize NDT inputs from current downsampled cloud and local map
+  if(reg_mode_==0){
+    ndt_success = ndt_pcl(input_cloud, currentLocalMapDS, currentPoseInMap.matrix(), transform);
+  }else if(reg_mode_==1){
+    ndt_success = icp_pcl(input_cloud, currentLocalMapDS, currentPoseInMap.matrix(), transform);
+#ifdef CUDA_EN
+  }else if(reg_mode_==2){
+    ndt_success = ndt_cuda(input_cloud, currentLocalMapDS, currentPoseInMap.matrix(), transform);
+  }else if(reg_mode_==3){
+    ndt_success = vgicp_cuda(input_cloud, currentLocalMapDS, currentPoseInMap.matrix(), transform);
+#endif
+  }else{
+    RCLCPP_ERROR(this->node->get_logger(), "reg_mode_ is invalid or selected CUDA mode not available!");
+    return false;
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed = end - start;
+  std::ofstream fout_time,fout_ndt_score;
+  // fout_time.open(std::string(ROOT_DIR) + "Log/result/reloc_time.txt",
+  //                std::ios::app);
+  fout_ndt_score.open(std::string(ROOT_DIR) + "Log/result/ndt_score.txt",
+                 std::ios::app);
+  // if (!fout_time.is_open())
+  //   RCLCPP_ERROR(this->node->get_logger(), "open fail\n");
+  // fout_time << std::fixed << std::setprecision(6) << elapsed.count() * 1e3 << std::endl;
+  
+  fout_ndt_score << std::fixed << std::setprecision(6);
+  double score = 1.0;
+  if(reg_mode_ == 0) score = ndtPCL.getFitnessScore();
+  else if(reg_mode_ == 1) score = icpPCL.getFitnessScore();
+#ifdef CUDA_EN
+  else if(reg_mode_ == 2) score = ndtCuda.getFitnessScore();
+  else if(reg_mode_ == 3) score = fvgicpCuda.getFitnessScore();
+#endif
+  fout_ndt_score << score << std::endl;
+
+  std::cout << "NDT registration time: " << elapsed.count() << " seconds"
+            << std::endl;
+  if (!ndt_success) {
+    return false;
+  }
   // lidar to map
   currentPoseInMap = Eigen::Affine3f(transform);
   // cloud in map frame
   reloCloudInMap->clear();
-  transformPointCloud(currentCloudDs, currentPoseInMap, reloCloudInMap);
+  pcl::transformPointCloud(*input_cloud, *reloCloudInMap, currentPoseInMap.matrix());
   publishCloud(pubReloWorldCloud, reloCloudInMap, this->node->now(), "world");
 
   // body pose in map
@@ -388,17 +632,19 @@ bool pose_estimator::relocalization() {
 
   // cloud in body frame for local planning 
   cloudInBody->clear();
-  transformPointCloud(currentCloud, lidar2body, cloudInBody);
+  // transformPointCloud(currentCloud, lidar2body, cloudInBody);
+  pcl::transformPointCloud(*currentCloud, *cloudInBody, lidar2body.matrix());
   publishCloud(pubRelocBodyCloud, cloudInBody,
                /*rclcpp::Time(currentCloudTime * 1e9)*/ this->node->now(),
                "base_link");
 
-  std::cout << "lidar to map transformation: " << currentPoseInMap.translation().x()
-            << " " << currentPoseInMap.translation().y() << " "
-            << currentPoseInMap.translation().z() << " "
-            << currentPoseInMap.rotation().eulerAngles(0, 1, 2).transpose()
-            << std::endl;
+  // std::cout << "lidar to map transformation: " << currentPoseInMap.translation().x()
+  //           << " " << currentPoseInMap.translation().y() << " "
+  //           << currentPoseInMap.translation().z() << " "
+  //           << currentPoseInMap.rotation().eulerAngles(0, 1, 2).transpose()
+  //           << std::endl;
   publish_odometry(currentPoseInMap);
+  publish_path(pubPath);
 
   return true;
 }
@@ -415,22 +661,25 @@ void pose_estimator::lio_incremental() {
 
   // cloud in body frame
   cloudInBody->clear();
-  transformPointCloud(currentCloud, lidar2body, cloudInBody);
+  // transformPointCloud(currentCloud, lidar2body, cloudInBody);
+  pcl::transformPointCloud(*currentCloud, *cloudInBody, lidar2body.matrix());
   publishCloud(pubRelocBodyCloud, cloudInBody,
                /*rclcpp::Time(currentCloudTime * 1e9)*/ this->node->now(),
                "base_link");
   
   // cloud in map frame
   reloCloudInMap->clear();
-  transformPointCloud(currentCloudDs, currentPoseInMap, reloCloudInMap);
+  // transformPointCloud(currentCloudDs, currentPoseInMap, reloCloudInMap);
+  pcl::transformPointCloud(*currentCloudDs, *reloCloudInMap, currentPoseInMap.matrix());
   publishCloud(pubReloWorldCloud, reloCloudInMap, this->node->now(), "world");
 
-  std::cout << "livo transformation in map: " << currentPoseInMap.translation().x()
-            << " " << currentPoseInMap.translation().y() << " "
-            << currentPoseInMap.translation().z() << " "
-            << currentPoseInMap.rotation().eulerAngles(0, 1, 2).transpose()
-            << std::endl;
+  // std::cout << "livo transformation in map: " << currentPoseInMap.translation().x()
+  //           << " " << currentPoseInMap.translation().y() << " "
+  //           << currentPoseInMap.translation().z() << " "
+  //           << currentPoseInMap.rotation().eulerAngles(0, 1, 2).transpose()
+  //           << std::endl;
   publish_odometry(currentPoseInMap);
+  publish_path(pubPath);
 }
 void pose_estimator::publish_odometry(const Eigen::Affine3f &trans_aft) {
   Eigen::Matrix<double, 3, 3> ang_rot = trans_aft.rotation().cast<double>();
@@ -467,23 +716,10 @@ bool pose_estimator::easyToRelo(const PointTypeXYZI &pose3d) {
               << idxVec_copy.size() << " points" << ANSI_COLOR_RESET
               << std::endl;
     // If the secondary search yields enough results, return true
+    idxVec = idxVec_copy;
+    disVec = disVec_copy;
     return true;
   }
-  // Validate results from the secondary search
-  // for (const auto &index : idxVec_copy) {
-  //   if (priorPath->points.size() >
-  //       index + 100) {  // Ensure sufficient prior points
-  //     std::cout << ANSI_COLOR_GREEN_BG << "lio -> relo with "
-  //               << priorPath->points.size() << " to " << index
-  //               << ANSI_COLOR_RESET << std::endl;
-  //     idxVec.emplace_back(index);
-  //     // return true;
-  //   }
-  // }
-
-  // for (const auto &index : idxVec_copy) {
-  //     idxVec.emplace_back(index);
-  // }
   return false;
 }
 
@@ -492,20 +728,46 @@ bool pose_estimator::globalRelo() {
   static int cloud_count = 0;
 
   if (!sc_flg && sc_init_enable) {
-    // 点云过少不进行初始化
-    if (currentCloud->points.size() < 5000) {
+    // 初始化时对点云进行累加，至少5帧 currentCloud在lidar系下
+    pcl::PointCloud<PointTypeXYZI>::Ptr tmpCloud(new pcl::PointCloud<PointTypeXYZI>());
+    pcl::copyPointCloud(*currentCloud, *tmpCloud);
+    initCloudBuffer.emplace_back(tmpCloud);
+    initPoseBuffer.emplace_back(currentPoseInOdom.matrix());
+    if(initCloudBuffer.size() < init_cloud_num_) {
       std::cout << ANSI_COLOR_RED
-                << "current cloud size is too small, wait for next frame ..."
-                << ANSI_COLOR_RESET << std::endl;
+                << "wait for more cloud frame for sc, current frame count: "
+                << initCloudBuffer.size() << ANSI_COLOR_RESET << std::endl;
       return false;
     }
+    // Transform each buffered cloud into the coordinate frame of the latest buffered pose and accumulate.
+    initCloud->clear();
+    if (!initPoseBuffer.empty()) {
+      Eigen::Matrix4f latest_pose = initPoseBuffer.back();
+      Eigen::Matrix4f latest_pose_inv;
+      latest_pose_inv.block<3, 3>(0, 0) = latest_pose.block<3, 3>(0, 0).transpose();
+      latest_pose_inv.block<3, 1>(0, 3) = -latest_pose_inv.block<3, 3>(0, 0) * latest_pose.block<3, 1>(0, 3);
+      latest_pose_inv.row(3) << 0.0f, 0.0f, 0.0f, 1.0f;
+      for (size_t i = 0; i < initCloudBuffer.size(); ++i) {
+        Eigen::Matrix4f pose_i = initPoseBuffer[i];
+        Eigen::Matrix4f T = latest_pose_inv * pose_i;
+        pcl::PointCloud<PointTypeXYZI>::Ptr tmp(new pcl::PointCloud<PointTypeXYZI>());
+        pcl::transformPointCloud(*initCloudBuffer[i], *tmp, T);
+        *initCloud += *tmp;
+      }
+    } else {
+      // Fallback: just accumulate raw clouds if no pose info (should not happen)
+      for (auto &c : initCloudBuffer) {
+        *initCloud += *c;
+      }
+    }
+    // 清空缓存，后续使用 initCloud 作为初始化输入
+    initCloudBuffer.clear();
+    initPoseBuffer.clear();
     std::cout << ANSI_COLOR_GREEN << "global relo by sc ... "
               << ANSI_COLOR_RESET << std::endl;
 
     // Must be body frame when calculating scancontext
-    pcl::PointCloud<PointTypeXYZI>::Ptr cloud_lidar = currentCloud;
-
-    Eigen::MatrixXd initSC = sessions[0].scManager.makeScancontext(*cloud_lidar);
+    Eigen::MatrixXd initSC = sessions[0].scManager.makeScancontext(*initCloud);
     Eigen::MatrixXd ringkey =
         sessions[0].scManager.makeRingkeyFromScancontext(initSC);
     Eigen::MatrixXd sectorkey =
@@ -514,162 +776,80 @@ bool pose_estimator::globalRelo() {
         ScanContext::eig2stdvec(ringkey);
     detectResult = sessions[0].scManager.detectClosestKeyframeID(
         0, invalid_idx, polarcontext_invkey_vec, initSC);
+    detectID = detectResult.first;
 
-    std::cout << " current cloud size: " << cloud_lidar->points.size()
+    std::cout << " current cloud size: " << initCloud->points.size()
               << std::endl;
     std::cout << ANSI_COLOR_RED << "init relocalization by current SC id: " << 0
               << " in prior map's SC id: " << detectResult.first
-              << " yaw offset: " << detectResult.second << ANSI_COLOR_RESET
+              << " yaw offset: " << -detectResult.second << ANSI_COLOR_RESET
               << std::endl;
-    if (detectResult.first != -1) {
-      detectID = detectResult.first;
-      PointTypePose pose_com;
-      pose_com.x = 0.0;
-      pose_com.y = 0.0;
-      pose_com.z = 0.0;
-      pose_com.roll = 0.0;
-      pose_com.pitch = 0.0;
-      pose_com.yaw = -detectResult.second;
-
-      initCloud->clear();
-      *initCloud += *getAddCloud(cloud_lidar, pose_com, pose_ext);
-
-      nearCloud->clear();
-      *nearCloud += *transformPointCloud(
-          sessions[0].cloudKeyFrames[detectResult.first].all_cloud,
-          &sessions[0].cloudKeyPoses6D->points[detectResult.first]);
-    } else {
-      initCloud->clear();
-      *initCloud += *cloud_lidar;
-      std::cout << ANSI_COLOR_RED << "can not relo by SC ... "
-                << ANSI_COLOR_RESET << std::endl;
-    }
   }
 
-  std::cout << ANSI_COLOR_GREEN << "global relocalization processing ... "
-            << ANSI_COLOR_RESET << std::endl;
-
-  if (detectID > -1) {
-    std::cout << ANSI_COLOR_GREEN << "init relo by SC-pose ... "
+  if (sc_init_enable && detectID > -1) {
+    std::cout << ANSI_COLOR_GREEN << "init relo by scan context ... "
               << ANSI_COLOR_RESET << std::endl;
     std::cout << ANSI_COLOR_GREEN << "use prior frame " << detectID
               << " to relo init cloud ..." << ANSI_COLOR_RESET << std::endl;
 
-    nearCloud->clear();
-    PointTypeXYZI tmp;
-    PointTypePose poseSC =
+    PointTypePose poseOffset =
         sessions[0].cloudKeyPoses6D->points[detectResult.first];
-    tmp.x = poseSC.x;
-    tmp.y = poseSC.y;
-    tmp.z = poseSC.z;
-
+    std::cout << "sc prior frame pose in map: " << poseOffset.x << " " << poseOffset.y
+              << " " << poseOffset.z << " " << poseOffset.roll << " "
+              << poseOffset.pitch << " " << poseOffset.yaw << std::endl;
+    
+    // search nearby keyframes
+    PointTypeXYZI tmp;
+    tmp.x = poseOffset.x;
+    tmp.y = poseOffset.y;
+    tmp.z = poseOffset.z;
     idxVec.clear();
     disVec.clear();
-    kdtreeGlobalMapPoses->nearestKSearch(tmp, searchNum, idxVec, disVec);
+    kdtreeGlobalMapPoses->nearestKSearch(tmp, searchNum * 2 , idxVec, disVec);
+
+    // convert to map
+    pcl::PointCloud<PointTypeXYZI>::Ptr tempNearCloud(new pcl::PointCloud<PointTypeXYZI>());
     for (int i = 0; i < idxVec.size(); i++) {
-      *nearCloud +=
+      *tempNearCloud +=
           *transformPointCloud(sessions[0].cloudKeyFrames[idxVec[i]].all_cloud,
                                &sessions[0].cloudKeyPoses6D->points[idxVec[i]]);
     }
-
-    std::cout << "raw local map point cloud size: " << nearCloud->points.size()
-              << std::endl;
-
-    PointTypePose poseOffset;
-    poseOffset.x = poseSC.x;
-    poseOffset.y = poseSC.y;
-    poseOffset.z = poseSC.z;
-    poseOffset.roll = poseSC.roll;
-    poseOffset.pitch = poseSC.pitch;
-    poseOffset.yaw = poseSC.yaw;
-    std::cout << "sc prior frame pose: " << poseOffset.x << " " << poseOffset.y
-              << " " << poseOffset.z << " " << poseOffset.roll << " "
-              << poseOffset.pitch << " " << poseOffset.yaw << std::endl;
-    initCloud = transformPointCloud(initCloud, &poseOffset);
-    std::cout << "init cloud size: " << initCloud->points.size() << std::endl;
-
+    
     std::cout << ANSI_COLOR_GREEN << "get precise pose by NDT ... "
               << ANSI_COLOR_RESET << std::endl;
-    // Eigen::MatrixXd transform = reg[0].run(initCloud, nearCloud);
-    pcl::PointCloud<PointTypeXYZI>::Ptr laserCloudSource(
-        new pcl::PointCloud<PointTypeXYZI>());
-    pcl::copyPointCloud(*initCloud, *laserCloudSource);
-    pcl::PointCloud<PointTypeXYZI>::Ptr laserCloudTarget(
-        new pcl::PointCloud<PointTypeXYZI>());
+    std::cout << ANSI_COLOR_GREEN << "local map cloud size: " << tempNearCloud->points.size()
+              << ANSI_COLOR_RESET << std::endl;
+    std::cout << ANSI_COLOR_GREEN << "current init cloud size: " << initCloud->points.size()
+              << ANSI_COLOR_RESET << std::endl;
+    // current frame to loop frame by sc
+    Eigen::Affine3f transCurFrame2PriorFrame =
+        pcl::getTransformation(0.0, 0.0, 0.0, 0.0, 0.0, -detectResult.second);
+    // loop frame to map 
+    Eigen::Affine3f transPriorFrame2Map =
+        pcl::getTransformation(poseOffset.x, poseOffset.y, poseOffset.z,
+                               poseOffset.roll, poseOffset.pitch,
+                               poseOffset.yaw);
+    Eigen::Affine3f initPoseInMap =
+        transPriorFrame2Map * transCurFrame2PriorFrame;         
+    Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+    bool ndt_success=ndt_pcl(initCloud, tempNearCloud, initPoseInMap.matrix(), transform); 
 
-    pcl::copyPointCloud(*nearCloud, *laserCloudTarget);
-    std::cout << "downsized initialization local map point cloud size: "
-              << laserCloudTarget->points.size() << std::endl;
-    pcl::IterativeClosestPoint<PointTypeXYZI, PointTypeXYZI> ndt;
-    ndt.setMaxCorrespondenceDistance(0.1);
-    ndt.setMaximumIterations(50);
-    ndt.setTransformationEpsilon(1e-6);
-    ndt.setEuclideanFitnessEpsilon(1e-6);
-    ndt.setRANSACIterations(1);
-    ndt.setInputSource(laserCloudSource);
-    ndt.setInputTarget(laserCloudTarget);
-    pcl::PointCloud<PointTypeXYZI>::Ptr alignedCloud(
-        new pcl::PointCloud<PointTypeXYZI>());
-    Eigen::Matrix4f matricInitGuess = Eigen::Matrix4f::Identity();
-    ndt.align(*alignedCloud, matricInitGuess);
-    Eigen::Matrix4f transform = ndt.getFinalTransformation();
-
-    // 初始化不准，后续可以纠正
-    if (!ndt.hasConverged() || ndt.getFitnessScore() > 0.05) {
-      std::cout << ANSI_COLOR_RED
-                << "NDT registration failed, fitness score too high: "
-                << ndt.getFitnessScore() << ANSI_COLOR_RESET << std::endl;
-      invalid_idx.emplace_back(detectID);
+    reloCloudInMap->clear();
+    pcl::transformPointCloud(*initCloud, *reloCloudInMap, transform);
+    publishCloud(pubReloWorldCloud, reloCloudInMap, this->node->now(), "world");
+    
+    if (!ndt_success) {
+      if(ndtPCL.getFitnessScore()>ndt_score_threshold_) invalid_idx.emplace_back(detectID);
       sc_flg = false;
       return false;
     } else {
-      std::cout << "NDT has converged: " << ndt.hasConverged()
-                << " with score: " << ndt.getFitnessScore() << std::endl;
       sc_flg = true;
     }
-    Eigen::Matrix3d rot = transform.matrix().block<3, 3>(0, 0).cast<double>();
-    Eigen::Vector3d linear =
-        transform.matrix().block<3, 1>(0, 3).cast<double>();
-    // Eigen::Matrix<double, 3, 1> euler = RotMtoEuler(rot);
-    Eigen::Matrix<double, 3, 1> euler =
-        rot.eulerAngles(0, 1, 2);  // roll, pitch, yaw
-
-    PointTypePose poseReg;
-    poseReg.x = linear(0, 0);
-    poseReg.y = linear(1, 0);
-    poseReg.z = linear(2, 0);
-    poseReg.roll = euler(0, 0);
-    poseReg.pitch = euler(1, 0);
-    poseReg.yaw = euler(2, 0);
-
-    Eigen::Affine3f trans_com =
-        pcl::getTransformation(0.0, 0.0, 0.0, 0.0, 0.0, -detectResult.second);
-    Eigen::Affine3f trans_offset = pcl::getTransformation(
-        poseOffset.x, poseOffset.y, poseOffset.z, poseOffset.roll,
-        poseOffset.pitch, poseOffset.yaw);
-    Eigen::Affine3f trans_reg =
-        pcl::getTransformation(poseReg.x, poseReg.y, poseReg.z, poseReg.roll,
-                               poseReg.pitch, poseReg.yaw);
-
-    Eigen::Affine3f trans_init =
-        trans_com * trans_offset * trans_reg * currentPoseInOdom.inverse();
-
-    float pose_init[6];
-    pcl::getTranslationAndEulerAngles(trans_init, pose_init[0], pose_init[1],
-                                      pose_init[2], pose_init[3], pose_init[4],
-                                      pose_init[5]);
-    initPose.x = pose_init[0];
-    initPose.y = pose_init[1];
-    initPose.z = pose_init[2];
-    initPose.roll = pose_init[3];
-    initPose.pitch = pose_init[4];
-    initPose.yaw = pose_init[5];
-
+    // update current pose in map
+    currentPoseInMap.matrix() = transform;
     global_flg = true;
-    std::cout << ANSI_COLOR_GREEN << "get optimized pose: " << initPose.x << " "
-              << initPose.y << " " << initPose.z << " " << initPose.roll << " "
-              << initPose.pitch << " " << initPose.yaw << ANSI_COLOR_RESET
-              << std::endl;
+    std::cout << ANSI_COLOR_GREEN << "init lidar to map pose: " << currentPoseInMap.translation().x() << " "
+              << currentPoseInMap.translation().y() << " " << currentPoseInMap.translation().z() << std::endl;
     std::cout << ANSI_COLOR_GREEN
               << "init relocalization has been finished ... "
               << ANSI_COLOR_RESET << std::endl;
@@ -681,14 +861,13 @@ bool pose_estimator::globalRelo() {
     pcl::PointCloud<PointTypeXYZI>::Ptr tmpCloud(new pcl::PointCloud<PointTypeXYZI>());
     transformPointCloud(currentCloud, currentPoseInOdom, tmpCloud);
     *initCloudInOdom +=*tmpCloud;
-    if(cloud_count < 5) {
+    if(cloud_count < init_cloud_num_) {
       std::cout << ANSI_COLOR_RED
                 << "wait for more cloud frame, current frame count: "
                 << cloud_count << ANSI_COLOR_RESET << std::endl;
       return false;
     }
     cloud_count = 0;
-    std::cout << "init cloud size: " << initCloudInOdom->points.size() << std::endl;
     if (initCloudInOdom->points.size() < 2000) {
       std::cout << ANSI_COLOR_RED
                 << "current cloud size is too small, wait for next frame ..."
@@ -698,6 +877,11 @@ bool pose_estimator::globalRelo() {
 
     // odom to map
     // odom frame has been aligned to gravity direction
+    if (enable_prior_pose_) {
+      externalPose.x = initpose_prior_[0];
+      externalPose.y = initpose_prior_[1];
+      externalPose.yaw = initpose_prior_[2];
+    }
     PointTypePose pose_offset;
     pose_offset.x = externalPose.x;
     pose_offset.y = externalPose.y;
@@ -717,55 +901,36 @@ bool pose_estimator::globalRelo() {
     tmp.y = externalPose.y;
     tmp.z = externalPose.z;
     kdtreeGlobalMapPoses->radiusSearchT(tmp, searchDis * 2, idxVec, disVec);
-    PointTypePose pose_new = sessions[0].cloudKeyPoses6D->points[idxVec[0]];
     
     // get local map for initialization
-    nearCloud->clear();
+    pcl::PointCloud<PointTypeXYZI>::Ptr tempNearCloud(new pcl::PointCloud<PointTypeXYZI>());
     for (int i = 0; i < idxVec.size(); i++) {
-      *nearCloud +=
+      *tempNearCloud +=
           *transformPointCloud(sessions[0].cloudKeyFrames[idxVec[i]].all_cloud,
                                &sessions[0].cloudKeyPoses6D->points[idxVec[i]]);
     }
-    std::cout << "local cloud size for initialization: " << nearCloud->points.size() << std::endl;
+
+    std::cout << "local cloud size for initialization: " << tempNearCloud->points.size() << std::endl;
     std::cout << ANSI_COLOR_GREEN << "get precise pose by NDT ... "
               << ANSI_COLOR_RESET << std::endl;
-
     currentCloudDsInOdom->clear();
     downSizeInitCloud.setLeafSize(0.20, 0.20, 0.20);
     downSizeInitCloud.setInputCloud(initCloudInOdom);
     downSizeInitCloud.filter(*currentCloudDsInOdom);
+    std::cout << "init cloud size: " << currentCloudDsInOdom->points.size() << std::endl;
+
     initCloudInOdom->clear();
 
-    localMapDS->clear();
+    currentLocalMapDS->clear();
     downSizeFilterNearCloud.setLeafSize(0.20, 0.20, 0.20);
-    downSizeFilterNearCloud.setInputCloud(nearCloud);
-    downSizeFilterNearCloud.filter(*localMapDS);
-    nearCloud->clear();
-
-    // pcl::NormalDistributionsTransform<PointTypeXYZI, PointTypeXYZI> NDT;
-    // NDT清理
-    // NDT = pcl::NormalDistributionsTransform<PointTypeXYZI,
-    //                                         PointTypeXYZI>();  // 重置NDT
-    // NDT.setResolution(0.5f);             // 体素分辨率(米)，可在 0.5~2.0 调整
-    // NDT.setStepSize(0.1);                // line search 步长
-    // NDT.setTransformationEpsilon(1e-4);  // 收敛阈值
-    // NDT.setMaximumIterations(60);        // 迭代次数
-    // NDT.setInputSource(currentCloudDsInOdom);
-    // NDT.setInputTarget(localMapDS);
-    pcl::IterativeClosestPoint<PointTypeXYZI, PointTypeXYZI> NDT;
-    NDT.setMaxCorrespondenceDistance(0.25);
-    NDT.setMaximumIterations(50);
-    NDT.setTransformationEpsilon(1e-4);
-    NDT.setEuclideanFitnessEpsilon(1e-4);
-    NDT.setRANSACIterations(2);
-    NDT.setInputSource(currentCloudDsInOdom);
-    NDT.setInputTarget(localMapDS);
-    pcl::PointCloud<PointTypeXYZI>::Ptr alignedCloud;
-    alignedCloud.reset(new pcl::PointCloud<PointTypeXYZI>());
-    NDT.align(*alignedCloud,init_odom2map.matrix());
+    downSizeFilterNearCloud.setInputCloud(tempNearCloud);
+    downSizeFilterNearCloud.filter(*currentLocalMapDS);
+    std::cout << "init local map size: " << currentLocalMapDS->points.size()
+              << std::endl;
+    Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+    bool ndt_success=ndt_pcl(currentCloudDsInOdom, currentLocalMapDS, init_odom2map.matrix(), transform);
 
     // transform is from odom to map
-    Eigen::Matrix4f transform = NDT.getFinalTransformation();
     Eigen::Affine3f transformAffine;
     transformAffine.matrix() = transform;
     // convert current cloud in odom to map frame for visualization
@@ -776,15 +941,12 @@ bool pose_estimator::globalRelo() {
         init_odom2map.matrix().inverse() * transform;
     float pos_diff = trans_diff.block<3, 1>(0, 3).norm();
     std::cout << "NDT delta pose difference: " << pos_diff << std::endl;
-
-    if (NDT.getFitnessScore() > 0.2) {
+    float ndt_score = ndtPCL.getFitnessScore();
+    std::cout << "ndt_score_threshold_ = " << ndt_score_threshold_ << std::endl;
+    if (!ndt_success && ndt_score > ndt_score_threshold_) {
       std::cout << ANSI_COLOR_RED
                 << "NDT registration failed, fitness score too high: "
-                << NDT.getFitnessScore() << ANSI_COLOR_RESET << std::endl;
-      std::cout << ANSI_COLOR_RED << "or position diff too large: " << pos_diff
-                << ANSI_COLOR_RESET << std::endl;
-      std::cout << "aligned cloud size: " << alignedCloud->points.size()
-                << std::endl;
+                << ndtPCL.getFitnessScore() << ANSI_COLOR_RESET << std::endl;
       receive_ext_flg = false;
       std::cout << ANSI_COLOR_RED
                 << "please update external pose to continue ..."
@@ -792,10 +954,8 @@ bool pose_estimator::globalRelo() {
       return false;
     }
 
-    std::cout << "NDT has converged: " << NDT.hasConverged()
-              << " with score: " << NDT.getFitnessScore() << std::endl;
-    std::cout << "NDT aligned init cloud size: " << alignedCloud->points.size()
-              << std::endl;
+    std::cout << "NDT has converged: " << ndtPCL.hasConverged()
+              << " with score: " << ndtPCL.getFitnessScore() << std::endl;
     sc_flg = true;
 
     // optimazed odom to map transformation
@@ -805,17 +965,18 @@ bool pose_estimator::globalRelo() {
     currentPoseInMap= transformAffine * currentPoseInOdom;
     global_flg = true;
 
-    std::cout << ANSI_COLOR_GREEN << "init lidar to map pose: " << currentPoseInMap.translation().x() << " "
-              << currentPoseInMap.translation().y() << " " << currentPoseInMap.translation().z() << std::endl;
+    // std::cout << ANSI_COLOR_GREEN << "init lidar to map pose: " << currentPoseInMap.translation().x() << " "
+    //           << currentPoseInMap.translation().y() << " " << currentPoseInMap.translation().z() << std::endl;
+    float yaw_angle = getYawFromTransform(currentPoseInMap);
+    std::cout << ANSI_COLOR_GREEN << "Robot position in map frame - x: " << currentPoseInMap.translation().x()
+              << ", y: " << currentPoseInMap.translation().y()
+              << ", yaw: " << yaw_angle << " rad"
+              << std::endl;
+              
     std::cout << ANSI_COLOR_GREEN
               << "init relocalization by external-pose has been finished ... "
               << ANSI_COLOR_RESET << std::endl;
   } else {
-    // std::cout << ANSI_COLOR_RED
-    //           << "can not relo by SC and no external pose ... "
-    //           << ANSI_COLOR_RESET << std::endl;
-    // std::cout << ANSI_COLOR_RED << "please set external pose to continue ..."
-    //           << ANSI_COLOR_RESET << std::endl;
     sc_flg = false;
     return false;
   }
@@ -860,9 +1021,14 @@ void pose_estimator::publish_path(
     const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr &pub) {
   msg_body_pose.header.frame_id = "world";
   msg_body_pose.header.stamp = this->node->now();
+  msg_body_pose.pose.position.x = odomAftMapped.pose.pose.position.x;
+  msg_body_pose.pose.position.y = odomAftMapped.pose.pose.position.y;
+  msg_body_pose.pose.position.z = odomAftMapped.pose.pose.position.z;
+  msg_body_pose.pose.orientation = odomAftMapped.pose.pose.orientation;
 
   path.header.frame_id = "world";
   path.header.stamp = this->node->now();
+  path.poses.clear();
   path.poses.push_back(msg_body_pose);
   pub->publish(path);
 }

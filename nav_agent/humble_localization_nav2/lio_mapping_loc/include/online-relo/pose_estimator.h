@@ -13,7 +13,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <thread>
 
-#include "../FRICP-toolkit/registeration.h"
 #include "../common_lib.h"
 #include "../multi-session/Incremental_mapping.hpp"
 #include "../tool_color_printf.h"
@@ -23,9 +22,14 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
+#ifdef CUDA_EN
+#include "ndt/ndt_cuda.hpp"
+#include "gicp/fast_vgicp_cuda.hpp"
+#endif
 
 #define MAX_TIME_DIFF 0.05  // seconds, max time difference
 class pose_estimator {
+
  public:
   pose_estimator(rclcpp::Node::SharedPtr& node);
   ~pose_estimator() {}
@@ -39,7 +43,6 @@ class pose_estimator {
   float searchDis;
   int searchNum;
   float trustDis;
-  int regMode;
   rclcpp::Node::SharedPtr node;
   // Subscribers
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subCloud;
@@ -63,6 +66,8 @@ class pose_estimator {
 
   // Point clouds
   pcl::PointCloud<PointTypeXYZI>::Ptr priorMap;
+  pcl::PointCloud<PointTypeXYZI>::Ptr filterPriorMap;
+
   pcl::PointCloud<PointTypeXYZI>::Ptr priorPath;
   pcl::PointCloud<PointTypeXYZI>::Ptr reloCloudInMap;
   pcl::PointCloud<PointTypeXYZI>::Ptr cloudInBody;
@@ -70,6 +75,9 @@ class pose_estimator {
   pcl::PointCloud<PointTypeXYZI>::Ptr initCloudInOdom;
   pcl::PointCloud<PointTypeXYZI>::Ptr nearCloud;
   pcl::PointCloud<PointTypeXYZI>::Ptr localMapDS;
+  std::deque<pcl::PointCloud<PointTypeXYZI>::Ptr> initCloudBuffer;
+  std::deque<Eigen::Matrix4f> initPoseBuffer;
+
 
   // Pose info
   PointTypePose externalPose;
@@ -95,7 +103,6 @@ class pose_estimator {
   pcl::VoxelGrid<PointTypeXYZI> downSizeFilterPub, downSizeFilterLocalMap,
       downSizeFilterCurrentCloud;
   pcl::VoxelGrid<PointTypeXYZI> downSizeInitCloud, downSizeFilterNearCloud;
-  pcl::NormalDistributionsTransform<PointTypeXYZI, PointTypeXYZI> NDT;
   int idx = 1;
   std::deque<pcl::PointCloud<PointTypeXYZI>::Ptr> cloudBuffer;
   std::deque<double> cloudtimeBuffer;
@@ -129,9 +136,17 @@ class pose_estimator {
 
   // Sessions and registration
   std::vector<MultiSession::Session> sessions;
-  std::vector<Registeration> reg;
   std::pair<int, float> detectResult;
   std::vector<int> invalid_idx;
+
+#ifdef CUDA_EN
+  fast_gicp::NDTCuda<PointTypeXYZI, PointTypeXYZI> ndtCuda;
+  fast_gicp::FastVGICPCuda<PointTypeXYZI, PointTypeXYZI> fvgicpCuda;
+#endif
+  pcl::IterativeClosestPoint<PointTypeXYZI, PointTypeXYZI> icpPCL;
+  pcl::NormalDistributionsTransform<PointTypeXYZI, PointTypeXYZI> ndtPCL;
+  pcl::PointCloud<PointTypeXYZI>::Ptr ndt_alignedCloud;
+  pcl::PointCloud<PointTypeXYZI>::Ptr currentLocalMapDS;
 
   // Flags
   bool buffer_flg = true;
@@ -140,6 +155,8 @@ class pose_estimator {
   bool receive_ext_flg = false;
   bool sc_init_enable = false;
   bool sc_flg = false;
+  int reg_mode_ = 0;
+  int init_cloud_num_ = 5;
 
   float height;
   int cout_count = 0;
@@ -148,6 +165,17 @@ class pose_estimator {
   int sc_old = -1;
   std::thread thread_loc_, thread_pub_;
 
+  double localmap_res_,currentcloud_res_;
+
+  // 多帧累积   
+  bool accum_enable_ = false;
+  int accum_window_size_ = 1;
+
+  std::deque<pcl::PointCloud<PointTypeXYZI>::Ptr> ds_cloud_window_;
+  std::deque<Eigen::Matrix4f> pose_odom_window_;  // 与 ds_cloud_window_ 对齐：T_odom_lidar
+
+  pcl::PointCloud<PointTypeXYZI>::Ptr currentCloudDsAccum_;  // 累积输出（最新帧 LiDAR 系）
+  pcl::PointCloud<PointTypeXYZI>::Ptr currentCloudReg_;      // 本次用于配准的输入（=Ds 或 Accum）
   // Methods
   void allocateMemory();
 
@@ -162,10 +190,34 @@ class pose_estimator {
   bool easyToRelo(const PointTypeXYZI& pose3d);
   bool globalRelo();
   bool relocalization();
+  // 方法A：使用旋转矩阵直接计算yaw（最稳定）
+  float getYawFromTransform(const Eigen::Affine3f& tf);
+  bool ndt_pcl(const pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                             const pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                             const Eigen::Matrix4f &init_pose,
+                             Eigen::Matrix4f &output_pose);
+  bool icp_pcl(const pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                             const pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                             const Eigen::Matrix4f &init_pose,
+                             Eigen::Matrix4f &output_pose);
+#ifdef CUDA_EN
+  bool ndt_cuda(pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                            pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                            Eigen::Matrix4f &init_pose,
+                            Eigen::Matrix4f &output_pose);
+  bool vgicp_cuda(const pcl::PointCloud<PointTypeXYZI>::Ptr input_cloud,
+                             const pcl::PointCloud<PointTypeXYZI>::Ptr target_cloud,
+                             const Eigen::Matrix4f &init_pose,
+                             Eigen::Matrix4f &output_pose);                            
+#endif
   void lio_incremental();
   void publish_odometry(const Eigen::Affine3f& trans_aft);
   void publish_odometry(
       const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr& pub);
   void publish_path(
       const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr& pub);
+  
+  std::vector<double> initpose_prior_;  // Initial pose (x, y, yaw)
+  bool enable_prior_pose_;  // Flag to enable prior pose initialization
+  double ndt_score_threshold_;  // NDT fitness score threshold for valid registration
 };

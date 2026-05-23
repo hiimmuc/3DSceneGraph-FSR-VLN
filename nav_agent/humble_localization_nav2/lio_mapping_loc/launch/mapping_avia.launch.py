@@ -9,18 +9,13 @@ from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 
-
 def generate_launch_description():
-
+    
     # Find path
-    config_file_dir = os.path.join(
-        get_package_share_directory("fast_livo"), "config")
-    rviz_config_file = os.path.join(
-        get_package_share_directory("fast_livo"),
-        "rviz_cfg",
-        "fast_livo2.rviz")
+    config_file_dir = os.path.join(get_package_share_directory("fast_livo"), "config")
+    rviz_config_file = os.path.join(get_package_share_directory("fast_livo"), "rviz_cfg", "fast_livo2.rviz")
 
-    # Load parameters
+    #Load parameters
     avia_config_cmd = os.path.join(config_file_dir, "avia.yaml")
     camera_config_cmd = os.path.join(config_file_dir, "camera_pinhole.yaml")
 
@@ -45,7 +40,7 @@ def generate_launch_description():
 
     # https://github.com/ros-navigation/navigation2/blob/1c68c212db01f9f75fcb8263a0fbb5dfa711bdea/nav2_bringup/launch/navigation_launch.py#L40
     use_respawn_arg = DeclareLaunchArgument(
-        'use_respawn',
+        'use_respawn', 
         default_value='True',
         description='Whether to respawn if a node crashes. Applied when composition is disabled.')
 
@@ -61,30 +56,29 @@ def generate_launch_description():
 
         # play ros2 bag
         # ExecuteProcess(
-        #     cmd=[['ros2 bag play ', '~/datasets/Retail_Street ', '--clock ', "-l"]],
+        #     cmd=[['ros2 bag play ', '~/datasets/Retail_Street ', '--clock ', "-l"]], 
         #     shell=True
         # ),
 
         # republish compressed image to raw image
         # https://robotics.stackexchange.com/questions/110939/how-do-i-remap-compressed-video-to-raw-video-in-ros2
-        # ros2 run image_transport republish compressed raw --ros-args --remap
-        # in:=/left_camera/image --remap out:=/left_camera/image
+        # ros2 run image_transport republish compressed raw --ros-args --remap in:=/left_camera/image --remap out:=/left_camera/image
         Node(
             package="image_transport",
             executable="republish",
             name="republish",
-            arguments=[  # Array of strings/parametric arguments that will end up in process's argv
-                'compressed',
+            arguments=[ # Array of strings/parametric arguments that will end up in process's argv
+                'compressed', 
                 'raw',
             ],
             remappings=[
-                ("in", "/left_camera/image"),
+                ("in",  "/left_camera/image"), 
                 ("out", "/left_camera/image")
             ],
             output="screen",
             respawn=use_respawn,
         ),
-
+        
         Node(
             package="fast_livo",
             executable="fastlivo_mapping",

@@ -49,6 +49,7 @@ Our associate dataset [**FAST-LIVO2-Dataset**](https://connecthkuhk-my.sharepoin
 Ubuntu 22.04.  [ROS Installation](http://wiki.ros.org/ROS/Installation).
 
 ### 2.2 PCL && Eigen && OpenCV
+suggest with PCL 1.15.0, PCL 1.12 has hug in NDT
 
 PCL>=1.6, Follow [PCL Installation](https://pointclouds.org/). 
 
@@ -63,7 +64,7 @@ Sophus Installation for the non-templated/double-only version.
 ```bash
 git clone https://github.com/strasdat/Sophus.git
 cd Sophus
-git checkout a621ff
+git checkout a0fe89
 mkdir build && cd build && cmake ..
 make
 sudo make install
@@ -124,6 +125,7 @@ cd ~/fast_ws/src
 git clone https://github.com/Robotic-Developer-Road/FAST-LIVO2.git
 cd ../
 colcon build --symlink-install --continue-on-error
+colcon build --symlink-install --event-handlers console_direct+ --parallel-workers 4
 source ~/fast_ws/install/setup.bash
 ```
 
@@ -185,9 +187,13 @@ ros2 service call /fast_livo/save_map fast_livo/srv/SaveMap
 
 ```bash
 # start online relocalization
-ros2 launch fast_livo online_reloc.launch.py use_rviz:=True
+export CUDA_VISIBLE_DEVICES=6 
+ros2 launch fast_livo online_reloc.launch.py
 # start livo odometry to offer an init pose to reloc module,  not enable use_rivz
 ros2 launch fast_livo online_livo.launch.py
+#lsof -i :5909
+## ros2 launch rosbridge_server  rosbridge_websocket_launch.xml
+# ros2 launch fast_livo online_robot_odom.launch.py
 
 ```
 

@@ -7,7 +7,7 @@
       img_en: 0
       lidar_en: 1
       ros_driver_bug_fix: false
-      map_save_path: "/workspace/1014_demo_map/"
+      map_save_path: "/map/1030_demo_map/"
       enable_zupt: false
       zupt_noise: 0.05
       zupt_interval: 2
@@ -66,7 +66,7 @@
 
     preprocess:
       point_filter_num: 2 # 1 for mapping; 2 for reloc
-      filter_size_surf: 0.10
+      filter_size_surf: 0.20
       lidar_type: 1 # Livox Avia LiDAR
       scan_line: 6
       blind: 0.1
@@ -75,7 +75,7 @@
       img_filter_en: true
       img_filter_fre: 2 # filter image frequency
     vio:
-      max_iterations: 5
+      max_iterations: 3
       outlier_threshold: 1000 # 78 100 156 #100 200 500 700 infinite
       img_point_cov: 100 # 100 1000 
       patch_size: 8
@@ -95,11 +95,11 @@
       b_gyr_cov: 0.001 # 0.1
 
     lio:
-      max_iterations: 3
+      max_iterations: 5
       dept_err: 0.02
       beam_err: 0.05
       min_eigen_value: 0.005 # 0.005 
-      voxel_size: 0.25 #
+      voxel_size: 0.5 #
       max_layer: 2
       max_points_num: 50
       layer_init_num: [5, 5, 5, 5, 5]
