@@ -1,14 +1,3 @@
-<div align="center">
-<img src="docs/assets/holoagent_logo_text.png" alt="HoloAgent Logo" width="500"/>
-
----
-
-# HoloAgent: Unified Robot Agent Framework
-
-</div>
-
-A unified, agentic system for general-purpose robots, enabling multi-modal perception, mapping and localization, and autonomous mobility and manipulation, with intelligent interaction with users.
-
 ## 🤖 FSR-VLN
 
 [![Project](https://img.shields.io/badge/📖-Project-blue)](https://horizonrobotics.github.io/robot_lab/fsr-vln)
